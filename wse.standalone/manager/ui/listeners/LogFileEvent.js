@@ -1,0 +1,2 @@
+window.VIF_LISTENER_PROPERTIES = window.VIF_LISTENER_PROPERTIES || {};
+window.VIF_LISTENER_PROPERTIES['LogFileEvent'] = [];

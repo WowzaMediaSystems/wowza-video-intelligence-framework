@@ -1,0 +1,355 @@
+{
+    //defaults for each stream defined below in the streams[]
+    "active":false, //if we should do vi on the stream
+    "vi_service_url":"${VIS_PROTOCOL}://${VIS_HOST}:${VIS_PORT}/ws/stream/",  //where the vif service is hosted
+    "vi_service_api_key":"${VIS_API_KEY}",  //api key used to connect to vif service
+    "untracked_objects": false, //track untracked objects when tracking_method is set
+
+    "vif_event_listeners": {
+        //list of listeners to recieve VIF events, such as overlays, id3 tags, customer modules.
+    },
+
+    "object_detections_holdback": 2,  //how long to hold detections for batch and rollup events
+    "scene_detections_holdback": 1,
+    "auto_scene_frame_throttle": false, //when enabled, the service will automatically throttle scene detection frames to try to maintain the target_processing_ratio
+    
+    "grayscaled": false, //converts images to grayscale to improve performance
+    "resize_output": true,
+    "duration": 2, //how many seconds to send (scene only)
+    "skip_frames": 0, //skipped frames per second
+    "frame_buffer": 10, //buffer to hold frames to process
+
+    // how many parallel instances to create for each model type.
+    // default values are tuned for a NVIDIA T4 GPU, if your GPU
+    // has more CUDA cores it could benefit from higher values.
+    // Monitor the GPU usage % and increase these values if you notice
+    // less than 50% GPU usage at full load.
+    "concurrent_executions": {
+        "scene_detection": {
+            "default": 1
+        },
+        "object_detection": {
+            "default": 10
+        }
+    },
+    //debugging options
+    "save_images": false,   //save images from transcoder to /tmp/vi/<stream_name>
+    "log_timing": 0,        //how long to write logging details to /tmp/vi/<stream_name>
+    "log_max_messages": 20, //maximum number of log messages to write in wse access log for vi/ws/wss messages. -1 is all, 0 is disabled
+
+    "motion_analysis": {},
+    "object_analysis": {
+        // default to to object tracking, the only other valid option is "byte-track"
+        "tracking_method": "none",
+        // if tracking_method is not null, use these properties for ByteTrack
+        "byte_track_properties": {
+            // minimum confidence score for a single-frame detection to turn into a new tracked object
+            "track_creation_minimum_confidence": 0.5,
+            // how many frames can a tracked object without active detections remain tracked before it's removed
+            "max_lost_track_frames_before_track_removal": 30,
+            // value between 0.0 and 1.0, determining the percentage (0.2 corresponds to 20%) of overlap that
+            // consecutive detections require in order to be considered the same tracked object
+            "minimum_consecutive_track_overlap": 0.2,
+            // how many consecutive frames the same object has to be tracked internally before it becomes
+            // a visible tracked object
+            "track_creation_minimum_consecutive_frames": 3
+        },
+        // minimum confidence for a detection to be considered by the tracking algorithm. Usually this number is lower
+        // than track_creation_minimum_confidence, as it can be used to sustain existing tracked object with lower
+        // confidence scores compared to the score required for a new detection track to start
+        "confidence_threshold": 0.3,
+        // For custom trained models, the path to the .pt or pth files containing its weights. Absolute path or relative path
+        // relative to the VIF Service execution context
+        "checkpoint_path": null,
+        // model variant for RF-DETR. When checkpoint_path is specified, it completely overrides model_name; model_name is ignored.
+        "model_name": "medium"  //options are: nano, small, medium, large
+    },
+    "scene_analysis": {
+      "confidence_threshold":0.3,
+      "sensitivity":5 
+    },
+    "streams":
+    [
+        {
+            "active":true,
+            "app_name": "live",         //application to watch
+            "stream_name": "object.*",  //regex pattern to match incoming streams to          
+            "vif_event_listeners": {
+                "Id3Tags": {
+                    // "class_name": "com.wowza.wms.plugin.videointelligence.event.Id3Event",
+                    "class_name": "Id3Event",
+                    "methods": ["rollup"]
+                },
+                "Webhooks": {
+                    "class_name": "WebhookEvent2",
+                    "methods": ["disabled"]
+                },
+                "LogFiles": {
+                    "class_name": "LogFileEvent",
+                    "methods": ["batch"]
+                },
+                "Overlays": {
+                    "class_name": "OverlayEvent",
+                    "methods": ["immediate"],
+                    "confidence_threshold": 0.3,
+                    "properties": {
+                        "debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",  //show a string that can include current time such as "'Cur time:' HH:mm:ss MM-dd-yyyy" as a video overlay
+                        "show_stats": true, //show performance stats as a video overlay
+                        "overlay_thread_drawing": false, //draw overlays in a thread to be safe
+                        "replace_video": true, //replaces the existing video with captured
+                        "fade_step": 20 //how many frames it takes to fade objects out once they are no longer tracked
+                    }
+                }
+            },
+            "object_detections_holdback": 2,
+            "grayscaled": false,
+            "log_timing": 0,
+            "save_images": false,
+            "frame_buffer": 10,
+            "skip_frames": 13,
+            "resize_output": true,
+
+            "detector_type":"object",
+            "object_analysis": {
+                "tracking_method": "byte-track",
+                "byte_track_properties": {
+                    "track_creation_minimum_confidence": 0.5,
+                    "max_lost_track_frames_before_track_removal": 30,
+                    "minimum_consecutive_track_overlap": 0.2,
+                    "track_creation_minimum_consecutive_frames": 3
+                },
+                "confidence_threshold": 0.3,
+                "class_names": ["airplane", "apple", "backpack", "banana", "baseball bat", "knife", "laptop", "scissors", "person", "car", "surfboard", "motorcycle", "truck", "traffic light", "bus", "skateboard", "tv", "cell phone", "chair", "elephant", "stop sign"],
+                "model_name": "medium"
+            }
+        },
+        {
+            "active":true,
+            "app_name": "live",
+            "stream_name": "scene.*",
+            "vif_event_listeners": {
+                "Id3Tags": {
+                    "class_name": "Id3Event",
+                    "methods": ["immediate"]
+                },
+                "Webhooks": {
+                    "class_name": "WebhookEvent2",
+                    "methods": ["disabled"]
+                },
+                "LogFiles": {
+                    "class_name": "LogFileEvent",
+                    "methods": ["immediate"]
+                },
+                "Overlays": {
+                    "class_name": "OverlayEvent",
+                    "confidence_threshold": 0.7,
+                    "methods": ["immediate"],
+                    "properties": {
+                        "jitter": 2,
+                        "debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",
+                        "show_stats": true
+                    }
+                 }
+            },
+            "frame_buffer": 10,
+            "skip_frames": 20,
+            "duration": 1,
+
+            "detector_type":"scene",
+            "scene_analysis": {
+                "class_names":["fire","fighting","running", "person climbing fence","crowd of people","taking pictures","walking","standing","color bars"],
+                "sensitivity": 5
+            }
+        },
+        {
+            "active":true,
+            "app_name": "live",
+            "stream_name": "traffic.*",
+            "detector_type":"object",
+            "object_analysis": {
+                "tracking_method": "byte-track",
+                "byte_track_properties": {
+                    "track_creation_minimum_confidence": 0.3,
+                    "max_lost_track_frames_before_track_removal": 45,
+                    "minimum_consecutive_track_overlap": 0.1,
+                    "track_creation_minimum_consecutive_frames": 2
+                },
+                "confidence_threshold": 0.3,
+                "class_names": [ "person", "car", "motorcycle", "truck", "traffic light", "bus"],
+                "model_name": "medium", 
+                "local_files_only": false
+            },
+
+            "log_max_messages": 20,
+            "log_timing": 2,                  
+            "skip_frames": 0,
+
+            "vif_event_listeners": {
+                "ObjectTracking": {
+                    "class_name": "ObjectTracking",
+                    "methods": ["immediate"],
+                    "properties": {
+                        "overlays": true,
+                        "id3": true,
+                        "webhooks": true,
+                        "logfile": true,
+                        "save_image": true,
+                        //"save_image_path": "/mikev/mystest", //default is /usr/local/wse/vif/images
+                        "object_label": "{{track_id}}:{{class_name}} {{confidence}}", //usedn if drawing object outside a region
+                        "draw_untracked_objects": true, //whether to draw objects that are not currently being tracked, only used when tracking_method is set   
+                        "untracked_object_label": "{{track_id}}:{{class_name}} {{confidence}}", //used if drawing untracked objects when tracking_method is set
+                        "untracked_object_color": "gray", //color to draw untracked objects when tracking_method is set
+                        "fade_step": 20, //how many frames it takes to fade objects out once they are no longer tracked
+                        "regions_of_interest": [
+                          {
+                            "id": "1",
+                            "type": "box",
+                            "name": "West Bound",
+                            "x": 10,
+                            "y": 110,
+                            "x2": 630,
+                            "y2": 165,
+                            "draw_region": true,
+                            "draw_objects": true,
+                            "color": "blue",
+                            "label": "{{name}} ({{current}}:{{total}})",
+                            "object_label": "{{track_id}}:{{class_name}} {{trigger}} {{confidence}} {{direction}}@{{velocity}}", 
+                            "triggers": ["inside::detected", "velocity_min::stalled", "direction::wrong way", "count_max::too many", "time_max::congestion"],  // inside, overlay, velocity_min, velocity_max, direction, count_min, count_max, time_min, time_max, TBDoutside/exit.
+                            "class_names": ["all"],  //subset for class defined in object_analysis
+                            "confidence_threshold": 0.5,          //only consider objects with confidence score above this threshold for triggers, default is 0
+
+                            "inside_count": 10,                   //when trigger:inside, how many frames an object needs to be inside the region before trigger, default is 1
+
+                            "object_coordinate": "bottom-center", //when trigger:inside, which point of the objects bounding box to use for determining if it is in the region. Options are: "center-center", "bottom-center", "top-center", "left-center", "right-center", default is center-center
+                            "velocity_min": 5,                    //when trigger:velocity_min, if objects velocity in the region goes below this value, default 0
+                            "velocity_max": 9999,                 //when trigger:velocity_max, if objects velocity in the region goes above this value, default 99999
+                            "velocity_count": 10,                 //when trigger:velocity_***, how many distances records required to an average, default is 10, max is 100
+
+                            //objects at one time
+                            "count_min": 0,                       //when trigger:count_min, if the number of objects in region goes below this value, default is 0
+                            "count_max": 1,                       //when trigger:count_max, if the number of objects in region goes above this value, default is 99999 
+
+                            "directions": ["NE","E","SE","N"],    //when trigger:direction, if objects direction in the region goes in this direction.  default is null, options are: N, NE, E, SE, S, SW, W, NW
+                            "direction_count": 10,                //when trigger:direction, how many time the directions matches before trigger, default is 10
+
+                            "time_min": 0,                        //when trigger:time_min, if number of objects detected since time_duration is less, default 0
+                            "time_max": 3,                        //when trigger:time_max, if number of objects detected since time_duration is greater, default 99999
+                            "time_duration": 15                   //when trigger_time_***, how long to track objects in seconds
+                          },
+                          {
+                            "id": "2",
+                            "type": "box",
+                            "name": "East Bound",
+                            "x": 10,
+                            "y": 185,
+                            "x2": 630,
+                            "y2": 295,
+                            "draw_region": true,
+                            "draw_objects": true,
+                            "color": "orange",
+                            "triggers": ["inside::detected"],
+                            "class_names": ["all"],
+                            "object_coordinate": "bottom-center", // which part of the object bounding box to use for determining if it's in the counting area. Options are: "all", "center", "bottom-center", "top-center", "left-center", "right-center"
+                            "label": "{{name}} ({{current}}:{{total}})",
+                            "count_max": 1 
+                          }  
+                        ],
+                        "debug_responses": true,
+                        "replace_video": true
+                    }                    
+                }
+            }
+        },
+        {
+            "active": true,
+            "app_name": "live",
+            "detector_type": "object",
+            "stream_name": "stall.*",
+            "vif_event_listeners": {
+                "ObjectTracking": {
+                    "class_name": "ObjectTracking",
+                    "methods": [
+                        "immediate"
+                    ],
+                    "confidence_threshold": 0.0,
+                    "properties": {
+                        "webhooks": true,
+                        "logfile": true,
+                        "overlays": true,
+                        "id3": true,
+                        "save_image": true,
+                        "replace_video": true,
+                        "title_string": "'Cam-01:' yyyy-MM-dd HH:mm:ss",  //show a string that can include current time such as "'Cur time:' HH:mm:ss MM-dd-yyyy" as a video overlay
+                        "draw_untracked_objects": false, //whether to draw objects that are not currently being tracked, only used when tracking_method is set   
+                        "untracked_object_label": "{{track_id}}:{{class_name}} {{confidence}}", //used if drawing untracked objects when tracking_method is set
+                        "untracked_object_color": "gray", //color to draw untracked objects when tracking_method is set
+                        "fade_step": 10, //how many frames it takes to fade objects out once they are no longer tracked
+                        "regions_of_interest": [
+                        {
+                            "id": "1",
+                            "type": "box",
+                            "name": "Highway 52",
+                            "x": 20,
+                            "y": 50,
+                            "x2": 610,
+                            "y2": 359,
+                            "label": "{{name}}",
+                            "object_label": "{{class_name}} {{trigger}}",
+                            "draw_region": true,
+                            "draw_objects": true,
+                            "color": "red",
+                            "triggers": [
+                                "ixnside::detected",
+                                "velocity_min::stalled"
+                            ],
+                            "class_names": [
+                            "all"
+                            ],
+                            "confidence_threshold": 0.5,
+                            "width_threshold": 20,
+                            "height_threshold": 20,
+                            "inside_count": 10,
+                            "object_coordinate": "center-center",
+                            "velocity_min": 2.0,
+                            "velocity_count": 10
+                        }
+                        ]
+                    }
+                }
+            },
+            "untracked_objects": false,
+            "object_detections_holdback": 2.0,
+            "scene_detections_holdback": 1.0,
+            "object_analysis": {
+                "stream_name": "stall.*",
+                "concurrent_executions": 10,
+                "class_names": [
+                "person",
+                "car",
+                "motorcycle",
+                "truck",
+                "traffic light",
+                "bus"
+                ],
+                "model_name": "medium",
+                "confidence_threshold": 0.3,
+                "tracking_method": "byte-track",
+                "byte_track_properties": {
+                "track_creation_minimum_confidence": 0.3,
+                "max_lost_track_frames_before_track_removal": 45,
+                "minimum_consecutive_track_overlap": 0.1,
+                "track_creation_minimum_consecutive_frames": 2
+                }
+            },
+            "save_images": false,
+            "log_max_messages": 20,
+            "log_timing": 2,
+            "grayscaled": false,
+            "self_paced_detections": true,
+            "resize_output": true,
+            "frame_buffer": 10,
+            "skip_frames": 0,
+            "duration": 0.0
+        }
+    ]
+}

@@ -1,0 +1,1399 @@
+  <script src="//cdn.flowplayer.com/releases/native/3/stable/flowplayer.min.js"></script>
+  <script src="//cdn.flowplayer.com/releases/native/3/stable/plugins/hls.min.js"></script>
+  <script src="//cdn.flowplayer.com/releases/native/3/stable/plugins/id3.min.js"></script>
+  <link rel="stylesheet" href="//cdn.flowplayer.com/releases/native/3/stable/style/flowplayer.css">
+
+  <style>
+/*    * { box-sizing: border-box; }
+
+ body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: #333;
+      background-color: #fff;
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+     .navbar {
+      background-color: #222;
+      border: 0;
+      margin-bottom: 0;
+      min-height: 50px;
+      position: relative;
+    }
+
+    .navbar-inverse { background-color: #222; border-color: transparent; }
+
+    .navbar-static-top { z-index: 1000; border-width: 0 0 1px; }
+
+    .navbar-brand {
+      float: left;
+      padding: 3px 15px;
+      font-size: 18px;
+      line-height: 20px;
+      height: 50px;
+      color: #eeeeee;
+      text-decoration: none;
+    }
+
+    .navbar-brand:hover { color: #eeeeee; text-decoration: none; }
+
+    .navbar-brand-wse {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #eeeeee;
+      line-height: 1.2;
+    }
+
+    .navbar-brand-mgr {
+      text-transform: uppercase;
+      color: #999;
+      font-size: 0.65em;
+      font-weight: bold;
+    }
+    .hidden-sm, .hidden-xs { display: block !important; }
+    .visible-sm, .visible-xs { display: none !important; }
+ */
+    @media (max-width: 767px) {
+      .hidden-xs { display: none !important; }
+      .visible-xs { display: block !important; }
+    }
+
+/*    .container-full {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .container-full > * {
+      margin-left: 15px;
+      margin-right: 15px;
+    }*/
+
+    .controls-section {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px 15px;
+      margin-top: 10px;
+      margin-bottom: 10px;
+      flex-shrink: 0;
+    }
+
+    .error-message {
+      background: #f2dede;
+      border: 1px solid #ebccd1;
+      border-radius: 4px;
+      padding: 10px 15px;
+      margin-top: 10px;
+      color: #a94442;
+    }
+
+    .url-input-group {
+      display: flex;
+      flex-direction: row;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .url-input-group label { font-weight: bold; }
+
+    .url-input-group input[type="text"] {
+      display: block;
+      flex: 1;
+      min-width: 220px;
+      padding: 6px 12px;
+      /*font-size: 14px;*/
+      line-height: 1.42857143;
+      color: #555;
+      background-color: #fff;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .url-input-group input:focus {
+      border-color: #66afe9;
+      outline: 0;
+      box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(102,175,233,.6);
+    }
+
+/*    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      margin-bottom: 0;
+      font-size: 14px;
+      font-weight: normal;
+      line-height: 1.42857143;
+      text-align: center;
+      white-space: nowrap;
+      vertical-align: middle;
+      cursor: pointer;
+      user-select: none;
+      background-image: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+    }
+
+    .btn-primary {
+      color: #fff;
+      background-color: #337ab7;
+      border-color: #2e6da4;
+    }
+
+    .btn-primary:hover, .btn-primary:focus {
+      color: #fff;
+      background-color: #286090;
+      border-color: #204d74;
+    }
+*/
+    /* Controls: sliders */
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      background: rgba(255,255,255,0.65);
+      border: 1px solid #e4e4e4;
+      border-radius: 8px;
+      padding: 6px 10px;
+    }
+
+    .control-group input[type="range"] {
+      width: 170px;
+      accent-color: #ff8400;
+    }
+
+    .control-value {
+      display: inline-block;
+      min-width: 4.5ch;
+      text-align: right;
+      font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
+      font-weight: 700;
+      color: #222;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 2px 8px;
+    }
+
+    /* Click-to-toggle tooltips */
+    .tooltip-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tip-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid #ddd;
+      background: #fff;
+      color: #999;
+      cursor: pointer;
+      user-select: none;
+      outline: none;
+    }
+
+    .tip-btn:hover { color: #ff8400; border-color: rgba(255,132,0,0.5); }
+
+    .tip-btn .tip-pop {
+      position: absolute;
+      top: calc(100% + 10px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: 300px;
+      max-width: min(300px, 82vw);
+      background: #222;
+      color: #fff;
+      border-radius: 10px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.35;
+      text-align: left;
+      white-space: normal;
+      z-index: 5000;
+      display: none;
+    }
+
+    .tip-btn .tip-pop:before {
+      content: "";
+      position: absolute;
+      top: -7px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-bottom: 8px solid #222;
+    }
+
+    .tip-btn.open .tip-pop { display: block; }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      height: calc(100vh - 230px);
+      overflow: hidden;
+      min-height: 0;
+      margin-bottom: 10px;
+    }
+
+    .card {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .card-player {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .card h2 {
+      /*font-size: 18px;*/
+      margin-bottom: 10px;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .card-player h2 {
+      /*font-size: 18px;*/
+      margin-bottom: 10px;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .badge {
+      background: #ff8400;
+      color: #fff;
+      /*font-size: 12px;*/
+      padding: 4px 8px;
+      border-radius: 10px;
+      font-weight: bold;
+      margin-left: 5px;
+    }
+
+    #playerElement {
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      align-items: center;
+      justify-content: center;
+      background: #000000;
+      flex: 1;
+      min-height: 0;
+    }
+
+    #playerElement video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .tab-controls {
+      display: flex;
+      gap: 3px;
+      margin-bottom: 10px;
+      flex-shrink: 0;
+    }
+
+    .tab-controls input[type="radio"] { display: none; }
+
+    /* Each tab label is a bar with right-justified actions inside */
+    .tab-controls label {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+
+      padding: 6px 10px;
+      background: #222;
+      border: none;
+      cursor: pointer;
+      font-weight: normal;
+      /*font-size: 14px;*/
+      color: #999;
+      user-select: none;
+      overflow: visible;
+    }
+
+    .tab-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .tab-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tab-actions {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .tab-copy-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.08);
+      color: #eaeaea;
+      cursor: pointer;
+      user-select: none;
+      pointer-events: auto;
+    }
+
+    .tab-copy-btn:hover {
+      background: rgba(255,255,255,0.16);
+      border-color: rgba(255,132,0,0.7);
+      color: #fff;
+    }
+
+    .tab-copy-status {
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.85);
+      min-width: 64px;
+      text-align: right;
+      line-height: 1;
+    }
+
+    .tab-controls input[type="radio"]:checked + label {
+      background: #ff8400;
+      color: #fff;
+    }
+
+    .tab-controls input[type="radio"]:checked + label .tab-copy-btn {
+      border-color: rgba(0,0,0,0.18);
+      background: rgba(0,0,0,0.15);
+      color: #fff;
+    }
+
+    .tab-controls label:hover {
+      background: #333;
+      color: #fff;
+    }
+
+    /* --- Copy UX behavior requested ---
+       Default: show icon only
+       On click: hide icon, show status for 1s
+    */
+    .tab-actions .tab-copy-status { display: none; }
+    .tab-controls label.copied .tab-copy-btn { display: none; }
+    .tab-controls label.copied .tab-copy-status { display: inline-block; }
+
+    .tab-content {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .tab-content.active { display: flex !important; }
+
+    .event-display, .log-display {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 8px;
+      font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
+      /*font-size: 12px;*/
+      font-weight: 600;
+      color: #222;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .log-display { white-space: pre-wrap; }
+
+    .log-entry {
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,132,0,0.2);
+    }
+
+    .log-entry:last-child { border-bottom: none; }
+
+    .log-timestamp {
+      color: #ff8400;
+      font-weight: bold;
+      margin-bottom: 4px;
+      /*font-size: 13px;*/
+    }
+
+    .log-json {
+      color: #555;
+      margin-left: 0;
+      /*font-size: 13px;*/
+      white-space: pre-wrap;
+    }
+
+    .event-item {
+      margin-bottom: 6px;
+      padding: 6px 8px;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-left: 3px solid #ff8400;
+      border-radius: 3px;
+    }
+
+    .event-time {
+      color: #555;
+      /*font-size: 12px;*/
+      font-weight: bold;
+      margin-bottom: 3px;
+    }
+
+    .event-data {
+      line-height: 1.4;
+      /*font-size: 13px;*/
+      color: #222;
+    }
+
+    .detection-label {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      /*font-size: 13px;*/
+      white-space: nowrap;
+      font-weight: 700;
+      margin-right: 3px;
+      margin-bottom: 3px;
+    }
+
+    .detection-label.confidence-high {
+      background: rgba(92,184,92,0.2);
+      color: #3c763d;
+      border: 1px solid rgba(92,184,92,0.4);
+    }
+
+    .detection-label.confidence-medium-high,
+    .detection-label.confidence-medium-low {
+      background: rgba(240,173,78,0.2);
+      color: #c87f0a;
+      border: 1px solid rgba(240,173,78,0.4);
+    }
+
+    .detection-label.confidence-low {
+      background: rgba(217,83,79,0.2);
+      color: #a94442;
+      border: 1px solid rgba(217,83,79,0.4);
+    }
+
+    .hidden { display: none; }
+
+/*    .navbar-logo { height: 44px; width: 44px; float: left; }
+
+    .navbar-text-wrapper { float: left; padding-left: 10px; }
+*/
+    .placeholder-text {
+      color: #777;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    @media (min-width: 769px) {
+
+      .controls-section {
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      /*.url-input-group label { font-size: 1rem; }*/
+
+      .url-input-group input[type="text"] {
+        border-radius: 8px;
+        padding: 12px 16px;
+        /*font-size: 0.95rem;*/
+      }
+/*
+      .btn {
+        border-radius: 4px;
+        padding: 10px 20px;
+        font-size: 0.95rem;
+      }*/
+
+      .main-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        min-height: 0;
+        overflow: hidden;
+        height: calc(100vh - 230px);
+      }
+
+      .card {
+        border-radius: 12px;
+        padding: 20px;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .card-player {
+        border-radius: 12px;
+        padding: 20px;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .card h2 {
+        /*font-size: 1.25rem;*/
+        margin-bottom: 15px;
+      }
+
+      .card-player h2 {
+        /*font-size: 1.25rem;*/
+        margin-bottom: 15px;
+      }
+      .badge {
+        /*font-size: 0.75rem;*/
+        padding: 2px 8px;
+        border-radius: 12px;
+      }
+
+      .event-display { border-radius: 8px; padding: 16px; /*font-size: 0.9rem;*/ }
+      .log-display { border-radius: 8px; padding: 16px; /*font-size: 0.85rem;*/ }
+
+      .log-entry { margin-bottom: 20px; padding-bottom: 20px; }
+      /*.log-timestamp { font-size: 0.85rem; }*/
+
+      .event-item {
+        margin-bottom: 8px;
+        padding: 8px 10px;
+        border-left: 3px solid #ff8400;
+        border-radius: 4px;
+      }
+
+      /*.event-time { font-size: 0.85rem; }*/
+    }
+  </style>
+
+
+  <div class="container-full">
+    <div class="controls-section">
+      <div class="url-input-group">
+        <label>Stream URL:</label>
+        <input type="text" id="playerUrl" value="" placeholder="Enter HLS playlist URL (.m3u8)">
+
+        <div class="control-group">
+          <div class="tooltip-wrap">
+            <label for="minScore" style="margin:0; font-weight:700;">Min score</label>
+            <button type="button" class="tip-btn" data-tip>
+              <i class="fa fa-info-circle" aria-hidden="true"></i>
+              <div class="tip-pop">
+                Only detections with a confidence score greater than or equal to this value will be shown.
+                Lower-confidence detections are hidden.
+              </div>
+            </button>
+          </div>
+          <input type="range" id="minScore" min="0" max="1" step="0.01" value="0.90">
+          <span class="control-value" id="minScoreValue">0.90</span>
+        </div>
+
+        <button class="btn btn-primary" id="loadBtn" onclick="createPlayer()">Load <i class="fa fa-arrow-right"></i></button>
+        <button class="btn btn-primary" id="loadBtn" onclick="mainPage()">All Streams <i class="fa fa-arrow-right"></i></button>
+      </div>
+      <div id="errorMessage" class="error-message hidden"></div>
+    </div>
+
+    <div class="main-grid">
+      <div class="card-player">
+        <h3>Video Player</h3>
+        <div id="playerElement"></div>
+      </div>
+
+      <div class="card">
+        <h3>
+          Live ID3 Events
+          <span class="badge" id="statusBadge">Ready</span>
+        </h3>
+
+        <div class="tab-controls">
+          <input type="radio" name="eventTab" id="tabFormatted" value="formatted" checked onchange="switchTab()">
+          <label for="tabFormatted" id="labelTabFormatted">
+            <span class="tab-left">
+              <span class="tab-title">Formatted View</span>
+            </span>
+            <span class="tab-actions">
+              <button type="button" class="tab-copy-btn" title="Clear formatted detections" onclick="onClearFormattedFromTab(event)">
+                <i class="fa fa-trash" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="tab-copy-btn" title="Copy formatted detections" onclick="onCopyFormattedFromTab(event)">
+                <i class="fa fa-clipboard" aria-hidden="true"></i>
+              </button>
+              <span class="tab-copy-status" id="copyStatusFormatted"></span>
+            </span>
+          </label>
+
+          <input type="radio" name="eventTab" id="tabRaw" value="raw" onchange="switchTab()">
+          <label for="tabRaw" id="labelTabRaw">
+            <span class="tab-left">
+              <span class="tab-title">Raw JSON Log</span>
+            </span>
+            <span class="tab-actions">
+              <button type="button" class="tab-copy-btn" title="Clear raw detections" onclick="onClearRawFromTab(event)">
+                <i class="fa fa-trash" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="tab-copy-btn" title="Copy raw detections" onclick="onCopyRawFromTab(event)">
+                <i class="fa fa-clipboard" aria-hidden="true"></i>
+              </button>
+              <span class="tab-copy-status" id="copyStatusRaw"></span>
+            </span>
+          </label>
+        </div>
+
+        <div class="tab-content active" id="formattedView">
+          <div class="event-display" id="eventDisplay">
+            <div class="placeholder-text">
+              Waiting for playback to start...<br>
+              Click play to see ID3 metadata events
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="rawView">
+          <div class="log-display" id="logDisplay">
+            <div class="placeholder-text">
+              Waiting for playback to start...<br>
+              Click play to see raw ID3 metadata
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var CONFIG = {
+      EVENT_TYPE_SCENE_DETECTION_POSTIFX: 'detection',
+      EVENT_TYPE_PDT: 'programDateTime',
+      MIN_SCORE_DEFAULT: 0.70,
+
+      CONFIDENCE_THRESHOLDS: {
+        HIGH: 0.75,
+        MEDIUM_HIGH: 0.50,
+        MEDIUM_LOW: 0.25
+      },
+      BADGE_COLORS: {
+        LOADING: '#f0ad4e',
+        READY: '#ff8400',
+        PLAYING: '#5cb85c',
+        PAUSED: '#f0ad4e',
+        ERROR: '#d9534f'
+      },
+      FLOWPLAYER_TOKEN: pluginProperties.playerToken || '',
+      FORMATTED_IDLE_PLACEHOLDER_HTML: '<div class="placeholder-text">Waiting for playback to start...<br>Click play to see ID3 metadata events</div>',
+      RAW_IDLE_PLACEHOLDER_HTML: '<div class="placeholder-text">Waiting for playback to start...<br>Click play to see raw ID3 metadata</div>',
+      MAX_HISTORY_ITEMS: 100
+    };
+
+    var elements = {
+      playerUrl: document.getElementById('playerUrl'),
+      minScore: document.getElementById('minScore'),
+      minScoreValue: document.getElementById('minScoreValue'),
+      errorMessage: document.getElementById('errorMessage'),
+      playerElement: document.getElementById('playerElement'),
+      eventDisplay: document.getElementById('eventDisplay'),
+      logDisplay: document.getElementById('logDisplay'),
+      statusBadge: document.getElementById('statusBadge'),
+      formattedView: document.getElementById('formattedView'),
+      rawView: document.getElementById('rawView'),
+      copyStatusFormatted: document.getElementById('copyStatusFormatted'),
+      copyStatusRaw: document.getElementById('copyStatusRaw'),
+      labelTabFormatted: document.getElementById('labelTabFormatted'),
+      labelTabRaw: document.getElementById('labelTabRaw')
+    };
+
+    var myPlayer = null;
+    var playerStartTime = null;
+    var currentLoadingUrl = null;
+
+    var hasUserPressedPlay = false;
+
+    // Pause state (Option A: no hard-freeze)
+    var isPaused = false;
+
+    // Copy timers
+    var copyTimers = { formatted: null, raw: null };
+
+    // PDT anchor state
+    var pdtAnchorIso = null;
+    var pdtAnchorMediaTime = null;
+
+    var urlParams = new URLSearchParams(window.location.search);
+    var srcParam = urlParams.get('src') || vifPlaybackUrl;
+    var minScoreParam = urlParams.get('minScore');
+
+    if (srcParam) elements.playerUrl.value = srcParam;
+
+    function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
+
+    function initControlsFromUrl() {
+      const ms = (minScoreParam !== null && !isNaN(parseFloat(minScoreParam)))
+        ? clamp(parseFloat(minScoreParam), 0, 1)
+        : CONFIG.MIN_SCORE_DEFAULT;
+
+      elements.minScore.value = ms.toFixed(2);
+      elements.minScoreValue.textContent = ms.toFixed(2);
+    }
+
+    initControlsFromUrl();
+
+    elements.minScore.addEventListener('input', () => {
+      elements.minScoreValue.textContent = parseFloat(elements.minScore.value).toFixed(2);
+      //persistParamsToUrl();
+    });
+
+    function getMinScore() {
+      const v = parseFloat(elements.minScore.value);
+      return Number.isFinite(v) ? v : CONFIG.MIN_SCORE_DEFAULT;
+    }
+
+    // function persistParamsToUrl(explicitSrc) {
+    //   const params = new URLSearchParams(window.location.search);
+    //   const src = explicitSrc ?? elements.playerUrl.value.trim();
+
+    //   if (src) params.set('src', src);
+    //   params.set('minScore', getMinScore().toFixed(2));
+
+    //   history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+    // }
+
+    // --- Time helpers (PDT + timeline) ---
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function pad3(n) { return String(n).padStart(3, '0'); }
+
+    function formatVideoClock(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return 'n/a';
+      const totalMs = Math.floor(seconds * 1000);
+      const ms = totalMs % 1000;
+      const totalSec = Math.floor(totalMs / 1000);
+      const s = totalSec % 60;
+      const totalMin = Math.floor(totalSec / 60);
+      const m = totalMin % 60;
+      const h = Math.floor(totalMin / 60);
+      return `${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`;
+    }
+
+    function formatWallClock(dt) {
+      const hh = dt.getUTCHours();
+      const mm = dt.getUTCMinutes();
+      const ss = dt.getUTCSeconds();
+      const ms = dt.getUTCMilliseconds();
+      return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}.${pad3(ms)} UTC`;
+    }
+
+    function wallClockForMediaTime(mediaTime) {
+      if (!pdtAnchorIso || typeof pdtAnchorMediaTime !== 'number') return null;
+      const anchorDate = new Date(pdtAnchorIso);
+      if (Number.isNaN(anchorDate.getTime())) return null;
+
+      const deltaMs = (mediaTime - pdtAnchorMediaTime) * 1000;
+      const dt = new Date(anchorDate.getTime() + deltaMs);
+      return formatWallClock(dt);
+    }
+
+    function updatePdtAnchorFromCue(cue) {
+      const iso = cue?.value?.data || cue?.value?.programDateTime || cue?.programDateTime || cue?.text || cue?.value;
+      if (typeof iso === 'string' && iso.includes('T')) {
+        pdtAnchorIso = iso;
+        pdtAnchorMediaTime = cue.startTime;
+      }
+    }
+
+    function formatTimestampForDisplay(cueStartSeconds, videoCurrentSeconds) {
+      const pdt = wallClockForMediaTime(cueStartSeconds);
+      const video = formatVideoClock(videoCurrentSeconds);
+      if (pdt) return `${pdt} (video=${video})`;
+      return `t=${formatVideoClock(cueStartSeconds)} (video=${video})`;
+    }
+
+    // Keeping this for placeholder timing only
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function getPlayerTime() {
+      if (!playerStartTime) {
+        playerStartTime = Date.now();
+        return '00:00';
+      }
+      const elapsedSeconds = (Date.now() - playerStartTime) / 1000;
+      return formatTime(elapsedSeconds);
+    }
+
+    function switchTab() {
+      const selectedTab = document.querySelector('input[name="eventTab"]:checked').value;
+      elements.formattedView.classList.remove('active');
+      elements.rawView.classList.remove('active');
+      if (selectedTab === 'formatted') elements.formattedView.classList.add('active');
+      else elements.rawView.classList.add('active');
+    }
+
+    function getConfidenceClass(confidence) {
+      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.HIGH) return 'confidence-high';
+      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.MEDIUM_HIGH) return 'confidence-medium-high';
+      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.MEDIUM_LOW) return 'confidence-medium-low';
+      return 'confidence-low';
+    }
+
+    function clearPlaceholder(element) {
+      const placeholder = element.querySelector('.placeholder-text');
+      if (placeholder) element.innerHTML = '';
+    }
+
+    function getFormattedPlaceholderHtml() {
+      if (hasUserPressedPlay) {
+        return `<div class="placeholder-text">Playing... awaiting detections (min score ${getMinScore().toFixed(2)})</div>`;
+      }
+      return CONFIG.FORMATTED_IDLE_PLACEHOLDER_HTML;
+    }
+
+    function getRawPlaceholderHtml() {
+      if (hasUserPressedPlay) {
+        return '<div class="placeholder-text">Playing... awaiting ID3 metadata</div>';
+      }
+      return CONFIG.RAW_IDLE_PLACEHOLDER_HTML;
+    }
+
+    function resetFormattedDisplay() {
+      elements.eventDisplay.innerHTML = getFormattedPlaceholderHtml();
+      elements.eventDisplay.scrollTop = 0;
+    }
+
+    function resetRawDisplay() {
+      elements.logDisplay.innerHTML = getRawPlaceholderHtml();
+      elements.logDisplay.scrollTop = 0;
+    }
+
+    function trimHistory(containerEl, selector, maxItems) {
+      const items = containerEl.querySelectorAll(selector);
+      if (items.length > maxItems) {
+        for (let i = maxItems; i < items.length; i++) items[i].remove();
+      }
+    }
+
+    function displayRawLog(eventType, data, timestamp) {
+      if (eventType.endsWith(CONFIG.EVENT_TYPE_PDT)) return;
+
+      let logContent = '';
+      try {
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        logContent = `<div class="log-entry">
+          <div class="log-timestamp">${timestamp} => ${eventType}</div>
+          <div class="log-json">${escapeHtml(JSON.stringify(parsed, null, 2))}</div>
+        </div>`;
+      } catch (e) {
+        logContent = `<div class="log-entry">
+          <div class="log-timestamp">${timestamp} => ${eventType}</div>
+          <div class="log-json">${escapeHtml(String(data))}</div>
+        </div>`;
+      }
+
+      clearPlaceholder(elements.logDisplay);
+      elements.logDisplay.insertAdjacentHTML('afterbegin', logContent);
+      trimHistory(elements.logDisplay, '.log-entry', CONFIG.MAX_HISTORY_ITEMS);
+      elements.logDisplay.scrollTop = 0;
+    }
+
+    function displayEvent(eventType, data, timestamp) {
+      if (!eventType.endsWith(CONFIG.EVENT_TYPE_SCENE_DETECTION_POSTIFX)) return;
+
+      try {
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+
+        let detections = [];
+        if (parsed.vif_data && Array.isArray(parsed.vif_data)) {
+          parsed.vif_data.forEach((viEntry) => {
+            if (viEntry.detections && viEntry.detections.length > 0) {
+              viEntry.detections.forEach(det => {
+                const confidence =
+                  (typeof det.confidence.avg === 'number') ? det.confidence.avg :
+                  (typeof det.confidence === 'number') ? det.confidence :
+                  null;
+
+                if (confidence === null) return;
+                detections.push({ label: det.class_name, confidence });
+              });
+            }
+          });
+        } else if (parsed.detections && Array.isArray(parsed.detections)) {
+          detections = parsed.detections;
+        } else {
+          return;
+        }
+
+        const minScore = getMinScore();
+        detections = detections
+          .filter(d => typeof d.confidence === 'number' && d.confidence >= minScore)
+          .sort((a, b) => b.confidence - a.confidence);
+
+        if (detections.length === 0) return;
+
+        const labels = detections.map(d => {
+          const confidenceClass = getConfidenceClass(d.confidence);
+          return `<span class="detection-label ${confidenceClass}">${escapeHtml(d.label)} (${Number(d.confidence).toFixed(2)})</span>`;
+        }).join('');
+
+        const content = `
+          <div class="event-item">
+            <div class="event-time">${escapeHtml(timestamp)}</div>
+            <div class="event-data">${labels}</div>
+          </div>
+        `;
+
+        clearPlaceholder(elements.eventDisplay);
+        elements.eventDisplay.insertAdjacentHTML('afterbegin', content);
+        trimHistory(elements.eventDisplay, '.event-item', CONFIG.MAX_HISTORY_ITEMS);
+        elements.eventDisplay.scrollTop = 0;
+      } catch (e) {
+        console.error('Error parsing event data:', e);
+      }
+    }
+
+    function updateStatusBadge(text, color) {
+      elements.statusBadge.textContent = text;
+      elements.statusBadge.style.background = color;
+    }
+
+    function showError(message) {
+      elements.errorMessage.textContent = message;
+      elements.errorMessage.classList.remove('hidden');
+    }
+
+    function hideError() {
+      elements.errorMessage.classList.add('hidden');
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    // Tooltip behavior: click to open/close, click outside closes, click inside closes
+    function closeAllTips() {
+      document.querySelectorAll('.tip-btn.open').forEach(btn => btn.classList.remove('open'));
+    }
+
+    function isPlaybackMounted() {
+      return !!document.getElementById('playerElement') && !!document.getElementById('playerUrl');
+    }
+
+    document.querySelectorAll('[data-tip]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const wasOpen = btn.classList.contains('open');
+        closeAllTips();
+        if (!wasOpen) btn.classList.add('open');
+      });
+
+      const pop = btn.querySelector('.tip-pop');
+      if (pop) {
+        pop.addEventListener('click', (e) => {
+          e.stopPropagation();
+          btn.classList.remove('open');
+        });
+      }
+    });
+
+    if (!window.__vifPlaybackGlobalBindings) {
+      document.addEventListener('click', () => {
+        if (!isPlaybackMounted()) return;
+        closeAllTips();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (!isPlaybackMounted()) return;
+        if (e.key === 'Escape') closeAllTips();
+      });
+      window.__vifPlaybackGlobalBindings = true;
+    }
+
+    // --- Copy UX helpers (icon hides, status shows for 1 second) ---
+    function setTabCopiedState(which, message) {
+      const labelEl = (which === 'formatted') ? elements.labelTabFormatted : elements.labelTabRaw;
+      const statusEl = (which === 'formatted') ? elements.copyStatusFormatted : elements.copyStatusRaw;
+
+      if (!labelEl || !statusEl) return;
+
+      statusEl.textContent = message || '';
+      labelEl.classList.add('copied');
+
+      if (copyTimers[which]) clearTimeout(copyTimers[which]);
+      copyTimers[which] = setTimeout(() => {
+        labelEl.classList.remove('copied');
+        statusEl.textContent = '';
+        copyTimers[which] = null;
+      }, 1000);
+    }
+
+    // --- Clipboard helpers ---
+    async function copyTextToClipboard(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+      }
+
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+
+    function buildFormattedPayloadFromDiv() {
+      const items = Array.from(document.querySelectorAll('#eventDisplay .event-item'));
+      const out = items.reverse().map(item => {
+        const timeEl = item.querySelector('.event-time');
+        const labelEls = Array.from(item.querySelectorAll('.detection-label'));
+
+        const detections = labelEls.map(el => {
+          const t = (el.textContent || '').trim(); // "person (0.93)"
+          const m = t.match(/^(.*)\s+\(([-\d.]+)\)\s*$/);
+          if (m) return { label: m[1], confidence: Number(m[2]) };
+          return { label: t, confidence: null };
+        });
+
+        return {
+          timestamp: timeEl ? timeEl.textContent.trim() : null,
+          detections
+        };
+      });
+
+      return {
+        type: 'scene-detection',
+        view: 'formatted',
+        minScore: getMinScore(),
+        events: out
+      };
+    }
+
+    function buildRawPayloadFromDiv() {
+      const entries = Array.from(document.querySelectorAll('#logDisplay .log-entry'));
+      const out = entries.reverse().map(entry => {
+        const tsEl = entry.querySelector('.log-timestamp');
+        const jsonEl = entry.querySelector('.log-json');
+
+        const ts = tsEl ? tsEl.textContent.trim() : null;
+        const rawText = jsonEl ? jsonEl.textContent : '';
+
+        let parsed = null;
+        try { parsed = rawText ? JSON.parse(rawText) : null; } catch (e) {}
+
+        return { timestamp: ts, data: parsed ?? rawText };
+      });
+
+      return {
+        type: 'scene-detection',
+        view: 'raw',
+        events: out
+      };
+    }
+
+    async function copyFormattedDetections() {
+      try {
+        const payloadObj = buildFormattedPayloadFromDiv();
+        const payload = JSON.stringify(payloadObj, null, 2);
+        await copyTextToClipboard(payload);
+        setTabCopiedState('formatted', (payloadObj.events?.length ? 'Copied' : 'Empty'));
+      } catch (e) {
+        console.error('Copy formatted failed:', e);
+        setTabCopiedState('formatted', 'Failed');
+      }
+    }
+
+    async function copyRawDetections() {
+      try {
+        const payloadObj = buildRawPayloadFromDiv();
+        const payload = JSON.stringify(payloadObj, null, 2);
+        await copyTextToClipboard(payload);
+        setTabCopiedState('raw', (payloadObj.events?.length ? 'Copied' : 'Empty'));
+      } catch (e) {
+        console.error('Copy raw failed:', e);
+        setTabCopiedState('raw', 'Failed');
+      }
+    }
+
+    // Wrappers prevent label click from toggling the tab
+    function onCopyFormattedFromTab(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyFormattedDetections();
+    }
+
+    function onCopyRawFromTab(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyRawDetections();
+    }
+
+    function clearFormattedDetections() {
+      resetFormattedDisplay();
+      setTabCopiedState('formatted', 'Cleared');
+    }
+
+    function clearRawDetections() {
+      resetRawDisplay();
+      setTabCopiedState('raw', 'Cleared');
+    }
+
+    function onClearFormattedFromTab(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearFormattedDetections();
+    }
+
+    function onClearRawFromTab(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearRawDetections();
+    }
+
+    function clearPlaybackDebugInterval() {
+      if (window.__vifPlaybackDebugInterval) {
+        clearInterval(window.__vifPlaybackDebugInterval);
+        window.__vifPlaybackDebugInterval = null;
+      }
+    }
+
+    function destroyPlaybackSession(options) {
+      const shouldClearPlaybackUrl = !options || options.clearPlaybackUrl !== false;
+
+      clearPlaybackDebugInterval();
+      currentLoadingUrl = null;
+
+      if (myPlayer != null) {
+        try {
+          myPlayer.destroy();
+        } catch (e) {
+          console.error('Error destroying player:', e);
+        } finally {
+          myPlayer = null;
+        }
+      }
+
+      const videoElement = document.querySelector('#playerElement video');
+      if (videoElement) {
+        try {
+          videoElement.pause();
+          videoElement.removeAttribute('src');
+          videoElement.load();
+        } catch (e) {
+          console.error('Error clearing video element:', e);
+        }
+      }
+
+      if (shouldClearPlaybackUrl && typeof window.vifPlaybackUrl !== 'undefined') {
+        window.vifPlaybackUrl = '';
+      }
+    }
+
+    window.__vifPlaybackDestroy = destroyPlaybackSession;
+
+    function mainPage()
+    {
+      destroyPlaybackSession();
+      loadAjaxPluginContent("server","vif", "shm.html","");
+    }
+
+    // --- Player creation ---
+    function createPlayer() {
+      const url = elements.playerUrl.value.trim();
+      if (!url) {
+        showError('Please enter a stream URL');
+        return;
+      }
+
+      hideError();
+      currentLoadingUrl = url;
+      //persistParamsToUrl(url);
+
+      isPaused = false;
+
+      pdtAnchorIso = null;
+      pdtAnchorMediaTime = null;
+
+      destroyPlaybackSession({ clearPlaybackUrl: false });
+
+      const playerContainer = elements.playerElement.parentNode;
+      const newPlayerElement = document.createElement('div');
+      newPlayerElement.id = 'playerElement';
+      playerContainer.replaceChild(newPlayerElement, elements.playerElement);
+      elements.playerElement = newPlayerElement;
+
+      setTimeout(() => initializeNewPlayer(url), 500);
+    }
+
+    function initializeNewPlayer(url) {
+      playerStartTime = null;
+      hasUserPressedPlay = false;
+
+      resetFormattedDisplay();
+      resetRawDisplay();
+
+      updateStatusBadge('Loading...', CONFIG.BADGE_COLORS.LOADING);
+
+      myPlayer = flowplayer("#playerElement", {
+        src: url,
+        token: CONFIG.FLOWPLAYER_TOKEN,
+        autoplay: true,
+        title: "ID3 Tags",
+        controls: true,
+        loop: true,
+        ui: flowplayer.ui.USE_PLAY_3,
+
+        hls: {
+          native: false,
+          liveDurationInfinity: true
+        }
+      });
+
+      myPlayer.on('ready', () => {
+        updateStatusBadge('Ready', CONFIG.BADGE_COLORS.READY);
+        console.log('[player] ready');
+      });
+
+      myPlayer.on('play', () => {
+        hasUserPressedPlay = true;
+        if (!playerStartTime) playerStartTime = Date.now();
+
+        isPaused = false;
+
+        updateStatusBadge('Playing', CONFIG.BADGE_COLORS.PLAYING);
+        console.log('[player] play');
+
+        clearPlaceholder(elements.eventDisplay);
+        clearPlaceholder(elements.logDisplay);
+
+        if (!elements.eventDisplay.querySelector('.event-item')) resetFormattedDisplay();
+        if (!elements.logDisplay.querySelector('.log-entry')) resetRawDisplay();
+
+        elements.eventDisplay.scrollTop = 0;
+        elements.logDisplay.scrollTop = 0;
+      });
+
+      // Option A: no forced pause, no freeze loop, no video currentTime rewrites
+      myPlayer.on('pause', () => {
+        console.log('[player] pause');
+        isPaused = true;
+        updateStatusBadge('Paused', CONFIG.BADGE_COLORS.PAUSED);
+      });
+
+      myPlayer.on(flowplayer.id3.events.ID3, ({ data }) => {
+        const v = document.querySelector('#playerElement video');
+        const cue = data?.cue;
+
+        if (!hasUserPressedPlay) return;
+        if (isPaused) return;
+
+        if (!cue || !cue.value) return;
+
+        const eventType = cue.value.info;
+        const eventData = cue.value.data;
+
+        if (eventType === CONFIG.EVENT_TYPE_PDT) {
+          updatePdtAnchorFromCue(cue);
+          console.log('[pdt] anchor set', { pdtAnchorIso, pdtAnchorMediaTime });
+        }
+
+        const cueStart = (typeof cue.startTime === 'number') ? cue.startTime : NaN;
+        const videoNow = (v && typeof v.currentTime === 'number') ? v.currentTime : NaN;
+        const timestamp = formatTimestampForDisplay(cueStart, videoNow);
+
+        displayEvent(eventType, eventData, timestamp);
+        displayRawLog(eventType, eventData, timestamp);
+      });
+
+      myPlayer.on('error', (error) => {
+        console.error('Player error:', error);
+        if (url !== currentLoadingUrl) return;
+        updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
+        showError('Failed to load stream. Please check the URL format and try again.');
+      });
+    }
+
+    if (srcParam) createPlayer();
+
+    window.addEventListener('pagehide', () => {
+      destroyPlaybackSession();
+    });
+
+    window.addEventListener('beforeunload', () => {
+      destroyPlaybackSession();
+    });
+
+    clearPlaybackDebugInterval();
+    window.__vifPlaybackDebugInterval = setInterval(() => {
+      if (!isPlaybackMounted()) {
+        destroyPlaybackSession({ clearPlaybackUrl: false });
+        return;
+      }
+      const v = document.querySelector('#playerElement video');
+      if (!v) return;
+      const b = v.buffered;
+      if (!b || b.length === 0) return;
+      const end = b.end(b.length - 1);
+      console.log('[dbg] currentTime=', v.currentTime.toFixed(3),
+        'bufferEnd=', end.toFixed(3),
+        'behindLive=', (end - v.currentTime).toFixed(3),
+        'paused=', v.paused);
+    }, 1000);
+
+    console.log("VIF ID3 Metadata Player Loaded");
+  </script>

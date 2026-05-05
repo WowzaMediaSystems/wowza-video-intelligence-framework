@@ -1,0 +1,16 @@
+# Ignore environment file with secrets
+.env
+
+# Ignore all log files
+*.log
+
+# Ignore logs directory
+logs/
+
+tmp/
+
+# VIS models
+vis/
+
+# WSE Conf
+wse/

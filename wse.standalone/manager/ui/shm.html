@@ -1,0 +1,462 @@
+<style>
+
+    .vif-dashboard {
+        /* Status Colors */
+        --good-color: #00e676; /* Green */
+        --alert-color: #ff5252; /* Red */
+        --alert-bg: #ffe5e5;
+        --warn-color: #cc9900; /* yellow/amber */
+        --warn-bg: #fff8e5;
+        --accent-color: #00bcd4;
+    }
+
+<%--         body {
+        font-family: monospace;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+    } --%>
+
+    .vif-dashboard .plugin-scroll {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+        overflow-y: visible;
+    }
+
+    .vif-dashboard .content-wrapper,
+    .vif-dashboard .host-container,
+    .vif-dashboard .table-wrapper,
+    .vif-dashboard #streams-table {
+        box-sizing: border-box;
+    }
+
+    .vif-dashboard h2 {
+        font-size: 18px;
+        margin: 0;
+/*        padding-bottom: 10px;
+         margin: 16px;
+         margin-bottom: 10px;
+ */    }
+
+    .vif-dashboard .streams-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        border-bottom: 1px solid #ccc;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        min-width: 0;
+    }
+
+    .vif-dashboard .streams-header-title {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .vif-dashboard #header-values {
+        font-style: italic;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .vif-dashboard .status-bar {
+        font-size: 0.85em;
+        color: #fff;
+        text-align: right;
+        margin-left: auto;
+        margin: 7px;
+    }
+
+/*    .status-bar {
+        text-align: right;
+        font-size: 12px;
+        color: #444;
+        margin: 16px;
+        margin-bottom: 0;
+    }*/
+
+    .vif-dashboard .content-wrapper {
+        padding: 16px;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: hidden;
+    }
+
+    .vif-dashboard .vif-row {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    /* --- Host Info Grid --- */
+    .vif-dashboard .host-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vif-dashboard #host-display,
+    .vif-dashboard #host-nvidia,
+    .vif-dashboard #host-stats {
+        flex: 0 0 calc((100% - 8px) / 2);
+        width: calc((100% - 8px) / 2);
+        max-width: calc((100% - 8px) / 2);
+        margin-right: auto;
+        min-width: 0;
+    }
+
+    .vif-dashboard .metric-card {
+        min-width: 120px;
+        flex: 1 1 220px;
+        max-width: 100%;
+        background: #fafafa;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid #ccc;
+        transition: all 0.3s ease;
+    }
+
+    .vif-dashboard #host-stats .metric-card {
+        flex: 0 0 calc((100% - 24px) / 4);
+        max-width: calc((100% - 24px) / 4);
+        min-width: 0;
+    }
+
+    .vif-dashboard .metric-thumb-card {
+        min-width: min(240px, 100%);
+        flex: 1 1 240px;
+        max-width: 100%;
+        background: #fafafa;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid #ccc;
+        transition: all 0.3s ease;
+    }
+
+    .vif-dashboard .metric-label {
+        font-size: 0.85em;
+        color: #444;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 5px;
+    }
+
+    .vif-dashboard .metric-value {
+        font-size: 1.3em;
+        font-weight: bold;
+        color: #333;
+        word-break: break-all;
+    }
+
+    /* Alert Classes */
+    .vif-dashboard .card-alert {
+        border: 1px solid var(--alert-color);
+        background-color: var(--alert-bg);
+    }
+    .vif-dashboard .card-alert .metric-value {
+        color: var(--alert-color);
+    }
+
+    .vif-dashboard .card-warn {
+        border: 1px solid var(--warn-color);
+        background-color: var(--warn-bg);
+    }
+    .vif-dashboard .card-warn .metric-value {
+        color: var(--warn-color);
+    }
+
+    .vif-dashboard .text-alert { color: var(--alert-color) !important; }
+    .vif-dashboard .text-warn { color: var(--warn-color) !important; }
+    .vif-dashboard .text-good { color: var(--good-color) !important; }
+
+    /* --- Streams Table --- */
+    .vif-dashboard .table-wrapper {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        background: #fafafa;
+        border-radius: 12px;
+        border: 1px solid #ccc;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vif-dashboard #streams-table {
+        width: 100%;
+        min-width: 1200px;
+        border-collapse: collapse;
+        font-size: 0.95em;
+        table-layout: auto;
+    }
+
+    .vif-dashboard thead {
+        background-color: #000;
+    }
+
+    .vif-dashboard th,
+    .vif-dashboard td {
+        padding: 12px 15px;
+        border-bottom: 1px solid #ccc;
+        vertical-align: middle;
+    }
+
+    .vif-dashboard th {
+        color: #fff;
+        text-align: center;
+        font-weight: normal;
+        white-space: nowrap;
+    }
+
+    .vif-dashboard .empty-streams-row td {
+        text-align: center;
+        color: #666;
+        font-style: italic;
+        padding: 18px 15px;
+    }
+
+    .vif-dashboard .align-left {
+        text-align: left;
+    }
+    .vif-dashboard .align-right {
+        text-align: right;
+    }
+
+    /* Button styling to match reference */
+    .vif-dashboard button {
+        padding: 0.4em 0.7em;
+        font-family: monospace;
+        font-size: 0.85em;
+        cursor: pointer;
+        background: #2a71ab;
+        border: 1px solid #ccc;
+        color: #ffffff;
+        border-radius: 4px;
+        margin-bottom: 4px;
+    }
+
+    .vif-dashboard button:hover {
+        background: #225783;
+    }
+
+    .vif-dashboard button:disabled {
+      background-color: #cccccc;
+      color: #666666;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .vif-dashboard .grid {
+        display: grid;
+        grid-template-columns: repeat(10, 1fr);
+        gap: 10px;
+        max-width: 500px;
+    }
+
+    .vif-dashboard .slider {
+        accent-color: #2a71ab;
+    }
+
+    .vif-dashboard .vif-controls {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 2px;
+        min-width: 0;
+    }
+
+    /* The container - defines the size of the switch */
+    .vif-dashboard .switch {
+        position: relative;
+        display: flex;
+        width: 50px;
+        height: 23px;
+    }
+
+    /* Hide the default HTML checkbox */
+    .vif-dashboard .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    /* The slider (the track) */
+    .vif-dashboard .slider-switch {
+        position: absolute;
+        cursor: pointer;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #ccc;
+        transition: .4s;
+        border-radius: 25px;
+    }
+
+    /* The knob (the circle that slides) */
+    .vif-dashboard .slider-switch:before {
+        position: absolute;
+        content: "";
+        height: 15px;
+        width: 15px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .vif-dashboard .item-right {
+      margin-left: auto;
+    }
+
+    /* Logic: When checked, change background color */
+    .vif-dashboard input:checked + .slider-switch {
+        background-color: #2a71ab;
+    }
+
+    /* Logic: When checked, move the knob to the right */
+    .vif-dashboard input:checked + .slider-switch:before {
+        transform: translateX(24px);
+    }
+
+    /* Thumbnail image styling */
+    .vif-dashboard #streams-table img {
+        border-radius: 4px;
+    }
+
+    .vif-dashboard .stream-type-cell {
+        min-width: 150px;
+        text-align: center;
+    }
+
+    .vif-dashboard .stream-type-icon {
+        width: 56px;
+        max-width: 100%;
+        height: auto;
+        margin-bottom: 7px;
+    }
+
+    .vif-dashboard .stream-type-meta-line {
+        text-align: center;
+        line-height: 1.35;
+    }
+
+    .vif-dashboard .stream-type-meta-secondary {
+        color: #555;
+    }
+
+    .vif-dashboard .thumbnail-card-image {
+        display: block;
+        width: 100%;
+        max-width: 320px;
+        height: auto;
+    }
+
+    @media (max-width: 1024px) {
+        .vif-dashboard .content-wrapper {
+            padding: 12px;
+        }
+
+        .vif-dashboard #host-display,
+        .vif-dashboard #host-nvidia,
+        .vif-dashboard #host-stats {
+            flex-basis: 100%;
+            width: 100%;
+            max-width: 100%;
+            margin-right: 0;
+        }
+
+        .vif-dashboard th,
+        .vif-dashboard td {
+            padding: 10px 12px;
+        }
+    }
+
+    @media (max-width: 1280px) {
+        .vif-dashboard #host-stats .metric-card {
+            flex: 1 1 calc((100% - 8px) / 2);
+            max-width: calc((100% - 8px) / 2);
+        }
+    }
+</style>
+
+<div class="vif-dashboard">
+<div class="plugin-scroll">
+    <div class="content-wrapper">
+
+        <div class="streams-header">
+            <h2>VIF Dashboard</h2>
+            <div id="config-streams" class="item-right" style="display: none;">
+                <button onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
+            </div>
+        </div>
+
+        <div id="host-display" class="host-container">
+        </div>
+        <div id="host-nvidia" class="host-container">
+        </div>
+        <div id="host-stats" class="host-container">
+        </div>
+
+        <div class="streams-header">
+            <div class="streams-header-title">
+                <h2>Active Streams: <span id="active-streams">0</span></h2>
+                <div id="header-values" title="Processing Avg / Frame Detect Avg"></div>
+            </div>
+            <div class="vif-controls item-right">
+                Thumbnails&nbsp;
+                <label class="switch">
+                    <input type="checkbox" id="thumbnailToggle">
+                    <span class="slider-switch"></span>
+                </label>
+            </div>
+        </div>
+
+        <div id="thumbnail-wrapper">
+            <div id="thumbnail-display" class="host-container"></div>
+        </div>
+
+        <div id="table-wrapper" class="table-wrapper">
+            <table id="streams-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Stream Name</th>
+                        <th>Stream Info</th>
+                        <th title="Round Trip time to VIF Service">Ping (RTT)</th>
+                        <th title="VIF Service Object Processing Time">Ttl Processing Avg</th>
+                        <th title="WSE Object Processing Time">Frame Detect Avg</th>
+                        <th title="Frames Detected per Second | Frames Captured per Second | Avg Frames Detected">Frames Detected</th>
+                        <th>Thumbnail</th>
+                    </tr>
+                </thead>
+                <tbody id="streams-body">
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</div>
+</div>
+
+<script>
+    url = new URL(window.location.href);
+    serverUrl = serverUrl.replaceAll("wse.docker", url.hostname);
+    serverUrl = serverUrl.replaceAll("host.docker.internal", url.hostname);
+    serverUrl = serverUrl.replace(/\/+$/, ''); // remove trailing slash if there is one
+    var pathPrefix = '/wse-plugins/server/vif/';
+    var host = url.host;
+    var protocol = url.protocol;
+    var hostname = url.hostname;
+</script>
+
+<script src="/wse-plugins/server/vif/shm.js"></script>

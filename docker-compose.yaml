@@ -1,0 +1,128 @@
+# name: Wowza Streaming Engine Video Intelligence Framework
+services:
+    wse:
+        hostname: wse.docker
+        image: wowza/wowza-streaming-engine:latest-beta-vif
+        pull_policy: always
+        #platform: linux/arm64
+        profiles: ["", "wse", "wse-only", "all"]
+        restart: unless-stopped # Automatically restarts unless manually stopped
+        ##### comment deploy section below for non gpu support
+        deploy:
+          resources:
+            reservations:
+              devices:
+                - driver: nvidia
+                  capabilities: [video, gpu, compute, utility]
+                  count: all
+        environment:
+            - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
+            - ADMIN_USER=${WSE_ADMIN_USER}
+            - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
+            - IPWHITELIST=*
+            - LOG_LEVEL=INFO #DEBUG INFO WARN ERROR
+            - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change
+            - VIS_API_KEY=${VIS_API_KEY}
+            - VIS_LICENSE=${VIS_LICENSE}
+            - VIS_PROTOCOL=${VIS_PROTOCOL}
+            - VIS_HOST=${VIS_HOST}
+            - VIS_PORT=${VIS_PORT:-5001}
+        #to persist the configurations between starts of Wowza Streaming Engine, uncomment the lines below:
+        volumes:
+             - ./wse/conf:/usr/local/WowzaStreamingEngine/conf
+             - ./wse/content:/usr/local/WowzaStreamingEngine/content
+             - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
+             - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
+
+        ports:
+            - 80:80                     #HLS
+            - 443:443                   #SSL
+            - 554:554                   #RTSP
+            - 1935:1935                 #RTMP
+            - 8087:8087                 #REST API
+            - 8089:8089                 #REST API Documenation
+            - 6970-6999:6970-6999/udp   #WEBRTC
+            - 10000:10000/udp           #SRT            
+        env_file:
+            - .env
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+
+    manager:
+        hostname: wsem.docker
+        image: wowza/wowza-streaming-engine-manager:latest-beta-vif
+        pull_policy: always        
+        #platform: linux/arm64        
+        profiles: ["", "wse", "wsem", "all"]
+        environment:
+            - LOG_LEVEL=WARN #DEBUG INFO WARN ERROR
+            - WSE_HOST=http://wse.docker:8087
+            - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change <http://localhost:8088/RESTAPIDocumentation/>            
+            - PLAYER_TOKEN=${PLAYER_TOKEN}
+            - ADMIN_USER=${WSE_ADMIN_USER}
+            - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
+            # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
+            # - JKS_PASSWORD=tbd
+        ports:
+            - 8088:8080
+            - 8443:8443
+        env_file:
+            - .env            
+        extra_hosts:
+          - "host.docker.internal:host-gateway"
+
+    video-intelligence-service-gpu:
+        hostname: video-intelligence-service.docker
+        image: wowza/wowza-video-intelligence-service:latest-gpu
+        pull_policy: always        
+        #platform: linux/arm64        
+        profiles: ["", "vi-service", "all"]
+        restart: unless-stopped        
+        environment:
+        # Core service configuration
+          - VIS_PORT=${VIS_PORT:-5001}
+          - LOG_LEVEL=INFO
+          - ENABLE_NETWORK_METRICS_LOGGING=false  # Set to 'true' to enable periodic network logging
+          - VIDEO_FRAME_REQUEST_TIMEOUT_SECONDS=2.0  # Timeout (seconds) for waiting on video frame responses
+        # Optional: Inference thread pool tuning (default: 32 threads per GPU)
+        # - INFERENCE_THREADS_PER_GPU=32
+        # Optional: Enable API key authentication
+          - VIS_API_KEY=${VIS_API_KEY}
+        # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
+        # - TRT_MODELS=object-detection-medium
+        # - TRT_MODELS=object-detection-nano,my-custom-model.pth
+        # License key string required to run VIS
+          - VIS_LICENSE=${VIS_LICENSE}
+        # Optional: Enable SSL/TLS for HTTPS and WSS
+        # - SSL_KEYFILE=/certs/server-key.pem
+        # - SSL_CERTFILE=/certs/server-cert.pem
+        # - SSL_KEYFILE_PASSWORD=optional-key-password
+        # NVIDIA GPU configuration
+          - NVIDIA_VISIBLE_DEVICES=all  # Or specify GPU IDs: '0,1'
+          - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+        volumes:
+        # Mount models directory for checkpoints
+          - ./vis/models:/build/models
+        # Optional: Mount SSL certificates for HTTPS/WSS
+        # - ./certs:/certs:ro
+        # Optional: Mount for RT-DETR v2 model cache (for offline usage)
+        # - ~/.cache/huggingface:/root/.cache/huggingface:ro
+        ports:
+          - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
+        env_file:
+            - .env
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        healthcheck:
+          test: ["CMD", "sh", "-c", "nc -z localhost ${VIS_PORT:-5001}"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 10s
+        deploy:
+          resources:
+            reservations:
+              devices:
+                - driver: nvidia
+                  capabilities: [gpu, compute, utility]
+                  count: all

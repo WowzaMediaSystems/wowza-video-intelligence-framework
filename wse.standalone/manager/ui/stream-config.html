@@ -1,0 +1,3433 @@
+
+    <style>
+        :root {
+            /* Status Colors */
+            --good-color: #00e676; /* Green */
+            --alert-color: #ff5252; /* Red */
+            --alert-bg: #ffe5e5;
+            --warn-color: #cc9900; /* yellow/amber */
+            --warn-bg: #fff8e5;
+            --accent-color: #00bcd4;
+            --form-label-width: 240px;
+        }
+
+        .content-wrapper,
+        .content-wrapper *,
+        .form-wrapper,
+        .event-listeners-panel,
+        .overlay-card {
+            box-sizing: border-box;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .streams-header {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px 16px;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+        }
+
+        .status-bar {
+            font-size: 0.85em;
+            color: #fff;
+            text-align: right;
+            margin-left: auto;
+            margin: 7px;
+        }
+
+        .content-wrapper {
+            padding: 16px;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .host-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .metric-card {
+            min-width: 120px;
+            background: #fafafa;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            transition: all 0.3s ease;
+        }
+
+        .metric-label {
+            font-size: 0.85em;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+
+        .metric-value {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+            word-break: break-all;
+        }
+
+        .card-alert {
+            border: 1px solid var(--alert-color);
+            background-color: var(--alert-bg);
+        }
+        .card-alert .metric-value {
+            color: var(--alert-color);
+        }
+
+        .card-warn {
+            border: 1px solid var(--warn-color);
+            background-color: var(--warn-bg);
+        }
+        .card-warn .metric-value {
+            color: var(--warn-color);
+        }
+
+        .text-alert { color: var(--alert-color) !important; }
+        .text-warn { color: var(--warn-color) !important; }
+        .text-good { color: var(--good-color) !important; }
+
+        button {
+            padding: 0.4em 0.7em;
+            font-family: monospace;
+            font-size: 0.85em;
+            cursor: pointer;
+            background: #2a71ab;
+            border: 1px solid #ccc;
+            color: #ffffff;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+
+        button:hover {
+            background: #225783;
+        }
+
+        button:disabled {
+          background-color: #cccccc;
+          color: #666666;
+          cursor: not-allowed;
+          pointer-events: none;
+        }
+
+        .slider {
+            accent-color: #2a71ab;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 2px;
+        }
+
+        .switch {
+            position: relative;
+            display: flex;
+            width: 50px;
+            height: 23px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider-switch {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 25px;
+        }
+
+        .slider-switch:before {
+            position: absolute;
+            content: "";
+            height: 15px;
+            width: 15px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .item-right {
+          margin-left: auto;
+        }
+
+        input:checked + .slider-switch {
+            background-color: #2a71ab;
+        }
+
+        input:checked + .slider-switch:before {
+            transform: translateX(24px);
+        }
+
+        /* Form-specific styles */
+        .form-wrapper {
+            background: #fafafa;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .top-config-panel {
+            background: #cccccc;
+            border-color: #b6b6b6;
+            color: #111;
+            width: 100%;
+            max-width: 100%;
+            transition: padding 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+        }
+
+        .top-config-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .top-config-toolbar-main {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1 1 460px;
+            min-width: 0;
+            flex-wrap: wrap;
+        }
+
+        .top-config-toolbar-heading {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex: 0 0 auto;
+        }
+
+        .top-config-toolbar #cfg-stream-select {
+            flex: 1 1 260px;
+            min-width: 220px;
+            margin-right: 0 !important;
+        }
+
+        .top-config-toolbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 1 auto;
+            flex-wrap: wrap;
+        }
+
+        .top-config-toolbar-actions button {
+            margin-bottom: 0;
+        }
+
+        .top-config-panel .form-section-title,
+        .top-config-panel .section-help,
+        .top-config-panel .save-meta,
+        .top-config-panel .save-meta strong,
+        .top-config-panel .form-group label:not(.switch),
+        .top-config-panel .field-help {
+            color: #111;
+        }
+
+        .top-config-panel .section-help,
+        .top-config-panel .save-meta,
+        .top-config-panel .field-help {
+            color: #2b2b2b;
+        }
+
+        .top-config-panel code {
+            color: #111;
+            background: rgba(255, 255, 255, 0.65);
+            padding: 1px 4px;
+            border-radius: 4px;
+        }
+
+        .top-config-panel.is-compact {
+            padding-top: 14px;
+            padding-bottom: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow: hidden;
+            flex-wrap: wrap;
+        }
+
+        .event-listeners-panel .form-group,
+        .event-listeners-panel .array-item-body .form-group {
+            overflow: visible;
+        }
+
+        .form-group label:not(.switch) {
+            flex: 0 0 var(--form-label-width);
+            max-width: var(--form-label-width);
+            font-size: 0.85em;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-align: right;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group select {
+            font-family: monospace;
+            font-size: 0.95em;
+            padding: 6px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: #fff;
+            flex: 1;
+            min-width: 0;
+            max-width: 300px;
+        }
+
+        .form-group input[type="text"]::placeholder,
+        .form-group input[type="number"]::placeholder {
+            color: #9aa3ad;
+            opacity: 1;
+        }
+
+        .top-config-panel input[type="text"],
+        .top-config-panel input[type="number"],
+        .top-config-panel select,
+        .top-config-panel .form-group input[type="text"],
+        .top-config-panel .form-group input[type="number"],
+        .top-config-panel .form-group select {
+            background: #fff;
+            border-color: #b6b6b6;
+            color: #111;
+        }
+
+        .top-config-panel #cfg-stream-select {
+            background: #fff;
+            border-color: #cfcfcf;
+            color: #111;
+        }
+
+        .top-config-panel input[type="text"]::placeholder,
+        .top-config-panel input[type="number"]::placeholder,
+        .top-config-panel .form-group input[type="text"]::placeholder,
+        .top-config-panel .form-group input[type="number"]::placeholder {
+            color: #9aa3ad;
+            opacity: 1;
+        }
+
+        .top-config-panel input[type="text"]:focus,
+        .top-config-panel input[type="number"]:focus,
+        .top-config-panel select:focus,
+        .top-config-panel .form-group input[type="text"]:focus,
+        .top-config-panel .form-group input[type="number"]:focus,
+        .top-config-panel .form-group select:focus {
+            border-color: #8ab4f8;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group input[type="number"]:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #2a71ab;
+        }
+
+        .form-section {
+            border-top: 1px solid #ddd;
+            margin-top: 16px;
+            padding-top: 12px;
+        }
+
+        .form-section-title {
+            font-size: 0.9em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #ddd;
+        }
+
+        .section-help {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 12px;
+            line-height: 1.45;
+        }
+
+        .field-help {
+            flex-basis: 100%;
+            margin-left: calc(var(--form-label-width) + 10px);
+            margin-top: -4px;
+            font-size: 0.8em;
+            color: #666;
+            line-height: 1.4;
+        }
+
+        .inline-warning {
+            font-size: 0.8em;
+            color: var(--warn-color);
+            background: var(--warn-bg);
+            border: 1px solid var(--warn-color);
+            border-radius: 4px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+
+        .event-listener-summary {
+            display: none;
+            font-size: 0.85em;
+            color: #3d4a57;
+            background: #f4f8fc;
+            border: 1px solid #d5e1ef;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 12px;
+            line-height: 1.45;
+        }
+
+        .event-listener-summary strong {
+            color: #234f8c;
+        }
+
+        .info-trigger {
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            margin: 0;
+            border-radius: 999px;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .overlay-backdrop {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.45);
+            padding: 24px;
+            z-index: 1000;
+        }
+
+        .overlay-backdrop.open {
+            display: flex;
+        }
+
+        .overlay-card {
+            width: min(640px, 100%);
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+            padding: 20px 22px;
+            position: relative;
+        }
+
+        .overlay-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 999px;
+            font-size: 1.1em;
+        }
+
+        .overlay-list {
+            margin: 10px 0 0;
+            padding-left: 20px;
+            color: #444;
+            line-height: 1.6;
+        }
+
+        .btn-danger {
+            background: #ff5252;
+            border-color: #ff5252;
+        }
+        .btn-danger:hover {
+            background: #d32f2f;
+        }
+
+        .btn-secondary {
+            background: #eceff1;
+            border-color: #c5ccd3;
+            color: #2f3b47;
+        }
+
+        .btn-secondary:hover {
+            background: #d9dee3;
+            border-color: #b2bac2;
+            color: #2f3b47;
+        }
+
+        #status-message {
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 30px;
+            box-sizing: border-box;
+            margin-right: auto;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            line-height: 1.35;
+            overflow: hidden;
+            overflow-wrap: anywhere;
+            white-space: normal;
+            opacity: 0;
+            visibility: hidden;
+            border: 1px solid transparent;
+            pointer-events: none;
+            transition: opacity 0.2s ease, visibility 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+        }
+
+        #status-message.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #status-message.success {
+            background: #e8f5e9;
+            border-color: var(--good-color);
+            color: #2e7d32;
+        }
+
+        #status-message.error {
+            background: var(--alert-bg);
+            border-color: var(--alert-color);
+            color: var(--alert-color);
+        }
+
+        .save-meta {
+            margin-top: 10px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        #dirty-indicator {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            font-size: 0.92em;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+
+        #dirty-indicator.state-saved {
+            background: #e8f3ea;
+            border-color: #8fc79c;
+            color: #216c38;
+        }
+
+        #dirty-indicator.state-unsaved {
+            background: #fff3cd;
+            border-color: #e2b84b;
+            color: #7a5400;
+        }
+
+        #dirty-indicator.state-saving {
+            background: #e7f0ff;
+            border-color: #86aee8;
+            color: #1f4d9b;
+        }
+
+        .save-meta-icon-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border: 1px solid rgba(0, 0, 0, 0.15);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.85);
+            color: #222;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .save-meta-icon-button:hover {
+            background: #fff;
+            border-color: rgba(0, 0, 0, 0.28);
+            transform: translateY(-1px);
+        }
+
+        .save-meta-icon-button:focus-visible {
+            outline: 2px solid #2b6cb0;
+            outline-offset: 2px;
+        }
+
+        .save-meta-icon-button svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+
+        .top-config-panel .save-meta-icon-button {
+            border-color: rgba(0, 0, 0, 0.14);
+            background: rgba(255, 255, 255, 0.9);
+            color: #111;
+        }
+
+        .top-config-panel .save-meta-icon-button:hover {
+            background: #fff;
+            border-color: rgba(0, 0, 0, 0.24);
+        }
+
+        .top-config-panel #btn-save-top {
+            background: #2a71ab;
+            border-color: #225783;
+            color: #fff;
+        }
+
+        .top-config-panel #btn-save-top:hover {
+            background: #225783;
+            border-color: #225783;
+        }
+
+        .listener-name-preview {
+            min-width: 220px;
+            max-width: 300px;
+            padding: 6px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: #f3f4f6;
+            color: #555;
+            font-family: monospace;
+            font-size: 0.95em;
+            line-height: 1.4;
+        }
+
+        .listener-create-template {
+            flex: 0 1 190px;
+            min-width: 150px;
+            max-width: 220px;
+        }
+
+        .listener-create-name-field,
+        .listener-create-name-preview {
+            flex: 1 1 180px;
+            min-width: 160px;
+            max-width: 240px;
+            box-sizing: border-box;
+        }
+
+        .listener-create-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+
+        .listener-create-actions button {
+            margin-bottom: 0;
+        }
+
+.byte-track-fields {
+            padding-left: 20px;
+            border-left: 3px solid #2a71ab;
+            margin-left: 10px;
+        }
+
+        .two-column {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .two-column > .form-wrapper {
+            flex: 1;
+            min-width: 0;
+        }
+
+        @media (max-width: 900px) {
+            :root {
+                --form-label-width: 180px;
+            }
+
+            .top-config-toolbar,
+            .top-config-toolbar-main {
+                align-items: stretch;
+            }
+
+            .top-config-toolbar-main,
+            .top-config-toolbar-actions {
+                width: 100%;
+            }
+
+            .top-config-toolbar-actions {
+                justify-content: flex-start;
+            }
+
+            .save-meta {
+                justify-content: flex-start;
+            }
+
+            .two-column {
+                flex-direction: column;
+            }
+
+            .two-column > .form-wrapper,
+            .two-column > .event-listeners-panel {
+                width: 100%;
+            }
+
+            .event-listeners-panel {
+                position: static;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .content-wrapper {
+                padding: 10px;
+            }
+
+            .form-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .form-group label:not(.switch) {
+                flex: 0 0 auto;
+                max-width: none;
+                text-align: left;
+            }
+
+            .form-group input[type="text"],
+            .form-group input[type="number"],
+            .form-group select,
+            .listener-name-preview,
+            .listener-create-template,
+            .listener-create-name-field,
+            .listener-create-name-preview,
+            .string-list-field {
+                width: 100%;
+                max-width: none;
+            }
+
+            .field-help {
+                margin-left: 0;
+            }
+
+            .top-config-toolbar-main {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .top-config-toolbar-heading {
+                justify-content: space-between;
+            }
+
+            .top-config-toolbar #cfg-stream-select,
+            .top-config-toolbar-actions,
+            .top-config-toolbar-actions button,
+            .form-actions button,
+            #status-message,
+            #dirty-indicator {
+                width: 100%;
+            }
+
+            .top-config-toolbar #cfg-stream-select {
+                flex: 0 1 auto;
+                min-width: 0;
+                min-height: 40px;
+            }
+
+            .top-config-toolbar-actions,
+            .form-actions,
+            .save-meta {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .array-section-header,
+            .array-item-header,
+            .listener-create-actions {
+                flex-wrap: wrap;
+            }
+        }
+
+        .event-listeners-panel {
+            flex: 1;
+            min-width: 0;
+            background: #fafafa;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            position: sticky;
+            top: 16px;
+        }
+
+        .array-section {
+            margin-top: 12px;
+            margin-bottom: 8px;
+        }
+
+        .array-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .array-section-header .form-section-title {
+            margin-bottom: 0;
+        }
+
+        .array-item {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .array-item-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f0f0f0;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: bold;
+            color: #333;
+            user-select: none;
+        }
+
+        .array-item-header:hover {
+            background: #e8e8e8;
+        }
+
+        .array-item-chevron {
+            font-size: 0.7em;
+            margin-right: 6px;
+            color: #666;
+        }
+
+        .array-item-header .array-item-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .array-item-header .array-item-actions button {
+            padding: 2px 6px;
+            font-size: 0.8em;
+            margin-bottom: 0;
+        }
+
+        .array-item-body {
+            padding: 10px 12px;
+            display: none;
+        }
+
+        .array-item-body.expanded {
+            display: block;
+        }
+
+        .array-item-body .form-group label:not(.switch) {
+            min-width: 140px;
+            font-size: 0.8em;
+        }
+
+        .array-item-body .form-group input,
+        .array-item-body .form-group select {
+            font-size: 0.85em;
+        }
+
+        .string-list-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            max-width: 300px;
+        }
+
+        .string-list-field input {
+            max-width: 100% !important;
+        }
+
+        .string-list-field .string-list-hint {
+            font-size: 0.75em;
+            color: #888;
+        }
+
+    </style>
+
+    <div class="content-wrapper">
+
+        <div class="streams-header">
+            <h2>VIF Stream Configuration</h2>
+            <div class="item-right">
+                <button onclick="loadAjaxPluginContent('server','vif','shm.html','')">Back to Dashboard</button>
+            </div>
+        </div>
+
+        <!-- Stream Selector -->
+        <div class="form-wrapper top-config-panel" style="margin-bottom: 16px; position: sticky; top: 0; z-index: 10;">
+
+            <div class="top-config-toolbar">
+                <div class="top-config-toolbar-main">
+                    <div class="top-config-toolbar-heading">
+                        <div class="form-section-title" style="margin-bottom:0;">Incoming Stream</div>
+                        <button type="button" class="info-trigger" onclick="openStreamMatchingInfo(event)" title="How stream matching works">?</button>
+                    </div>
+                    <select id="cfg-stream-select" onchange="onStreamSelected()" style="font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+                        <option value="">Loading streams...</option>
+                    </select>
+                </div>
+                <div class="top-config-toolbar-actions">
+                    <button id="btn-save-top" data-save-config-btn="true" onclick="saveConfig()">Save all changes</button>
+                    <button id="btn-clone-top" onclick="cloneConfig()" style="display:none;">Clone Config</button>
+                    <button id="btn-delete-top" class="btn-danger" onclick="deleteConfig()" style="display:none;">Delete Config</button>
+                </div>
+            </div>
+
+            <div id="new-stream-fields" style="display:none;">
+                <div class="form-group">
+                    <label title="Matches the application segment of the incoming stream URL, such as live.">Application</label>
+                    <input type="text" id="cfg-new-app-name" value="" placeholder="live" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <div class="field-help">Exact application match, such as <code>live</code>.</div>
+                </div>
+                <div class="form-group">
+                    <label title="Matches the stream-name segment of the incoming stream URL. Use an exact name or a regex pattern.">Stream Name (exact or regex)</label>
+                    <input type="text" id="cfg-new-stream-name" value="" placeholder="e.g. traffic.*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <div class="field-help">Use an exact name like <code>traffic_cam1</code> or a regex pattern like <code>traffic.*</code>.</div>
+                </div>
+            </div>
+            <div class="save-meta">
+                <div id="status-message"></div>
+                <div id="dirty-indicator">Saved</div>
+                <button id="download-config-btn" class="save-meta-icon-button" type="button" onclick="downloadConfigFile()" title="Download video-intelligence.json" aria-label="Download video-intelligence.json">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 20h14v-2H5v2zm7-18c-.55 0-1 .45-1 1v8.59l-2.3-2.29-1.4 1.41L12 16l4.7-5.29-1.4-1.41-2.3 2.29V3c0-.55-.45-1-1-1z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Two column layout -->
+        <div class="two-column">
+
+        <!-- Config Form -->
+        <div class="form-wrapper">
+            <div class="form-section-title">Video Processing</div>
+            <div class="section-help">
+               Stream configuration settings that control how VIF processes incoming video for this stream. Adjust these to balance performance and accuracy.
+            </div>
+
+            <div class="form-group">
+                <label>Active</label>
+                <label class="switch">
+                    <input type="checkbox" id="cfg-active">
+                    <span class="slider-switch"></span>
+                </label>
+                <div class="field-help">Turns VIF processing on or off for streams matching this rule.</div>
+            </div>
+
+            <div class="form-group">
+                <label>Grayscaled</label>
+                <label class="switch">
+                    <input type="checkbox" id="cfg-grayscaled">
+                    <span class="slider-switch"></span>
+                </label>
+                <div class="field-help">Converts frames to grayscale before analysis to reduce bandwidth and processing overhead.</div>
+            </div>
+
+            <div class="form-group">
+                <label>Resize Output</label>
+                <label class="switch">
+                    <input type="checkbox" id="cfg-resize-output" checked>
+                    <span class="slider-switch"></span>
+                </label>
+                <div class="field-help">Uses model-sized frames instead of full source size. Usually the safer choice for performance.</div>
+            </div>
+
+            <div class="form-group">
+                <label title="Higher values reduce the number of frames sent for analysis, which lowers load but can miss short events.">Skip Frames</label>
+                <input type="number" id="cfg-skip-frames" value="" placeholder="0" min="0" max="30" step="1">
+                <div class="field-help">How aggressively to reduce the number of frames sent for analysis. Higher values lower load but may miss short events.</div>
+            </div>
+
+            <div class="form-group">
+                <label>Detector Type</label>
+                <select id="cfg-detector-type">
+                    <option value="object" selected>Object</option>
+                    <option value="scene">Scene</option>
+                </select>
+                <div class="field-help">Object detection tracks boxes like person/car. Scene detection classifies the whole frame or clip.</div>
+            </div>
+
+            <div class="form-group" id="cfg-object-holdback-group">
+                <label title="This time window controls how long detections are buffered before batch or rollup listeners fire.">Detections Holdback</label>
+                <input type="number" id="cfg-object-detections-holdback" value="" placeholder="2" min="0" max="30" step="0.1">
+                <div class="field-help">Time window in seconds for object batch and rollup listener events.</div>
+            </div>
+
+            <div class="form-group" id="cfg-scene-holdback-group">
+                <label title="This time window controls how long detections are buffered before batch or rollup listeners fire.">Detections Holdback</label>
+                <input type="number" id="cfg-scene-detections-holdback" value="" placeholder="1" min="0" max="30" step="0.1">
+                <div class="field-help">Time window in seconds for scene batch and rollup listener events.</div>
+            </div>
+
+            <div class="form-group" id="cfg-duration-group">
+                <label>Duration (seconds)</label>
+                <input type="number" id="cfg-duration" value="" placeholder="2" min="0" max="5" step="0.1">
+                    <div class="field-help">Scene-only clip duration sent to the VIF service for each analysis request.</div>
+            </div>
+
+            <div class="form-group" id="cfg-auto-scene-throttle-group">
+                <label title="When enabled, the plugin can increase or decrease skip_frames for scene analysis to keep inference from falling behind.">Auto Scene Frame Throttle</label>
+                <label class="switch">
+                    <input type="checkbox" id="cfg-auto-scene-frame-throttle">
+                    <span class="slider-switch"></span>
+                </label>
+                <div class="field-help">Lets the plugin adjust <code>skip_frames</code> for scene analysis when inference gets too slow.</div>
+            </div>
+
+            <!-- Object Analysis Section -->
+            <div class="form-section" id="object-analysis-section">
+                <div class="form-section-title">Object Analysis</div>
+                <div class="section-help">
+                    Configure object detection and optional ByteTrack tracking.
+                </div>
+
+                <div class="form-group">
+                    <label>Model Name</label>
+                    <select id="cfg-model-name" onchange="toggleCheckpointPath()">
+                        <option value="nano">Nano</option>
+                        <option value="small">Small</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="large">Large</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                    <div class="field-help">Choose the built-in model size or select <code>custom</code> to load custom object detection models / model weights from the checkpoint path.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Class Names</label>
+                    <input type="text" id="cfg-class-names" value="" placeholder="comma-separated, e.g. person,car,dog">
+                    <div class="field-help">Comma-separated allowlist including only class names the object detection model supports. Leave empty only if you intentionally want the model's full class set.</div>
+                </div>
+
+                <div class="form-group" id="checkpoint-path-group" style="display:none;">
+                    <label>Checkpoint Path</label>
+                    <select id="cfg-checkpoint-path">
+                        <option value="">Loading...</option>
+                    </select>
+                    <div class="field-help">Required when using a custom object model. This is the location of available customized models and model weights.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Confidence Threshold</label>
+                    <input type="number" id="cfg-confidence-threshold" value="" placeholder="0.3" min="0" max="1" step="0.01">
+                    <div class="field-help">Minimum object score to keep before listener filtering or tracking logic runs.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Tracking Method</label>
+                    <select id="cfg-tracking-method" onchange="toggleByteTrack()">
+                        <option value="none" selected>None</option>
+                        <option value="byte-track">ByteTrack</option>
+                    </select>
+                    <div class="field-help">
+                        ByteTrack links detections across video frames so the same moving object keeps a consistent ID over time. Use it when you need consistent IDs for regions of interest, counts, direction, or time-in-area logic. Use None for raw detections only.</div>
+                </div>
+
+                <!-- ByteTrack Properties -->
+                <div id="byte-track-section" class="byte-track-fields">
+                    <div class="form-section-title">ByteTrack Properties</div>
+                    <div class="section-help">
+                        These settings control when tracks start, how long they persist, and how strict matching is between frames.
+                    </div>
+
+                    <div class="form-group">
+                        <label>Min Track Confidence</label>
+                        <input type="number" id="cfg-bt-min-confidence" value="" placeholder="0.5" min="0" max="1" step="0.01">
+                        <div class="field-help">Minimum score needed to create a new track.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Max Lost Track Frames</label>
+                        <input type="number" id="cfg-bt-max-lost-frames" value="" placeholder="30" min="0" max="60" step="1">
+                        <div class="field-help">How many missed frames a track survives before removal.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Min Consecutive Overlap</label>
+                        <input type="number" id="cfg-bt-min-overlap" value="" placeholder="0.2" min="0" max="1" step="0.01">
+                        <div class="field-help">How much two detection boxes must overlap to be treated as the same tracked object.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Min Consecutive Frames</label>
+                        <input type="number" id="cfg-bt-min-frames" value="" placeholder="3" min="0" max="60" step="1">
+                        <div class="field-help">How many consistent frames are needed before a new track becomes visible.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scene Analysis Section -->
+            <div class="form-section" id="scene-analysis-section" style="display:none;">
+                <div class="form-section-title">Scene Analysis</div>
+                <div class="section-help">
+                    Configure scene classification for clips rather than object boxes.
+                </div>
+
+                <div class="form-group">
+                    <label>Class Names</label>
+                    <input type="text" id="cfg-scene-class-names" value="" placeholder="comma-separated, e.g. person walking, running">
+                    <div class="field-help">Comma-separated target scene phrases or labels to classify against.</div>
+                </div>
+
+            <div class="form-group">
+                <label>Sensitivity</label>
+                <input type="number" id="cfg-scene-sensitivity" value="" placeholder="5" min="0" max="10" step="0.1">
+                <div class="field-help">Higher values make scene triggers more sensitive and likely to fire.</div>
+            </div>
+
+            <div class="form-group">
+                <label>Confidence Threshold</label>
+                <input type="number" id="cfg-scene-confidence-threshold" value="" placeholder="0.3" min="0" max="1" step="0.01">
+                <div class="field-help">Minimum scene score to keep before listener filtering.</div>
+            </div>
+
+            </div>
+
+            <!-- Debug Options Section -->
+            <div class="form-section">
+                <div class="form-section-title">Debug Options</div>
+                <div class="section-help">
+                    Recommended for troubleshooting. High values can produce noisy logs in production.
+                </div>
+
+                <div class="form-group">
+                    <label>Log Max Messages</label>
+                    <input type="number" id="cfg-log-max-messages" value="" placeholder="20" min="0" max="1000" step="1">
+                    <div class="field-help">Maximum VIF/WebSocket messages written to the WSE access log. Use 0 to disable.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Log Timing</label>
+                    <input type="number" id="cfg-log-timing" value="" placeholder="0" min="0" max="60" step="1">
+                    <div class="field-help">Writes timing diagnostics periodically when greater than 0.</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Event Listeners Panel (right side) -->
+        <div class="event-listeners-panel">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <div class="form-section-title" style="margin-bottom:0;">Event Listeners</div>
+                <button type="button" class="info-trigger" onclick="openEventListenerInfo(event)" title="About event listeners">?</button>
+                <div class="item-right">
+                    <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()">Create New Listener</button>
+                </div>
+            </div>
+            <div class="section-help">
+                Event listeners are triggered by detections. Use Select Listener to Edit for an existing listener or Create New Listener to add another one. Listener type stays fixed after creation.
+            </div>
+            <div id="evt-active-summary" class="event-listener-summary" aria-live="polite"></div>
+            <div id="evt-existing-listener-row" class="form-group" style="display:none;">
+                <label style="min-width:auto; text-align:left;">Select Listener to Edit</label>
+                <select id="evt-listener-select" onchange="onListenerSelected()" style="flex:1; font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #ccc; border-radius:4px; background:#fff;">
+                    <option value="">Select listener to edit...</option>
+                </select>
+                <button id="evt-cancel-listener-btn" type="button" class="btn-secondary" onclick="cancelListenerSelection()" style="display:none;">Cancel</button>
+                <button id="evt-remove-listener-btn" class="btn-danger" onclick="removeListener()" style="display:none;">Remove</button>
+            </div>
+            <div id="evt-warning-message" class="inline-warning" style="display:none;"></div>
+            <div id="evt-new-listener-name-group" class="form-group" style="display:none;">
+                <label style="min-width:auto; text-align:left;">Create New Listener</label>
+                <select id="evt-new-listener-template" class="listener-create-template" onchange="onNewListenerTemplateChanged()">
+                    <option value="OverlayEvent">OverlayEvent</option>
+                    <option value="Id3Event">Id3Event</option>
+                    <option value="LogFileEvent">LogFileEvent</option>
+                    <option value="WebhookEvent2">WebhookEvent2</option>
+                    <option value="ObjectTracking">ObjectTracking</option>
+                    <option value="__custom__">Custom Listener</option>
+                </select>
+                <input type="text" id="evt-new-listener-name" class="listener-create-name-field" placeholder="OverlayEvent" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                <div id="evt-new-listener-name-preview" class="listener-name-preview listener-create-name-preview" aria-live="polite">OverlayEvent</div>
+                <div class="listener-create-actions">
+                    <button id="evt-add-listener-btn" onclick="addNewListener()">Create</button>
+                    <button id="evt-cancel-new-listener-btn" type="button" class="btn-secondary" onclick="cancelNewListenerForm()" style="display:none;">Cancel</button>
+                </div>
+                <div class="field-help" style="margin-left:0;">Preset listeners use their built-in name automatically. If you need another listener of the same type, use <code>Custom Listener</code> and give it a unique name.</div>
+            </div>
+            <hr>
+            <div id="evt-listener-fields" style="display:none;">
+                <div class="form-group">
+                    <label>Listener Type</label>
+                    <select id="evt-class-name">
+                        <option value="">Select...</option>
+                    </select>
+                    <div id="evt-class-name-readonly" class="listener-name-preview" style="display:none;"></div>
+                    <div id="evt-class-name-help" class="field-help">Choose the listener type for this new custom listener. After creation, the type stays fixed.</div>
+                </div>
+                <div class="form-group">
+                    <label title="Immediate emits each result, batch groups results over the holdback time window, and rollup emits a summary over that same time window.">Method</label>
+                    <select id="evt-methods">
+                        <option value="disabled">Disabled</option>
+                        <option value="immediate">Immediate</option>
+                        <option value="batch">Batch</option>
+                        <option value="rollup">Rollup</option>
+                    </select>
+                    <div id="evt-method-help" class="field-help">Choose when the listener runs. Immediate fires per result, batch groups a short holdback time window, and rollup sends summarized output for that same time window.</div>
+                </div>
+                <div class="form-group">
+                    <label title="This is a listener-side filter. Results below this score are dropped for this listener only.">Confidence Threshold</label>
+                    <input type="number" id="evt-confidence" value="" placeholder="0.7" min="0" max="1" step="0.01">
+                    <div class="field-help">Optional listener-side filter. Results below this score will not be passed to this listener even if the detector kept them.</div>
+                </div>
+                <div id="evt-tip-message" class="section-help" style="margin-top:8px;"></div>
+            </div>
+
+            <!-- Properties Section -->
+            <div class="form-section" id="evt-properties-section" style="display:none;">
+                <div class="form-section-title">Properties</div>
+                <div id="evt-properties-fields"></div>
+            </div>
+
+        </div>
+
+        </div><!-- end two-column -->
+
+        <div id="event-listener-info-overlay" class="overlay-backdrop" onclick="onEventListenerOverlayBackdrop(event)">
+            <div class="overlay-card" onclick="event.stopPropagation()">
+                <button type="button" class="overlay-close" onclick="closeEventListenerInfo()" aria-label="Close">x</button>
+                <div class="form-section-title" style="margin-bottom:12px;">Event Listener Examples</div>
+                <div class="section-help" style="margin-bottom:0;">Examples:</div>
+                <ul class="overlay-list">
+                    <li><code>OverlayEvent</code> draws boxes/labels on video</li>
+                    <li><code>Id3Event</code> writes timed metadata into the stream</li>
+                    <li><code>LogFileEvent</code> writes detection data to logs</li>
+                    <li><code>WebhookEvent2</code> sends detection data to an external HTTP endpoint</li>
+                    <li><code>ObjectTracking</code> applies tracking and region logic, then triggers outputs based on movement, count, time spent in one location, and similar rules</li>
+                </ul>
+            </div>
+        </div>
+
+        <div id="stream-matching-info-overlay" class="overlay-backdrop" onclick="onStreamMatchingOverlayBackdrop(event)">
+            <div class="overlay-card" onclick="event.stopPropagation()">
+                <button type="button" class="overlay-close" onclick="closeStreamMatchingInfo()" aria-label="Close">x</button>
+                <div class="form-section-title" style="margin-bottom:12px;">How Matching Works</div>
+                <div class="section-help">
+                    Use this stream matching configuration rule to choose which incoming streams VIF should analyze.
+                </div>
+                <ul class="overlay-list">
+                    <li><strong>Application</strong> must match exactly.</li>
+                    <li><strong>Stream Name</strong> can be an exact name <b>or</b> a regex pattern.</li>
+                    <li><strong>Example:</strong> Application <code>live</code> and Stream Name <code>traffic.*</code> will match the ingest stream <code>rtmp://my-wowza-streaming-engine.com/live/traffic_cam1</code>.</li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+
+<script>
+    url = new URL(window.location.href);
+    serverUrl = serverUrl.replaceAll("wse.docker", url.hostname);
+    serverUrl = serverUrl.replaceAll("host.docker.internal", url.hostname);
+    serverUrl = serverUrl.replace(/\/+$/, '');
+    var credentials = `${username}:${password}`;
+    var encodedCredentials = btoa(credentials);
+
+    var streamsList = [];
+    // Main stream/object/scene defaults are loaded from /v1/server/plugin/vif/config into defaultConfig.
+    // Listener property defaults and validation rules below are UI-owned. See STREAM-CONFIG-DEFAULTS.md.
+    var defaultConfig = {};
+    var isDirty = false;
+    var isSaving = false;
+    var suppressDirtyTracking = false;
+    var statusHideTimer = null;
+    var statusClearTimer = null;
+    var STREAM_CONFIG_SELECTION_STORAGE_KEY = `vif.stream-config.selected-stream.${window.location.host}`;
+    // These listener property defaults are UI-owned and do not come from video-intelligence.json.
+    window.VIF_LISTENER_PROPERTIES = {
+        Id3Event: [],
+        LogFileEvent: [],
+        OverlayEvent: [
+            { key: 'fade_step', label: 'Fade Step', type: 'number', default: 10, tooltip: 'Number of frames over which overlays fade out' },
+            { key: 'jitter', label: 'Jitter', type: 'number', default: 0, tooltip: "Don't draw if pixel change is less than this amount." },
+            { key: 'show_stats', label: 'Show Stats', type: 'boolean', default: true, tooltip: 'Overlay system stats on video.' },
+            { key: 'replace_video', label: 'Replace Video', type: 'boolean', default: true, tooltip: 'Replace the original video with the overlay rendering' },
+            { key: 'debug_string', label: 'Debug String', type: 'text', default: '', tooltip: "Title overlay using date format pattern, e.g. 'Cam-01:' yyyy-MM-dd HH:mm:ss" }
+        ],
+        WebhookEvent2: [],
+        ObjectTracking: [
+            { key: 'id3', label: 'ID3 Tags', type: 'boolean', default: false, tooltip: 'Inject detection results as ID3 timed metadata tags' },
+            { key: 'webhooks', label: 'Webhooks', type: 'boolean', default: false, tooltip: 'Send detection results via webhook HTTP POST' },
+            { key: 'logfile', label: 'Log File', type: 'boolean', default: false, tooltip: 'Write detection results to log files' },
+            { key: 'overlays', label: 'Overlays', type: 'boolean', default: true, tooltip: 'Draw detection overlays on the video stream' },
+            { key: 'draw_untracked_objects', label: 'Draw Untracked Objects', type: 'boolean', default: true, tooltip: 'Draw bounding boxes for objects not yet tracked' },
+            { key: 'untracked_object_color', label: 'Untracked Object Color', type: 'text', default: 'gray', tooltip: 'Color for untracked object bounding boxes' },
+            { key: 'untracked_object_label', label: 'Untracked Object Label', type: 'text', default: '{{track_id}}:{{class_name}} {{confidence}}', tooltip: 'Label template for untracked objects. Variables: {{track_id}}, {{class_name}}, {{confidence}}' },
+            { key: 'replace_video', label: 'Replace Video', type: 'boolean', default: true, tooltip: 'Replace the original video with the overlay rendering' },
+            { key: 'fade_step', label: 'Fade Step', type: 'number', default: 10, tooltip: 'Number of frames over which overlays fade out' },
+            { key: 'title_string', label: 'Title String', type: 'text', default: '', tooltip: "Title overlay using date format pattern, e.g. 'Cam-01:' yyyy-MM-dd HH:mm:ss" },
+            { key: 'save_image', label: 'Save Image', type: 'boolean', default: false, tooltip: 'Save detection frame images to disk' },
+            { key: 'save_image_path', label: 'Save Image Path', type: 'text', default: '', tooltip: 'Directory path for saved detection images' },
+            {
+                key: 'regions_of_interest',
+                label: 'Regions of Interest',
+                type: 'array',
+                item_label: 'Region',
+                fields: [
+                    { key: 'type', label: 'Type', type: 'select', default: 'box', options: ['box', 'line'], tooltip: 'What type of region this is' },
+                    { key: 'name', label: 'Name', type: 'text', default: 'The Box', tooltip: 'Display name for this region' },
+                    { key: 'x', label: 'X', type: 'number', default: 0, tooltip: 'Left coordinate of the region' },
+                    { key: 'y', label: 'Y', type: 'number', default: 0, tooltip: 'Top coordinate of the region' },
+                    { key: 'x2', label: 'X2', type: 'number', default: 640, tooltip: 'Right coordinate of the region' },
+                    { key: 'y2', label: 'Y2', type: 'number', default: 360, tooltip: 'Bottom coordinate of the region' },
+                    { type: 'separator', label: 'Filters Options' },
+                    { key: 'class_names', label: 'Class Names', type: 'string_list', default: ['all'], tooltip: 'Object classes to track in this region. Use "all" for all classes' },
+                    { key: 'confidence_threshold', label: 'Confidence Threshold', type: 'number', default: 0.5, step: 0.05, tooltip: 'Minimum confidence to consider a detection in this region' },
+                    { key: 'width_threshold', label: 'Width Threshold', type: 'number', default: 0, tooltip: 'Minimum bounding box width (pixels) to include detection' },
+                    { key: 'height_threshold', label: 'Height Threshold', type: 'number', default: 0, tooltip: 'Minimum bounding box height (pixels) to include detection' },
+                    { type: 'separator', label: 'Overlay Options' },
+                    { key: 'draw_region', label: 'Draw Region', type: 'boolean', default: true, tooltip: 'Draw the region boundary on the overlay' },
+                    { key: 'draw_objects', label: 'Draw Objects', type: 'boolean', default: true, tooltip: 'Draw object bounding boxes inside this region' },
+                    { key: 'color', label: 'Color', type: 'text', default: 'red', tooltip: 'Color for the region boundary and labels' },
+                    { key: 'label', label: 'Region Label', type: 'text', default: '{{name}} ({{current}}:{{total}})', tooltip: 'Region label template. Variables: {{name}}, {{current}}, {{total}}' },
+                    { key: 'object_label', label: 'Object Label', type: 'text', default: '{{track_id}}:{{class_name}} {{confidence}}', tooltip: 'Object label template within this region' },
+                    { type: 'separator', label: 'Trigger Options' },
+                    { key: 'triggers', label: 'Triggers', type: 'string_list', default: ['inside'], tooltip: 'Trigger rules, e.g. inside::detected, velocity_min::stalled, direction::wrong way' },
+                    { key: 'inside_count', label: 'Inside Count', type: 'number', default: 10, tooltip: 'Number of consecutive frames an object must be inside to trigger' },
+                    { key: 'overlap_count', label: 'Overlap Count', type: 'number', default: 10, tooltip: 'Number of consecutive frames an object must be overlap to trigger' },
+                    { key: 'object_coordinate', label: 'Object Coordinate', type: 'select', default: 'center-center', options: ['bottom-center', 'bottom-left', 'bottom-right', 'center-center', 'center-left', 'center-right', 'top-center', 'top-left', 'top-right'], tooltip: 'Which point of the object bounding box to use for region checks' },
+                    { key: 'velocity_min', label: 'Velocity Min', type: 'number', default: 0, tooltip: 'Minimum velocity threshold for stall detection' },
+                    { key: 'velocity_max', label: 'Velocity Max', type: 'number', default: 9999, tooltip: 'Maximum velocity threshold' },
+                    { key: 'velocity_count', label: 'Velocity Count', type: 'number', default: 10, tooltip: 'Number of frames to average for velocity calculation' },
+                    { key: 'directions', label: 'Directions', type: 'string_list', default: [], tooltip: 'Expected directions, e.g. N, NE, E, SE, S, SW, W, NW' },
+                    { key: 'direction_count', label: 'Direction Count', type: 'number', default: 10, tooltip: 'Number of frames to average for direction calculation' },
+                    { key: 'count_min', label: 'Count Min', type: 'number', default: 0, tooltip: 'Minimum object count threshold' },
+                    { key: 'count_max', label: 'Count Max', type: 'number', default: 1, tooltip: 'Maximum object count before triggering "Too Many" alert' },
+                    { key: 'time_min', label: 'Time Min', type: 'number', default: 0, tooltip: 'Minimum time (seconds) an object must be present' },
+                    { key: 'time_max', label: 'Time Max', type: 'number', default: 0, tooltip: 'Maximum time (seconds) before triggering congestion alert' },
+                    { key: 'time_duration', label: 'Time Duration', type: 'number', default: 0, tooltip: 'Duration window (seconds) for time-based triggers' }
+                ]
+            }
+        ]
+    };
+    // Validation ranges below are UI-owned and should be reviewed when config semantics change.
+    var FIELD_RULES = {
+        'cfg-skip-frames': { min: 0, max: 30, integer: true, label: 'Skip Frames' },
+        'cfg-object-detections-holdback': { min: 0, max: 30, decimals: 1, label: 'Object Detections Holdback' },
+        'cfg-scene-detections-holdback': { min: 0, max: 30, decimals: 1, label: 'Scene Detections Holdback' },
+        'cfg-duration': { min: 0, max: 5, decimals: 1, label: 'Duration' },
+        'cfg-confidence-threshold': { min: 0, max: 1, decimals: 2, label: 'Object Confidence Threshold' },
+        'cfg-bt-min-confidence': { min: 0, max: 1, decimals: 2, label: 'Min Track Confidence' },
+        'cfg-bt-max-lost-frames': { min: 0, max: 60, integer: true, label: 'Max Lost Track Frames' },
+        'cfg-bt-min-overlap': { min: 0, max: 1, decimals: 2, label: 'Min Consecutive Overlap' },
+        'cfg-bt-min-frames': { min: 0, max: 60, integer: true, label: 'Min Consecutive Frames' },
+        'cfg-scene-sensitivity': { min: 0, max: 10, decimals: 1, label: 'Scene Sensitivity' },
+        'cfg-scene-confidence-threshold': { min: 0, max: 1, decimals: 2, label: 'Scene Confidence Threshold' },
+        'cfg-log-max-messages': { min: 0, max: 1000, integer: true, label: 'Log Max Messages' },
+        'cfg-log-timing': { min: 0, max: 60, integer: true, label: 'Log Timing' },
+        'evt-confidence': { min: 0, max: 1, decimals: 2, label: 'Listener Confidence Threshold' }
+    };
+    var NEW_LISTENER_PRESET_TYPES = ['OverlayEvent', 'Id3Event', 'LogFileEvent', 'WebhookEvent2', 'ObjectTracking'];
+    var EVENT_METHOD_OPTIONS = [
+        { value: 'disabled', label: 'Disabled' },
+        { value: 'immediate', label: 'Immediate' },
+        { value: 'batch', label: 'Batch' },
+        { value: 'rollup', label: 'Rollup' }
+    ];
+    var isAddingNewListener = false;
+    var LISTENER_PROPERTY_RULES = {
+        OverlayEvent: {
+            fade_step: { min: 0, max: 30, integer: true, label: 'Fade Step' }
+        },
+        ObjectTracking: {
+            fade_step: { min: 0, max: 30, integer: true, label: 'Fade Step' },
+            untracked_object_color: { cssColor: true, label: 'Untracked Object Color' },
+            color: { cssColor: true, label: 'Color' }
+        }
+    };
+
+    function formatRuleGuidance(rule) {
+        const parts = [];
+        if (Number.isFinite(rule.min) && Number.isFinite(rule.max)) {
+            parts.push(`Allowed range: ${rule.min}-${rule.max}.`);
+        }
+        if (rule.integer) {
+            parts.push('Whole numbers only.');
+        } else if (rule.decimals !== undefined) {
+            parts.push(`Up to ${rule.decimals} decimal place${rule.decimals === 1 ? '' : 's'}.`);
+        }
+        return parts.join(' ');
+    }
+
+    function normalizeValueForCompare(value) {
+        if (Array.isArray(value)) {
+            return value.map(normalizeValueForCompare);
+        }
+        if (value && typeof value === 'object') {
+            const normalized = {};
+            Object.keys(value).sort().forEach(function(key) {
+                normalized[key] = normalizeValueForCompare(value[key]);
+            });
+            return normalized;
+        }
+        return value;
+    }
+
+    function valuesEqual(a, b) {
+        return JSON.stringify(normalizeValueForCompare(a)) === JSON.stringify(normalizeValueForCompare(b));
+    }
+
+    function shouldIgnoreGlobalDirtyTracking(target) {
+        if (!target) return false;
+        if (target.id === 'cfg-stream-select' || target.id === 'evt-listener-select') return true;
+        if (target.closest && target.closest('#evt-new-listener-name-group')) return true;
+        return false;
+    }
+
+    function sanitizeNumericString(rawValue, rule) {
+        if (rawValue === '') return '';
+        let value = String(rawValue).replace(/[^0-9.]/g, '');
+        const firstDot = value.indexOf('.');
+        if (firstDot !== -1) {
+            value = value.slice(0, firstDot + 1) + value.slice(firstDot + 1).replace(/\./g, '');
+        }
+        if (rule.integer) {
+            value = value.split('.')[0];
+        } else if (rule.decimals !== undefined && firstDot !== -1) {
+            const parts = value.split('.');
+            parts[1] = (parts[1] || '').slice(0, rule.decimals);
+            value = parts[0] + '.' + parts[1];
+        }
+        return value;
+    }
+
+    function normalizeNumericValue(rawValue, rule) {
+        const sanitized = sanitizeNumericString(rawValue, rule);
+        if (sanitized === '' || sanitized === '.') return '';
+        let number = rule.integer ? parseInt(sanitized, 10) : parseFloat(sanitized);
+        if (!Number.isFinite(number)) return '';
+        if (Number.isFinite(rule.min)) number = Math.max(rule.min, number);
+        if (Number.isFinite(rule.max)) number = Math.min(rule.max, number);
+        if (rule.integer) return String(number);
+        if (rule.decimals !== undefined) {
+            return parseFloat(number.toFixed(rule.decimals)).toString();
+        }
+        return String(number);
+    }
+
+    function validateNumericValue(rawValue, rule) {
+        if (rawValue === '' || rawValue === null || rawValue === undefined) return false;
+        const value = sanitizeNumericString(rawValue, rule);
+        if (value === '' || value === '.') return false;
+        if (rule.integer && value.includes('.')) return false;
+        const number = rule.integer ? parseInt(value, 10) : parseFloat(value);
+        if (!Number.isFinite(number)) return false;
+        if (Number.isFinite(rule.min) && number < rule.min) return false;
+        if (Number.isFinite(rule.max) && number > rule.max) return false;
+        const decimalPart = value.includes('.') ? value.split('.')[1] : '';
+        if (!rule.integer && rule.decimals !== undefined && decimalPart.length > rule.decimals) return false;
+        return true;
+    }
+
+    function isValidCssColor(value) {
+        if (!value || !String(value).trim()) return false;
+        const probe = new Option().style;
+        probe.color = '';
+        probe.color = String(value).trim();
+        return probe.color !== '';
+    }
+
+    function applyNumericRuleToInput(input, rule) {
+        if (!input || !rule) return;
+        input.min = rule.min;
+        input.max = rule.max;
+        input.step = rule.integer ? '1' : `0.${'0'.repeat(Math.max((rule.decimals || 1) - 1, 0))}1`;
+        input.inputMode = 'decimal';
+        input.title = formatRuleGuidance(rule);
+        if (input.dataset.ruleBound === 'true') return;
+        input.addEventListener('input', function() {
+            const sanitized = sanitizeNumericString(input.value, rule);
+            if (input.value !== sanitized) input.value = sanitized;
+            const valid = input.value === '' || validateNumericValue(input.value, rule);
+            input.setCustomValidity(valid ? '' : formatRuleGuidance(rule));
+        });
+        input.addEventListener('blur', function() {
+            input.value = normalizeNumericValue(input.value, rule);
+            const valid = input.value === '' || validateNumericValue(input.value, rule);
+            input.setCustomValidity(valid ? '' : formatRuleGuidance(rule));
+        });
+        input.dataset.ruleBound = 'true';
+    }
+
+    function initializeStaticFieldRules() {
+        Object.entries(FIELD_RULES).forEach(function(entry) {
+            const input = document.getElementById(entry[0]);
+            if (input) applyNumericRuleToInput(input, entry[1]);
+        });
+    }
+
+    function initializeStaticFieldTooltips() {
+        // Inline help is the primary guidance pattern on this page.
+        // Avoid duplicating the same text into hover tooltips.
+    }
+
+    function getListenerPropertyRule(fieldKey) {
+        if (!activeListenerName || !eventListenersData[activeListenerName]) return null;
+        const shortName = resolveClassName(eventListenersData[activeListenerName].class_name || '');
+        const rules = LISTENER_PROPERTY_RULES[shortName] || {};
+        return rules[fieldKey] || null;
+    }
+
+    function applyTextRuleToInput(input, rule) {
+        if (!input || !rule || !rule.cssColor) return;
+        input.title = 'Enter any valid CSS color such as red, #ff0000, rgb(255,0,0), or rgba(255,0,0,0.5).';
+        if (input.dataset.ruleBound === 'true') return;
+        input.addEventListener('blur', function() {
+            const valid = input.value === '' || isValidCssColor(input.value);
+            input.setCustomValidity(valid ? '' : 'Enter a valid CSS color.');
+        });
+        input.dataset.ruleBound = 'true';
+    }
+
+    function isStreamConfigMounted() {
+        return !!document.getElementById('cfg-stream-select') && !!document.getElementById('dirty-indicator');
+    }
+
+    function updateDirtyIndicator() {
+        const dirtyEl = document.getElementById('dirty-indicator');
+        if (!dirtyEl) return;
+        if (isSaving) {
+            dirtyEl.textContent = 'Saving changes...';
+            dirtyEl.className = 'state-saving';
+            return;
+        }
+        if (isNewStream()) {
+            dirtyEl.textContent = 'Unsaved changes';
+            dirtyEl.className = 'state-unsaved';
+            return;
+        }
+        if (isDirty) {
+            dirtyEl.textContent = 'Unsaved changes';
+            dirtyEl.className = 'state-unsaved';
+            return;
+        }
+        dirtyEl.textContent = 'Saved';
+        dirtyEl.className = 'state-saved';
+    }
+
+    function updateIncomingStreamPanelState() {
+        if (!isStreamConfigMounted()) return;
+        const panel = document.querySelector('.top-config-panel');
+        if (!panel) return;
+        const shouldCompact = window.scrollY > 0;
+        panel.classList.toggle('is-compact', shouldCompact);
+    }
+
+    function updateSaveButtonState() {
+        const label = isSaving ? 'Saving...' : 'Save all changes';
+        document.querySelectorAll('[data-save-config-btn="true"]').forEach(function(saveBtn) {
+            saveBtn.disabled = isSaving;
+            saveBtn.textContent = label;
+        });
+    }
+
+    function openEventListenerInfo(event) {
+        if (event) event.stopPropagation();
+        const overlay = document.getElementById('event-listener-info-overlay');
+        if (!overlay) return;
+        overlay.classList.add('open');
+    }
+
+    function closeEventListenerInfo() {
+        const overlay = document.getElementById('event-listener-info-overlay');
+        if (!overlay) return;
+        overlay.classList.remove('open');
+    }
+
+    function onEventListenerOverlayBackdrop(event) {
+        if (event.target.id === 'event-listener-info-overlay') {
+            closeEventListenerInfo();
+        }
+    }
+
+    function openStreamMatchingInfo(event) {
+        if (event) event.stopPropagation();
+        const overlay = document.getElementById('stream-matching-info-overlay');
+        if (!overlay) return;
+        overlay.classList.add('open');
+    }
+
+    function closeStreamMatchingInfo() {
+        const overlay = document.getElementById('stream-matching-info-overlay');
+        if (!overlay) return;
+        overlay.classList.remove('open');
+    }
+
+    function onStreamMatchingOverlayBackdrop(event) {
+        if (event.target.id === 'stream-matching-info-overlay') {
+            closeStreamMatchingInfo();
+        }
+    }
+
+    function markDirty() {
+        if (!isStreamConfigMounted() || suppressDirtyTracking || isSaving) return;
+        isDirty = true;
+        updateDirtyIndicator();
+    }
+
+    function markClean(savedNow) {
+        isDirty = false;
+        updateDirtyIndicator();
+    }
+
+    function setSavingState(saving) {
+        isSaving = saving;
+        updateDirtyIndicator();
+        updateSaveButtonState();
+    }
+
+    function toggleCheckpointPath() {
+        const model = document.getElementById('cfg-model-name').value;
+        document.getElementById('checkpoint-path-group').style.display = model === 'custom' ? 'flex' : 'none';
+        markDirty();
+    }
+
+    function toggleByteTrack() {
+        const method = document.getElementById('cfg-tracking-method').value;
+        const show = method === 'byte-track';
+        document.getElementById('byte-track-section').style.display = show ? 'block' : 'none';
+        if (show && !document.getElementById('cfg-bt-min-confidence').value) {
+            const btMinConfidence = document.getElementById('cfg-bt-min-confidence');
+            const btMaxLostFrames = document.getElementById('cfg-bt-max-lost-frames');
+            const btMinOverlap = document.getElementById('cfg-bt-min-overlap');
+            const btMinFrames = document.getElementById('cfg-bt-min-frames');
+            btMinConfidence.value = btMinConfidence.placeholder || '0.5';
+            btMaxLostFrames.value = btMaxLostFrames.placeholder || '30';
+            btMinOverlap.value = btMinOverlap.placeholder || '0.2';
+            btMinFrames.value = btMinFrames.placeholder || '3';
+        }
+        markDirty();
+    }
+
+    function getSelectedStream() {
+        const select = document.getElementById('cfg-stream-select');
+        const val = select.value;
+        if (!val) return null;
+        const parts = val.split('::');
+        return { appName: parts[0], streamName: parts[1] };
+    }
+
+    function getStoredSelectedStreamValue() {
+        try {
+            return window.localStorage.getItem(STREAM_CONFIG_SELECTION_STORAGE_KEY) || '';
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function storeSelectedStreamValue(value) {
+        try {
+            if (value) {
+                window.localStorage.setItem(STREAM_CONFIG_SELECTION_STORAGE_KEY, value);
+            } else {
+                window.localStorage.removeItem(STREAM_CONFIG_SELECTION_STORAGE_KEY);
+            }
+        } catch (error) {
+            // Ignore storage issues and keep the page working normally.
+        }
+    }
+
+    function resetNewStreamMatchFields() {
+        const appInput = document.getElementById('cfg-new-app-name');
+        const streamInput = document.getElementById('cfg-new-stream-name');
+        appInput.value = appInput.placeholder || 'live';
+        streamInput.value = '';
+
+        window.requestAnimationFrame(function() {
+            if (!isNewStream()) return;
+            appInput.value = appInput.placeholder || 'live';
+            streamInput.value = '';
+        });
+    }
+
+    function applyDefaultFieldValue(input, defaultValue, fallbackValue) {
+        const resolvedValue = defaultValue !== null && defaultValue !== undefined
+            ? String(defaultValue)
+            : String(fallbackValue);
+        input.value = resolvedValue;
+        input.placeholder = resolvedValue;
+    }
+
+    // New stream default field values derive from defaultConfig where possible.
+    function applySuggestedDefaultsForNewStream() {
+        const skipFramesInput = document.getElementById('cfg-skip-frames');
+        const objectHoldbackInput = document.getElementById('cfg-object-detections-holdback');
+        const objectConfidenceInput = document.getElementById('cfg-confidence-threshold');
+        const logMaxMessagesInput = document.getElementById('cfg-log-max-messages');
+        const logTimingInput = document.getElementById('cfg-log-timing');
+        const btMinConfidenceInput = document.getElementById('cfg-bt-min-confidence');
+        const btMaxLostFramesInput = document.getElementById('cfg-bt-max-lost-frames');
+        const btMinOverlapInput = document.getElementById('cfg-bt-min-overlap');
+        const btMinFramesInput = document.getElementById('cfg-bt-min-frames');
+        const skipFramesDefault = Number.isFinite(defaultConfig && defaultConfig.skip_frames)
+            ? defaultConfig.skip_frames
+            : null;
+        const objectHoldbackDefault = Number.isFinite(defaultConfig && defaultConfig.object_detections_holdback)
+            ? defaultConfig.object_detections_holdback
+            : null;
+        const objectConfidenceDefault = defaultConfig
+            && defaultConfig.object_analysis
+            && Number.isFinite(defaultConfig.object_analysis.confidence_threshold)
+            ? defaultConfig.object_analysis.confidence_threshold
+            : null;
+        const logMaxMessagesDefault = Number.isFinite(defaultConfig && defaultConfig.log_max_messages)
+            ? defaultConfig.log_max_messages
+            : null;
+        const logTimingDefault = Number.isFinite(defaultConfig && defaultConfig.log_timing)
+            ? defaultConfig.log_timing
+            : null;
+        const byteTrackDefaults = defaultConfig
+            && defaultConfig.object_analysis
+            && defaultConfig.object_analysis.byte_track_properties
+            ? defaultConfig.object_analysis.byte_track_properties
+            : null;
+        const sceneHoldbackInput = document.getElementById('cfg-scene-detections-holdback');
+        const sceneDurationInput = document.getElementById('cfg-duration');
+        const sceneSensitivityInput = document.getElementById('cfg-scene-sensitivity');
+        const sceneConfidenceInput = document.getElementById('cfg-scene-confidence-threshold');
+        const sceneHoldbackDefault = Number.isFinite(defaultConfig && defaultConfig.scene_detections_holdback)
+            ? defaultConfig.scene_detections_holdback
+            : null;
+        const sceneDurationDefault = Number.isFinite(defaultConfig && defaultConfig.duration)
+            ? defaultConfig.duration
+            : null;
+        const sceneSensitivityDefault = defaultConfig
+            && defaultConfig.scene_analysis
+            && Number.isFinite(defaultConfig.scene_analysis.sensitivity)
+            ? defaultConfig.scene_analysis.sensitivity
+            : null;
+        const sceneConfidenceDefault = defaultConfig
+            && defaultConfig.scene_analysis
+            && Number.isFinite(defaultConfig.scene_analysis.confidence_threshold)
+            ? defaultConfig.scene_analysis.confidence_threshold
+            : null;
+
+        applyDefaultFieldValue(skipFramesInput, skipFramesDefault, '0');
+        applyDefaultFieldValue(objectHoldbackInput, objectHoldbackDefault, '2');
+        applyDefaultFieldValue(objectConfidenceInput, objectConfidenceDefault, '0.3');
+        applyDefaultFieldValue(logMaxMessagesInput, logMaxMessagesDefault, '20');
+        applyDefaultFieldValue(logTimingInput, logTimingDefault, '0');
+        applyDefaultFieldValue(
+            btMinConfidenceInput,
+            byteTrackDefaults && Number.isFinite(byteTrackDefaults.track_creation_minimum_confidence)
+                ? byteTrackDefaults.track_creation_minimum_confidence
+                : null,
+            '0.5'
+        );
+        applyDefaultFieldValue(
+            btMaxLostFramesInput,
+            byteTrackDefaults && Number.isFinite(byteTrackDefaults.max_lost_track_frames_before_track_removal)
+                ? byteTrackDefaults.max_lost_track_frames_before_track_removal
+                : null,
+            '30'
+        );
+        applyDefaultFieldValue(
+            btMinOverlapInput,
+            byteTrackDefaults && Number.isFinite(byteTrackDefaults.minimum_consecutive_track_overlap)
+                ? byteTrackDefaults.minimum_consecutive_track_overlap
+                : null,
+            '0.2'
+        );
+        applyDefaultFieldValue(
+            btMinFramesInput,
+            byteTrackDefaults && Number.isFinite(byteTrackDefaults.track_creation_minimum_consecutive_frames)
+                ? byteTrackDefaults.track_creation_minimum_consecutive_frames
+                : null,
+            '3'
+        );
+        applyDefaultFieldValue(sceneHoldbackInput, sceneHoldbackDefault, '1');
+        applyDefaultFieldValue(sceneDurationInput, sceneDurationDefault, '2');
+        applyDefaultFieldValue(sceneSensitivityInput, sceneSensitivityDefault, '5');
+        applyDefaultFieldValue(sceneConfidenceInput, sceneConfidenceDefault, '0.3');
+    }
+
+    function readNumericInputValue(id, integer) {
+        const input = document.getElementById(id);
+        const raw = (input.value || '').trim();
+        const fallback = (input.placeholder || '').trim();
+        const source = raw !== '' ? raw : fallback;
+        if (source === '') return NaN;
+        return integer ? parseInt(source, 10) : parseFloat(source);
+    }
+
+    function getApiUrl() {
+        const stream = getSelectedStream();
+        if (!stream) return null;
+        return `${serverUrl}/v1/server/plugin/vif/applications/${stream.appName}/streams/${stream.streamName}/config`;
+    }
+
+    function onNewListenerTemplateChanged() {
+        const templateSelect = document.getElementById('evt-new-listener-template');
+        const nameInput = document.getElementById('evt-new-listener-name');
+        const namePreview = document.getElementById('evt-new-listener-name-preview');
+        if (!templateSelect || !nameInput || !namePreview) return;
+        showListenerWarning('');
+
+        const selected = templateSelect.value || 'OverlayEvent';
+        const isCustom = selected === '__custom__';
+
+        if (isCustom) {
+            nameInput.style.display = '';
+            namePreview.style.display = 'none';
+            nameInput.value = '';
+            nameInput.placeholder = 'e.g. MyListener';
+            return;
+        }
+
+        nameInput.style.display = 'none';
+        nameInput.value = selected;
+        nameInput.placeholder = selected;
+        namePreview.style.display = '';
+        namePreview.textContent = selected;
+    }
+
+    function refreshNewListenerTemplateOptions() {
+        const templateSelect = document.getElementById('evt-new-listener-template');
+        if (!templateSelect) return;
+
+        const previousValue = templateSelect.value || 'OverlayEvent';
+        templateSelect.innerHTML = '';
+
+        NEW_LISTENER_PRESET_TYPES.forEach(function(typeName) {
+            if (eventListenersData[typeName]) return;
+            const option = document.createElement('option');
+            option.value = typeName;
+            option.textContent = typeName;
+            templateSelect.appendChild(option);
+        });
+
+        const customOption = document.createElement('option');
+        customOption.value = '__custom__';
+        customOption.textContent = 'Custom Listener';
+        templateSelect.appendChild(customOption);
+
+        const availableValues = Array.from(templateSelect.options).map(function(option) { return option.value; });
+        templateSelect.value = availableValues.includes(previousValue)
+            ? previousValue
+            : (availableValues[0] || '__custom__');
+
+        onNewListenerTemplateChanged();
+    }
+
+    function formatEventMethodLabel(method) {
+        const match = EVENT_METHOD_OPTIONS.find(function(optionInfo) {
+            return optionInfo.value === method;
+        });
+        return match ? match.label : method;
+    }
+
+    function updateActiveListenerSummary() {
+        const summary = document.getElementById('evt-active-summary');
+        if (!summary) return;
+
+        const listenerNames = Object.keys(eventListenersData || {});
+        if (listenerNames.length === 0) {
+            summary.style.display = 'none';
+            summary.innerHTML = '';
+            return;
+        }
+
+        const activeNames = listenerNames
+            .slice()
+            .sort(function(a, b) { return a.localeCompare(b); })
+            .filter(function(name) {
+                const listener = eventListenersData[name] || {};
+                const method = (listener.methods || 'disabled').toLowerCase();
+                return method !== 'disabled';
+            })
+            .map(function(name) {
+                const method = eventListenersData[name] ? eventListenersData[name].methods : 'disabled';
+                return `${name} (${formatEventMethodLabel(method)})`;
+            });
+
+        summary.innerHTML = '';
+        const label = document.createElement('strong');
+        label.textContent = 'Active listeners:';
+        summary.appendChild(label);
+        summary.appendChild(document.createTextNode(
+            activeNames.length > 0
+                ? ` ${activeNames.join(', ')}.`
+                : ' None. All configured event listeners are currently disabled.'
+        ));
+        summary.style.display = 'block';
+    }
+
+    function setExistingListenerRowVisibility(visible) {
+        const row = document.getElementById('evt-existing-listener-row');
+        const newBtn = document.getElementById('evt-show-new-listener-btn');
+        if (!row) return;
+        const shouldShow = visible && !isAddingNewListener;
+        row.style.display = shouldShow ? 'flex' : 'none';
+        if (newBtn) newBtn.style.display = visible && !isAddingNewListener ? '' : 'none';
+    }
+
+    function ensureListenerSelectPromptOption(select, labelText) {
+        if (!select) return null;
+        let prompt = select.querySelector('option[value=""]');
+        if (!prompt) {
+            prompt = document.createElement('option');
+            prompt.value = '';
+            select.insertBefore(prompt, select.firstChild);
+        }
+        prompt.textContent = labelText || 'Select listener to edit...';
+        return prompt;
+    }
+
+    function cancelListenerSelection() {
+        const select = document.getElementById('evt-listener-select');
+        if (!select) return;
+        ensureListenerSelectPromptOption(select, 'Select listener to edit...');
+        select.value = '';
+        activeListenerName = null;
+        onListenerSelected();
+    }
+
+    function cancelNewListenerForm() {
+        isAddingNewListener = false;
+        const select = document.getElementById('evt-listener-select');
+        if (select) {
+            ensureListenerSelectPromptOption(select, 'Select listener to edit...');
+            select.value = '';
+        }
+        onListenerSelected();
+    }
+
+    function openNewListenerForm() {
+        const fields = document.getElementById('evt-listener-fields');
+        const newNameGroup = document.getElementById('evt-new-listener-name-group');
+        const removeBtn = document.getElementById('evt-remove-listener-btn');
+        const cancelBtn = document.getElementById('evt-cancel-listener-btn');
+        const cancelNewBtn = document.getElementById('evt-cancel-new-listener-btn');
+        const select = document.getElementById('evt-listener-select');
+        const hasListeners = Object.keys(eventListenersData).length > 0;
+
+        syncListenerFields();
+
+        isAddingNewListener = true;
+        activeListenerName = null;
+        setExistingListenerRowVisibility(hasListeners);
+        if (hasListeners) {
+            ensureListenerSelectPromptOption(select, 'Select listener to edit...');
+            select.value = '';
+        }
+        fields.style.display = 'none';
+        document.getElementById('evt-properties-section').style.display = 'none';
+        newNameGroup.style.display = 'flex';
+        removeBtn.style.display = 'none';
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        if (cancelNewBtn) cancelNewBtn.style.display = hasListeners ? 'inline-block' : 'none';
+        showListenerWarning('');
+        updateListenerTip('', '');
+        refreshNewListenerTemplateOptions();
+    }
+
+    async function loadStreams(preferredValue) {
+        const select = document.getElementById('cfg-stream-select');
+        try {
+            const storedValue = getStoredSelectedStreamValue();
+            const currentValue = preferredValue !== undefined
+                ? preferredValue
+                : (select.value || storedValue);
+            const response = await fetch(`${serverUrl}/v1/server/plugin/vif/config`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Basic ${encodedCredentials}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const config = await response.json();
+            streamsList = (config.streams || []).sort((a, b) => {
+                const nameA = `${a.app_name}/${a.stream_name}`;
+                const nameB = `${b.app_name}/${b.stream_name}`;
+                return nameA.localeCompare(nameB);
+            });
+            defaultConfig = Object.assign({}, config);
+            delete defaultConfig.streams;
+            populateClassNameDropdown();
+            populateCheckpointPaths();
+
+            select.innerHTML = '';
+
+            const newOpt = document.createElement('option');
+            newOpt.value = '__new__';
+            newOpt.textContent = '+ New Stream Config...';
+            select.appendChild(newOpt);
+
+            streamsList.forEach((stream, index) => {
+                const opt = document.createElement('option');
+                opt.value = `${stream.app_name}::${stream.stream_name}`;
+                opt.textContent = `${stream.app_name} / ${stream.stream_name}`;
+                select.appendChild(opt);
+            });
+
+            const hasPreferredValue = currentValue
+                && Array.from(select.options).some(function(opt) { return opt.value === currentValue; });
+
+            if (hasPreferredValue) {
+                select.value = currentValue;
+            } else if (streamsList.length > 0) {
+                select.value = select.options[1].value;
+            }
+
+            onStreamSelected();
+
+        } catch (error) {
+            console.error("Error loading streams:", error);
+            select.innerHTML = '<option value="">Error loading streams</option>';
+            showStatus(`Error loading streams: ${error.message}`, true);
+        }
+    }
+
+    function toDownloadableConfig(config) {
+        const downloadConfig = JSON.parse(JSON.stringify(config || {}));
+        delete downloadConfig.available_event_listeners;
+        delete downloadConfig.available_checkpoint_paths;
+        if (downloadConfig.vi_service_api_key) {
+            downloadConfig.vi_service_api_key = '${VIS_API_KEY}';
+        }
+        return downloadConfig;
+    }
+
+    function getDownloadTimestamp() {
+        const now = new Date();
+        const pad = function(value) { return String(value).padStart(2, '0'); };
+        return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    }
+
+    async function downloadConfigFile() {
+        try {
+            const response = await fetch(`${serverUrl}/v1/server/plugin/vif/config`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Basic ${encodedCredentials}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const config = await response.json();
+            const json = JSON.stringify(toDownloadableConfig(config), null, 4);
+            const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `video-intelligence-${getDownloadTimestamp()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showStatus('Downloaded video-intelligence.json', false);
+        } catch (error) {
+            console.error('Error downloading video-intelligence.json:', error);
+            showStatus(`Error downloading video-intelligence.json: ${error.message}`, true);
+        }
+    }
+
+    function isNewStream() {
+        return document.getElementById('cfg-stream-select').value === '__new__';
+    }
+
+    function onStreamSelected() {
+        const newFields = document.getElementById('new-stream-fields');
+        const deleteBtnTop = document.getElementById('btn-delete-top');
+        const cloneBtnTop = document.getElementById('btn-clone-top');
+        const listenersPanel = document.querySelector('.event-listeners-panel');
+        const select = document.getElementById('cfg-stream-select');
+        storeSelectedStreamValue(select ? select.value : '');
+        if (isNewStream()) {
+            newFields.style.display = 'block';
+            deleteBtnTop.style.display = 'none';
+            cloneBtnTop.style.display = 'none';
+            listenersPanel.style.display = '';
+            suppressDirtyTracking = true;
+            populateForm(defaultConfig);
+            resetNewStreamMatchFields();
+            applySuggestedDefaultsForNewStream();
+            suppressDirtyTracking = false;
+            document.getElementById('cfg-detector-type').value = 'object';
+            toggleDetectorSection();
+            markClean(false);
+            updateSaveButtonState();
+            updateIncomingStreamPanelState();
+            return;
+        }
+        listenersPanel.style.display = '';
+        newFields.style.display = 'none';
+        deleteBtnTop.style.display = 'inline-block';
+        cloneBtnTop.style.display = 'none';
+        const stream = getSelectedStream();
+        if (!stream) return;
+        updateSaveButtonState();
+        updateIncomingStreamPanelState();
+        getConfig();
+    }
+
+    async function cloneConfig() {
+        const stream = getSelectedStream();
+        if (!stream) return;
+        const apiUrl = getApiUrl();
+        if (!apiUrl) return;
+
+        try {
+            suppressDirtyTracking = true;
+            const response = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Basic ${encodedCredentials}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const config = await response.json();
+            const select = document.getElementById('cfg-stream-select');
+            select.value = '__new__';
+            onStreamSelected();
+            populateForm(config);
+            document.getElementById('cfg-new-app-name').value = config.app_name || stream.appName || '';
+            document.getElementById('cfg-new-stream-name').value = '';
+            showStatus('Config cloned. Enter a new stream name or regex, then save.', false);
+            markDirty();
+        } catch (error) {
+            console.error("Error cloning config:", error);
+            showStatus(`Error cloning config: ${error.message}`, true);
+        } finally {
+            suppressDirtyTracking = false;
+        }
+    }
+
+    function buildConfigJson() {
+        let appName, streamName;
+        if (isNewStream()) {
+            const appInput = document.getElementById('cfg-new-app-name');
+            appName = (appInput.value || appInput.placeholder || '').trim();
+            streamName = document.getElementById('cfg-new-stream-name').value.trim();
+            if (!appName || !streamName) {
+                const missingFields = [];
+                if (!appName) missingFields.push('Application is required.');
+                if (!streamName) missingFields.push('Stream Name is required.');
+                showStatus(missingFields.join(' '), true);
+                return null;
+            }
+        } else {
+            const stream = getSelectedStream();
+            if (!stream) return null;
+            appName = stream.appName;
+            streamName = stream.streamName;
+        }
+        const detectorType = document.getElementById('cfg-detector-type').value;
+
+        const config = {
+            active: document.getElementById('cfg-active').checked,
+            app_name: appName,
+            stream_name: streamName,
+            log_max_messages: readNumericInputValue('cfg-log-max-messages', true),
+            skip_frames: readNumericInputValue('cfg-skip-frames', true),
+            duration: readNumericInputValue('cfg-duration', false),
+            grayscaled: document.getElementById('cfg-grayscaled').checked,
+            resize_output: document.getElementById('cfg-resize-output').checked,
+            log_timing: readNumericInputValue('cfg-log-timing', true),
+            detector_type: detectorType
+        };
+
+        if (detectorType === 'scene') {
+            config.scene_detections_holdback = readNumericInputValue('cfg-scene-detections-holdback', false);
+            config.auto_scene_frame_throttle = document.getElementById('cfg-auto-scene-frame-throttle').checked;
+        }
+
+        if (detectorType === 'object') {
+            config.object_detections_holdback = readNumericInputValue('cfg-object-detections-holdback', false);
+            const classNames = document.getElementById('cfg-class-names').value
+                .split(',')
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            const trackingMethod = document.getElementById('cfg-tracking-method').value;
+
+            const modelName = document.getElementById('cfg-model-name').value;
+            config.object_analysis = {
+                class_names: classNames,
+                model_name: modelName,
+                confidence_threshold: readNumericInputValue('cfg-confidence-threshold', false),
+                tracking_method: trackingMethod || null
+            };
+
+            if (modelName === 'custom') {
+                config.object_analysis.checkpoint_path = document.getElementById('cfg-checkpoint-path').value || null;
+            }
+
+            if (trackingMethod === 'byte-track') {
+                config.object_analysis.byte_track_properties = {
+                    track_creation_minimum_confidence: readNumericInputValue('cfg-bt-min-confidence', false),
+                    max_lost_track_frames_before_track_removal: readNumericInputValue('cfg-bt-max-lost-frames', true),
+                    minimum_consecutive_track_overlap: readNumericInputValue('cfg-bt-min-overlap', false),
+                    track_creation_minimum_consecutive_frames: readNumericInputValue('cfg-bt-min-frames', true)
+                };
+            }
+        }
+
+        if (detectorType === 'scene') {
+            const sceneClassNames = document.getElementById('cfg-scene-class-names').value
+                .split(',')
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            config.scene_analysis = {
+                class_names: sceneClassNames,
+                sensitivity: readNumericInputValue('cfg-scene-sensitivity', false),
+                confidence_threshold: readNumericInputValue('cfg-scene-confidence-threshold', false),
+            };
+        }
+
+        config.vif_event_listeners = buildEventListenersJson();
+
+        return config;
+    }
+
+    function showListenerWarning(message) {
+        const el = document.getElementById('evt-warning-message');
+        if (!message) {
+            el.style.display = 'none';
+            el.textContent = '';
+            return;
+        }
+        el.textContent = message;
+        el.style.display = 'block';
+    }
+
+    function getListenerTip(className, method) {
+        const shortName = resolveClassName(className || '');
+        const methodTips = {
+            immediate: 'Immediate is best when downstream systems need each detection as it happens.',
+            batch: 'Batch is useful when you want short grouped windows instead of one event per detection.',
+            rollup: 'Rollup is useful for summary-style outputs such as counts, dwell time, or aggregate state over a window.',
+            disabled: 'Disabled keeps the listener config in place without emitting any events.'
+        };
+        const listenerTips = {
+            OverlayEvent: 'OverlayEvent draws boxes, labels, and optional stats back onto the Wowza video output.',
+            Id3Event: 'Id3Event injects timed metadata into the stream for downstream players or consumers.',
+            LogFileEvent: 'LogFileEvent writes detection activity to a file, which is helpful for audits and debugging.',
+            WebhookEvent2: 'WebhookEvent2 sends detections using the webhook destinations configured in webhooks.json.',
+            ObjectTracking: 'ObjectTracking evaluates tracked objects against configured regions, triggers, directions, counts, and dwell logic.'
+        };
+
+        const parts = [];
+        if (listenerTips[shortName]) parts.push(listenerTips[shortName]);
+        if (methodTips[method]) parts.push(methodTips[method]);
+        return parts.join(' ');
+    }
+
+    function updateListenerTip(className, method) {
+        const tipEl = document.getElementById('evt-tip-message');
+        const tip = getListenerTip(className, method);
+        tipEl.textContent = tip || 'Choose a listener class and method to see a short usage tip here.';
+    }
+
+    function collectValidationErrors(config) {
+        const errors = [];
+
+        if (!config.app_name) errors.push('Application is required.');
+        if (!config.stream_name) errors.push('Stream name / regex is required.');
+
+        if (!Number.isFinite(config.skip_frames) || config.skip_frames < 0 || config.skip_frames > 30 || !Number.isInteger(config.skip_frames)) {
+            errors.push('Skip Frames must be a whole number between 0 and 30.');
+        }
+
+        if (!Number.isFinite(config.log_max_messages) || config.log_max_messages < 0 || config.log_max_messages > 1000 || !Number.isInteger(config.log_max_messages)) {
+            errors.push('Log Max Messages must be a whole number between 0 and 1000.');
+        }
+
+        if (!Number.isFinite(config.log_timing) || config.log_timing < 0 || config.log_timing > 60 || !Number.isInteger(config.log_timing)) {
+            errors.push('Log Timing must be a whole number between 0 and 60.');
+        }
+
+        if (config.detector_type === 'object') {
+            const oa = config.object_analysis || {};
+            if (!oa.model_name) errors.push('Object model name is required.');
+            if (!Number.isFinite(oa.confidence_threshold) || oa.confidence_threshold < 0 || oa.confidence_threshold > 1) {
+                errors.push('Object confidence threshold must be between 0 and 1.');
+            }
+            if (oa.model_name === 'custom' && !oa.checkpoint_path) {
+                errors.push('Checkpoint Path is required when Model Name is Custom.');
+            }
+            if (!Number.isFinite(config.object_detections_holdback) || config.object_detections_holdback < 0 || config.object_detections_holdback > 30) {
+                errors.push('Object Detections Holdback must be between 0 and 30.');
+            }
+            if (oa.tracking_method === 'byte-track') {
+                const bt = oa.byte_track_properties || {};
+                if (!Number.isFinite(bt.track_creation_minimum_confidence) || bt.track_creation_minimum_confidence < 0 || bt.track_creation_minimum_confidence > 1) {
+                    errors.push('Min Track Confidence must be between 0 and 1.');
+                }
+                if (!Number.isFinite(bt.minimum_consecutive_track_overlap) || bt.minimum_consecutive_track_overlap < 0 || bt.minimum_consecutive_track_overlap > 1) {
+                    errors.push('Min Consecutive Overlap must be between 0 and 1.');
+                }
+                if (!Number.isFinite(bt.max_lost_track_frames_before_track_removal) || bt.max_lost_track_frames_before_track_removal < 0 || bt.max_lost_track_frames_before_track_removal > 60 || !Number.isInteger(bt.max_lost_track_frames_before_track_removal)) {
+                    errors.push('Max Lost Track Frames must be a whole number between 0 and 60.');
+                }
+                if (!Number.isFinite(bt.track_creation_minimum_consecutive_frames) || bt.track_creation_minimum_consecutive_frames < 0 || bt.track_creation_minimum_consecutive_frames > 60 || !Number.isInteger(bt.track_creation_minimum_consecutive_frames)) {
+                    errors.push('Min Consecutive Frames must be a whole number between 0 and 60.');
+                }
+            }
+        }
+
+        if (config.detector_type === 'scene') {
+            const sa = config.scene_analysis || {};
+            if (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > 5) {
+                errors.push('Duration must be between 0 and 5 for scene detection.');
+            }
+            if (!Number.isFinite(config.scene_detections_holdback) || config.scene_detections_holdback < 0 || config.scene_detections_holdback > 30) {
+                errors.push('Scene Detections Holdback must be between 0 and 30.');
+            }
+            if (!Number.isFinite(sa.confidence_threshold) || sa.confidence_threshold < 0 || sa.confidence_threshold > 1) {
+                errors.push('Scene confidence threshold must be between 0 and 1.');
+            }
+            if (!Number.isFinite(sa.sensitivity) || sa.sensitivity < 0 || sa.sensitivity > 10) {
+                errors.push('Scene sensitivity must be between 0 and 10.');
+            }
+        }
+
+        const listeners = config.vif_event_listeners || {};
+        for (const [name, listener] of Object.entries(listeners)) {
+            if (!listener.class_name) {
+                errors.push(`Listener "${name}" is missing a listener type.`);
+            }
+            if (!listener.methods || listener.methods.length === 0) {
+                errors.push(`Listener "${name}" is missing an event method.`);
+            }
+            if (!Number.isFinite(listener.confidence_threshold) || listener.confidence_threshold < 0 || listener.confidence_threshold > 1) {
+                errors.push(`Listener "${name}" confidence threshold must be between 0 and 1.`);
+            }
+            const props = listener.properties || {};
+            const shortName = resolveClassName(listener.class_name || '');
+            if (config.detector_type === 'scene' && shortName === 'WebhookEvent2' && Array.isArray(listener.methods) && listener.methods.includes('rollup')) {
+                errors.push(`Listener "${name}" cannot use Rollup for scene analysis webhooks. Use Immediate, Batch, or Disabled.`);
+            }
+            if (shortName === 'OverlayEvent' && props.fade_step !== undefined) {
+                if (!Number.isFinite(props.fade_step) || props.fade_step < 0 || props.fade_step > 30 || !Number.isInteger(props.fade_step)) {
+                    errors.push(`Listener "${name}" Fade Step must be a whole number between 0 and 30.`);
+                }
+            }
+            if (shortName === 'ObjectTracking') {
+                if (props.fade_step !== undefined && (!Number.isFinite(props.fade_step) || props.fade_step < 0 || props.fade_step > 30 || !Number.isInteger(props.fade_step))) {
+                    errors.push(`Listener "${name}" Fade Step must be a whole number between 0 and 30.`);
+                }
+                if (props.untracked_object_color !== undefined && props.untracked_object_color !== '' && !isValidCssColor(props.untracked_object_color)) {
+                    errors.push(`Listener "${name}" Untracked Object Color must be a valid CSS color.`);
+                }
+            }
+            if (Array.isArray(props.regions_of_interest)) {
+                props.regions_of_interest.forEach((region, index) => {
+                    if (region.color !== undefined && region.color !== '' && !isValidCssColor(region.color)) {
+                        errors.push(`Listener "${name}" region ${index + 1} Color must be a valid CSS color.`);
+                    }
+                    if (Array.isArray(region.triggers)) {
+                        region.triggers.forEach(trigger => {
+                            if (typeof trigger === 'string' && trigger.toLowerCase().includes('ixnside')) {
+                                errors.push(`Listener "${name}" region ${index + 1} contains suspicious trigger "${trigger}". Did you mean "inside::..."?`);
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+        return errors;
+    }
+
+    function resetForm() {
+        suppressDirtyTracking = true;
+        // Stream settings
+        document.getElementById('cfg-active').checked = false;
+        document.getElementById('cfg-skip-frames').value = '';
+        document.getElementById('cfg-object-detections-holdback').value = '';
+        document.getElementById('cfg-scene-detections-holdback').value = '';
+        document.getElementById('cfg-duration').value = '';
+        document.getElementById('cfg-grayscaled').checked = false;
+        document.getElementById('cfg-resize-output').checked = false;
+        document.getElementById('cfg-auto-scene-frame-throttle').checked = false;
+        document.getElementById('cfg-log-max-messages').value = '';
+        document.getElementById('cfg-log-timing').value = '';
+        document.getElementById('cfg-detector-type').value = '';
+
+        // Object analysis
+        document.getElementById('cfg-class-names').value = '';
+        document.getElementById('cfg-model-name').value = '';
+        document.getElementById('cfg-checkpoint-path').value = '';
+        document.getElementById('cfg-confidence-threshold').value = '';
+        document.getElementById('cfg-tracking-method').value = '';
+
+        // ByteTrack
+        document.getElementById('cfg-bt-min-confidence').value = '';
+        document.getElementById('cfg-bt-max-lost-frames').value = '';
+        document.getElementById('cfg-bt-min-overlap').value = '';
+        document.getElementById('cfg-bt-min-frames').value = '';
+
+        // Scene analysis
+        document.getElementById('cfg-scene-class-names').value = '';
+        document.getElementById('cfg-scene-sensitivity').value = '';
+        document.getElementById('cfg-scene-confidence-threshold').value = '';
+        suppressDirtyTracking = false;
+    }
+
+    function populateForm(config) {
+        resetForm();
+        suppressDirtyTracking = true;
+
+        if (config.active !== undefined) {
+            document.getElementById('cfg-active').checked = config.active;
+        }
+        if (config.log_max_messages !== undefined) {
+            document.getElementById('cfg-log-max-messages').value = config.log_max_messages;
+        }
+        if (config.skip_frames !== undefined) {
+            document.getElementById('cfg-skip-frames').value = config.skip_frames;
+        }
+        if (config.object_detections_holdback !== undefined) {
+            document.getElementById('cfg-object-detections-holdback').value = config.object_detections_holdback;
+        }
+        if (config.scene_detections_holdback !== undefined) {
+            document.getElementById('cfg-scene-detections-holdback').value = config.scene_detections_holdback;
+        }
+        if (config.duration !== undefined) {
+            document.getElementById('cfg-duration').value = config.duration;
+        }
+        if (config.grayscaled !== undefined) {
+            document.getElementById('cfg-grayscaled').checked = config.grayscaled;
+        }
+        if (config.resize_output !== undefined) {
+            document.getElementById('cfg-resize-output').checked = config.resize_output;
+        }
+        if (config.auto_scene_frame_throttle !== undefined) {
+            document.getElementById('cfg-auto-scene-frame-throttle').checked = config.auto_scene_frame_throttle;
+        }
+        if (config.log_timing !== undefined) {
+            document.getElementById('cfg-log-timing').value = config.log_timing;
+        }
+        if (config.detector_type !== undefined) {
+            document.getElementById('cfg-detector-type').value = config.detector_type;
+        }
+
+        if (config.object_analysis || isNewStream()) {
+            const oa = config.object_analysis || {};
+            if (oa.class_names) {
+                document.getElementById('cfg-class-names').value = oa.class_names.join(', ');
+            }
+            if (oa.model_name) {
+                document.getElementById('cfg-model-name').value = oa.model_name;
+            }
+            if (oa.checkpoint_path) {
+                document.getElementById('cfg-checkpoint-path').value = oa.checkpoint_path;
+            }
+            if (oa.confidence_threshold !== undefined) {
+                document.getElementById('cfg-confidence-threshold').value = oa.confidence_threshold;
+            }
+            if (oa.tracking_method) {
+                document.getElementById('cfg-tracking-method').value = oa.tracking_method;
+            }
+            if (oa.byte_track_properties) {
+                const bt = oa.byte_track_properties;
+                if (bt.track_creation_minimum_confidence !== undefined) {
+                    document.getElementById('cfg-bt-min-confidence').value = bt.track_creation_minimum_confidence;
+                }
+                if (bt.max_lost_track_frames_before_track_removal !== undefined) {
+                    document.getElementById('cfg-bt-max-lost-frames').value = bt.max_lost_track_frames_before_track_removal;
+                }
+                if (bt.minimum_consecutive_track_overlap !== undefined) {
+                    document.getElementById('cfg-bt-min-overlap').value = bt.minimum_consecutive_track_overlap;
+                }
+                if (bt.track_creation_minimum_consecutive_frames !== undefined) {
+                    document.getElementById('cfg-bt-min-frames').value = bt.track_creation_minimum_consecutive_frames;
+                }
+            }
+        }
+
+        if (config.scene_analysis || isNewStream()) {
+            const sa = config.scene_analysis || {};
+            if (sa.class_names) {
+                document.getElementById('cfg-scene-class-names').value = sa.class_names.join(', ');
+            }
+            if (sa.sensitivity !== undefined) {
+                document.getElementById('cfg-scene-sensitivity').value = sa.sensitivity;
+            }
+            if (sa.confidence_threshold !== undefined) {
+                document.getElementById('cfg-scene-confidence-threshold').value = sa.confidence_threshold;
+            }
+        }
+
+        // Event listeners
+        populateEventListeners(config.vif_event_listeners);
+
+        toggleByteTrack();
+        toggleCheckpointPath();
+        toggleDetectorSection();
+        suppressDirtyTracking = false;
+        markClean(false);
+    }
+
+    function populateClassNameDropdown() {
+        var select = document.getElementById('evt-class-name');
+        select.innerHTML = '';
+        var available = (defaultConfig && defaultConfig.available_event_listeners) || [];
+        var merged = [];
+
+        available.forEach(function(className) {
+            var shortName = className.includes('.') ? className.substring(className.lastIndexOf('.') + 1) : className;
+            if (!merged.includes(shortName)) merged.push(shortName);
+        });
+
+        NEW_LISTENER_PRESET_TYPES.forEach(function(className) {
+            if (!merged.includes(className)) merged.push(className);
+        });
+
+        merged.forEach(function(shortName) {
+            var opt = document.createElement('option');
+            opt.value = shortName;
+            opt.textContent = shortName;
+            select.appendChild(opt);
+        });
+    }
+
+    function isSceneWebhookListener(className) {
+        const detectorType = document.getElementById('cfg-detector-type') ? document.getElementById('cfg-detector-type').value : '';
+        return detectorType === 'scene' && resolveClassName(className || '') === 'WebhookEvent2';
+    }
+
+    function setListenerTypeEditability(className, editable) {
+        const select = document.getElementById('evt-class-name');
+        const readonlyEl = document.getElementById('evt-class-name-readonly');
+        const helpEl = document.getElementById('evt-class-name-help');
+        const shortName = resolveClassName(className || '');
+
+        if (!select || !readonlyEl || !helpEl) return;
+
+        if (editable) {
+            select.style.display = '';
+            select.disabled = false;
+            readonlyEl.style.display = 'none';
+            readonlyEl.textContent = '';
+            helpEl.textContent = 'Choose the listener type for this new custom listener. You can change it until you save the config.';
+            return;
+        }
+
+        select.style.display = 'none';
+        select.disabled = true;
+        readonlyEl.style.display = 'block';
+        readonlyEl.textContent = shortName || 'Not set';
+        helpEl.textContent = 'Listener type is fixed after save. Remove and recreate the listener to use a different type.';
+    }
+
+    function isListenerTypeEditable(listenerData) {
+        return !!listenerData && listenerData.type_locked === false;
+    }
+
+    function lockListenerTypesAfterSave() {
+        Object.keys(eventListenersData || {}).forEach(function(name) {
+            eventListenersData[name].type_locked = true;
+        });
+
+        const current = activeListenerName ? eventListenersData[activeListenerName] : null;
+        if (current) {
+            setListenerTypeEditability(current.class_name, isListenerTypeEditable(current));
+        }
+    }
+
+    function updateEventMethodOptions(className, selectedMethod) {
+        const select = document.getElementById('evt-methods');
+        const helpEl = document.getElementById('evt-method-help');
+        if (!select) return;
+        const isSceneWebhook = isSceneWebhookListener(className);
+        const currentValue = selectedMethod || select.value || 'disabled';
+        const allowedOptions = EVENT_METHOD_OPTIONS.filter(function(option) {
+            return !(isSceneWebhook && option.value === 'rollup');
+        });
+
+        select.innerHTML = '';
+
+        if (isSceneWebhook && currentValue === 'rollup') {
+            const invalidOption = document.createElement('option');
+            invalidOption.value = 'rollup';
+            invalidOption.textContent = 'Rollup (not available for scene webhooks)';
+            invalidOption.disabled = true;
+            invalidOption.selected = true;
+            select.appendChild(invalidOption);
+        }
+
+        allowedOptions.forEach(function(optionInfo) {
+            const option = document.createElement('option');
+            option.value = optionInfo.value;
+            option.textContent = optionInfo.label;
+            select.appendChild(option);
+        });
+
+        if (!(isSceneWebhook && currentValue === 'rollup')) {
+            const nextValue = allowedOptions.some(function(optionInfo) {
+                return optionInfo.value === currentValue;
+            }) ? currentValue : 'disabled';
+            select.value = nextValue;
+        }
+
+        if (helpEl) {
+            helpEl.textContent = isSceneWebhook
+                ? 'Choose when the listener runs. Immediate and batch are available for scene webhooks. Rollup is not available.'
+                : 'Choose when the listener runs. Immediate fires per result, batch groups a short holdback time window, and rollup sends summarized output for that same time window.';
+        }
+    }
+
+    function populateCheckpointPaths() {
+        var select = document.getElementById('cfg-checkpoint-path');
+        select.innerHTML = '';
+        var paths = (defaultConfig && defaultConfig.available_checkpoint_paths) || [];
+        if (paths.length === 0) {
+            var opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No custom models available';
+            select.appendChild(opt);
+            return;
+        }
+        paths.forEach(function(path) {
+            var opt = document.createElement('option');
+            opt.value = path;
+            opt.textContent = path;
+            select.appendChild(opt);
+        });
+    }
+
+    var eventListenersData = {};
+    var activeListenerName = null;
+
+    function populateEventListeners(listeners) {
+        const select = document.getElementById('evt-listener-select');
+        eventListenersData = {};
+
+        // Store all listener data
+        if (listeners) {
+            for (const name of Object.keys(listeners)) {
+                const l = listeners[name];
+                eventListenersData[name] = {
+                    class_name: l.class_name || '',
+                    methods: l.methods && l.methods.length > 0
+                        ? Array.from(l.methods)[0].toLowerCase() : 'disabled',
+                    confidence_threshold: l.confidence_threshold !== undefined && l.confidence_threshold !== null
+                        ? l.confidence_threshold : 0.7,
+                    properties: l.properties || {},
+                    type_locked: true
+                };
+            }
+        }
+
+        updateActiveListenerSummary();
+
+        // Populate dropdown
+        select.innerHTML = '';
+
+        activeListenerName = null;
+        if (Object.keys(eventListenersData).length > 0) {
+            refreshNewListenerTemplateOptions();
+            ensureListenerSelectPromptOption(select, 'Select listener to edit...');
+            for (const name of Object.keys(eventListenersData)) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            }
+            isAddingNewListener = false;
+            setExistingListenerRowVisibility(true);
+            select.value = '';
+            onListenerSelected();
+        } else {
+            refreshNewListenerTemplateOptions();
+            ensureListenerSelectPromptOption(select, 'No listeners yet');
+            select.value = '';
+            setExistingListenerRowVisibility(false);
+            openNewListenerForm();
+        }
+    }
+
+    function addNewListener() {
+        var templateSelect = document.getElementById('evt-new-listener-template');
+        var nameInput = document.getElementById('evt-new-listener-name');
+        var selectedTemplate = templateSelect ? templateSelect.value : '__custom__';
+        var name = selectedTemplate === '__custom__' ? nameInput.value.trim() : selectedTemplate;
+        if (!name) {
+            showListenerWarning('Custom listener name is required before you can create the listener.');
+            if (nameInput) nameInput.focus();
+            return;
+        }
+        showListenerWarning('');
+        if (eventListenersData[name]) {
+            alert('A listener with that name already exists.');
+            return;
+        }
+        eventListenersData[name] = {
+            class_name: selectedTemplate === '__custom__' ? '' : selectedTemplate,
+            methods: 'disabled',
+            confidence_threshold: 0.7,
+            properties: {},
+            type_locked: selectedTemplate !== '__custom__'
+        };
+        updateActiveListenerSummary();
+
+        // Add the new listener to the existing-listener dropdown
+        var select = document.getElementById('evt-listener-select');
+        ensureListenerSelectPromptOption(select, 'Select listener to edit...');
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+
+        // Select the new listener
+        select.value = name;
+        isAddingNewListener = false;
+        setExistingListenerRowVisibility(true);
+        refreshNewListenerTemplateOptions();
+        onListenerSelected();
+        markDirty();
+    }
+
+    function onListenerSelected() {
+        const select = document.getElementById('evt-listener-select');
+        const fields = document.getElementById('evt-listener-fields');
+        const newNameGroup = document.getElementById('evt-new-listener-name-group');
+        const removeBtn = document.getElementById('evt-remove-listener-btn');
+        const cancelBtn = document.getElementById('evt-cancel-listener-btn');
+        const cancelNewBtn = document.getElementById('evt-cancel-new-listener-btn');
+        var name = select.value;
+
+        // Save previous listener's fields
+        syncListenerFields();
+
+        newNameGroup.style.display = 'none';
+        if (cancelNewBtn) cancelNewBtn.style.display = 'none';
+        isAddingNewListener = false;
+        activeListenerName = name;
+        setExistingListenerRowVisibility(Object.keys(eventListenersData).length > 0);
+
+        if (!name || !eventListenersData[name]) {
+            fields.style.display = 'none';
+            document.getElementById('evt-properties-section').style.display = 'none';
+            removeBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'none';
+            showListenerWarning('');
+            updateListenerTip('', '');
+            if (Object.keys(eventListenersData).length === 0) {
+                openNewListenerForm();
+            }
+            return;
+        }
+
+        removeBtn.style.display = 'inline-block';
+        if (cancelBtn) cancelBtn.style.display = 'inline-block';
+        fields.style.display = 'block';
+        const data = eventListenersData[name];
+        document.getElementById('evt-class-name').value = data.class_name;
+        setListenerTypeEditability(data.class_name, isListenerTypeEditable(data));
+        updateEventMethodOptions(data.class_name, data.methods);
+        document.getElementById('evt-confidence').value = data.confidence_threshold ?? '';
+
+        const shortName = resolveClassName(data.class_name || '');
+        if (!shortName) {
+            showListenerWarning('No listener type is selected. Please choose a listener type.');
+        } else {
+            showListenerWarning('');
+        }
+        updateListenerTip(data.class_name, data.methods);
+        updatePropertiesVisibility();
+    }
+
+    function removeListener() {
+        var name = activeListenerName;
+        if (!name) return;
+        if (!confirm('Remove listener "' + name + '"?')) return;
+
+        delete eventListenersData[name];
+        activeListenerName = null;
+        updateActiveListenerSummary();
+
+        // Remove option from dropdown
+        var select = document.getElementById('evt-listener-select');
+        var opt = select.querySelector('option[value="' + CSS.escape(name) + '"]');
+        if (opt) opt.remove();
+
+        // Return to a neutral selector state or reopen the add form
+        if (Object.keys(eventListenersData).length > 0) {
+            ensureListenerSelectPromptOption(select, 'Select listener to edit...');
+            select.value = '';
+            isAddingNewListener = false;
+            setExistingListenerRowVisibility(true);
+            refreshNewListenerTemplateOptions();
+            onListenerSelected();
+        } else {
+            select.innerHTML = '';
+            refreshNewListenerTemplateOptions();
+            ensureListenerSelectPromptOption(select, 'No listeners yet');
+            select.value = '';
+            setExistingListenerRowVisibility(false);
+            openNewListenerForm();
+        }
+        markDirty();
+    }
+
+    function updatePropertiesVisibility() {
+        var method = document.getElementById('evt-methods').value;
+        if (method === 'disabled') {
+            document.getElementById('evt-properties-section').style.display = 'none';
+            document.getElementById('evt-properties-fields').innerHTML = '';
+            showListenerWarning('This listener is disabled and will not receive events.');
+        } else if (activeListenerName && eventListenersData[activeListenerName]) {
+            showListenerWarning('');
+            loadListenerProperties(eventListenersData[activeListenerName].class_name);
+        }
+        const current = activeListenerName ? eventListenersData[activeListenerName] : null;
+        updateListenerTip(current ? current.class_name : '', method);
+    }
+
+    function resolveClassName(className) {
+        // Strip package prefix if present (e.g. com.wowza...Id3Event -> Id3Event)
+        if (className.includes('.')) {
+            return className.substring(className.lastIndexOf('.') + 1);
+        }
+        return className;
+    }
+
+    function loadListenerProperties(className) {
+        const propsSection = document.getElementById('evt-properties-section');
+        const propsFields = document.getElementById('evt-properties-fields');
+        const shortName = resolveClassName(className);
+
+        if (!shortName) {
+            propsSection.style.display = 'none';
+            propsFields.innerHTML = '';
+            showListenerWarning('No listener type is selected. Please choose a listener type.');
+            return;
+        }
+
+        if (window.VIF_LISTENER_PROPERTIES && window.VIF_LISTENER_PROPERTIES[shortName] !== undefined) {
+            renderProperties(shortName);
+            return;
+        }
+        propsSection.style.display = 'block';
+        propsFields.innerHTML = '<div style="font-size:0.85em; color:#888; padding:4px 0;">No Properties to Configure</div>';
+        showListenerWarning(`No inline property editor is defined for ${shortName}. You can still save the listener, but this page cannot edit its custom properties.`);
+    }
+
+    function renderProperties(shortName) {
+        const propsSection = document.getElementById('evt-properties-section');
+        const propsFields = document.getElementById('evt-properties-fields');
+        const schema = (window.VIF_LISTENER_PROPERTIES && window.VIF_LISTENER_PROPERTIES[shortName]) || [];
+
+        if (schema.length === 0) {
+            propsSection.style.display = 'block';
+            propsFields.innerHTML = '<div style="font-size:0.85em; color:#888; padding:4px 0;">No Properties to Configure</div>';
+            return;
+        }
+
+        propsSection.style.display = 'block';
+        propsFields.innerHTML = '';
+
+        const data = eventListenersData[activeListenerName];
+        const props = data.properties || {};
+
+        schema.forEach(function(field) {
+            if (field.type === 'array') {
+                renderArrayField(propsFields, field, props[field.key] || []);
+            } else {
+                renderScalarField(propsFields, field, props[field.key]);
+            }
+        });
+
+        const previousSuppressDirtyTracking = suppressDirtyTracking;
+        suppressDirtyTracking = true;
+        syncPropertyFields();
+        suppressDirtyTracking = previousSuppressDirtyTracking;
+    }
+
+    function renderScalarField(container, field, value, dataAttr) {
+        const hasExplicitValue = value !== undefined && value !== null;
+
+        if (field.type === 'separator') {
+            var hr = document.createElement('hr');
+            hr.style.margin = '12px 0';
+            hr.style.border = 'none';
+            hr.style.borderTop = '1px solid #ddd';
+            if (field.label) {
+                var wrapper = document.createElement('div');
+                wrapper.style.cssText = 'font-size:0.8em; color:#888; text-transform:uppercase; letter-spacing:1px; margin:12px 0 8px;';
+                wrapper.textContent = field.label;
+                wrapper.appendChild(hr);
+                container.appendChild(wrapper);
+            } else {
+                container.appendChild(hr);
+            }
+            return;
+        }
+        dataAttr = dataAttr || 'propKey';
+        var div = document.createElement('div');
+        div.className = 'form-group';
+
+        var label = document.createElement('label');
+        label.textContent = field.label;
+        div.appendChild(label);
+
+        if (field.type === 'boolean') {
+            var switchLabel = document.createElement('label');
+            switchLabel.className = 'switch';
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = hasExplicitValue ? !!value : !!field.default;
+            input.dataset[dataAttr] = field.key;
+            input.addEventListener('change', syncPropertyFields);
+            var span = document.createElement('span');
+            span.className = 'slider-switch';
+            switchLabel.appendChild(input);
+            switchLabel.appendChild(span);
+            div.appendChild(switchLabel);
+        } else if (field.type === 'number') {
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.value = hasExplicitValue
+                ? value
+                : (field.default !== undefined && field.default !== null ? field.default : '');
+            if (field.default !== undefined && field.default !== null) {
+                input.placeholder = String(field.default);
+            }
+            input.step = field.step || 'any';
+            input.dataset[dataAttr] = field.key;
+            input.addEventListener('input', syncPropertyFields);
+            const numericRule = getListenerPropertyRule(field.key);
+            if (numericRule) applyNumericRuleToInput(input, numericRule);
+            div.appendChild(input);
+        } else if (field.type === 'select') {
+            var select = document.createElement('select');
+            select.dataset[dataAttr] = field.key;
+            (field.options || []).forEach(function(optVal) {
+                var opt = document.createElement('option');
+                opt.value = optVal;
+                opt.textContent = optVal;
+                select.appendChild(opt);
+            });
+            select.value = value !== undefined ? value : field.default;
+            select.addEventListener('change', syncPropertyFields);
+            div.appendChild(select);
+        } else if (field.type === 'string_list') {
+            var wrapper = document.createElement('div');
+            wrapper.className = 'string-list-field';
+            var input = document.createElement('input');
+            input.type = 'text';
+            if (Array.isArray(value)) {
+                input.value = value.join(', ');
+            } else if (hasExplicitValue) {
+                input.value = value;
+            } else if (field.default !== undefined && field.default !== null) {
+                input.value = Array.isArray(field.default)
+                    ? field.default.join(', ')
+                    : String(field.default);
+            } else {
+                input.value = '';
+            }
+            if (field.default !== undefined && field.default !== null) {
+                input.placeholder = Array.isArray(field.default) ? field.default.join(', ') : String(field.default);
+            }
+            input.dataset[dataAttr] = field.key;
+            input.dataset.fieldType = 'string_list';
+            input.addEventListener('input', syncPropertyFields);
+            wrapper.appendChild(input);
+            var hint = document.createElement('span');
+            hint.className = 'string-list-hint';
+            hint.textContent = 'comma-separated';
+            wrapper.appendChild(hint);
+            div.appendChild(wrapper);
+        } else {
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.value = hasExplicitValue
+                ? value
+                : (field.default !== undefined && field.default !== null ? String(field.default) : '');
+            if (field.default !== undefined && field.default !== null) {
+                input.placeholder = String(field.default);
+            }
+            input.dataset[dataAttr] = field.key;
+            input.addEventListener('input', syncPropertyFields);
+            const textRule = getListenerPropertyRule(field.key);
+            if (textRule) applyTextRuleToInput(input, textRule);
+            div.appendChild(input);
+        }
+
+        if (field.tooltip) {
+            var help = document.createElement('div');
+            help.className = 'field-help';
+            help.textContent = field.tooltip;
+            div.appendChild(help);
+        }
+
+        container.appendChild(div);
+    }
+
+    function renderArrayField(container, field, items) {
+        var section = document.createElement('div');
+        section.className = 'array-section';
+        section.dataset.arrayKey = field.key;
+
+        var header = document.createElement('div');
+        header.className = 'array-section-header';
+        var title = document.createElement('div');
+        title.className = 'form-section-title';
+        title.textContent = field.label;
+        header.appendChild(title);
+
+        var addBtn = document.createElement('button');
+        addBtn.textContent = '+ Add';
+        addBtn.addEventListener('click', function() {
+            var newItem = {};
+            addArrayItem(section, field, newItem, true);
+            syncPropertyFields();
+        });
+        header.appendChild(addBtn);
+        section.appendChild(header);
+
+        items.forEach(function(item) {
+            addArrayItem(section, field, item, false);
+        });
+
+        container.appendChild(section);
+    }
+
+    function addArrayItem(section, fieldSchema, itemData, expanded) {
+        var item = document.createElement('div');
+        item.className = 'array-item';
+
+        var itemHeader = document.createElement('div');
+        itemHeader.className = 'array-item-header';
+
+        var chevron = document.createElement('span');
+        chevron.className = 'array-item-chevron';
+        chevron.textContent = expanded ? '\u25BC' : '\u25B6';
+        itemHeader.appendChild(chevron);
+
+        var itemTitle = document.createElement('span');
+        itemTitle.textContent = itemData.name || itemData.id || fieldSchema.item_label || 'Item';
+        itemHeader.appendChild(itemTitle);
+
+        var actions = document.createElement('div');
+        actions.className = 'array-item-actions';
+
+        var removeBtn = document.createElement('button');
+        removeBtn.textContent = 'Remove';
+        removeBtn.className = 'btn-danger';
+        removeBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            item.remove();
+            syncPropertyFields();
+        });
+        actions.appendChild(removeBtn);
+        itemHeader.appendChild(actions);
+
+        itemHeader.addEventListener('click', function(e) {
+            if (e.target.tagName === 'BUTTON') return;
+            body.classList.toggle('expanded');
+            chevron.textContent = body.classList.contains('expanded') ? '\u25BC' : '\u25B6';
+        });
+
+        item.appendChild(itemHeader);
+
+        var body = document.createElement('div');
+        body.className = 'array-item-body' + (expanded ? ' expanded' : '');
+
+        fieldSchema.fields.forEach(function(subField) {
+            var value = itemData[subField.key];
+            renderScalarField(body, subField, value, 'arrayField');
+        });
+
+        item.appendChild(body);
+        section.appendChild(item);
+
+        // Update title when name/id fields change
+        var nameInput = body.querySelector('[data-array-field="name"]') || body.querySelector('[data-array-field="id"]');
+        if (nameInput) {
+            nameInput.addEventListener('input', function() {
+                itemTitle.textContent = this.value || fieldSchema.item_label || 'Item';
+            });
+        }
+    }
+
+    function syncPropertyFields() {
+        if (!activeListenerName || !eventListenersData[activeListenerName]) return false;
+        var container = document.getElementById('evt-properties-fields');
+        var props = {};
+
+        // Sync scalar fields
+        var inputs = container.querySelectorAll('[data-prop-key]');
+        inputs.forEach(function(input) {
+            var key = input.dataset.propKey;
+            if (input.type === 'checkbox') {
+                props[key] = input.checked;
+            } else if (input.type === 'number') {
+                const source = input.value !== '' ? input.value : input.placeholder;
+                props[key] = parseFloat(source) || 0;
+            } else if (input.dataset.fieldType === 'string_list') {
+                const source = input.value !== '' ? input.value : (input.placeholder || '');
+                props[key] = source.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+            } else {
+                props[key] = input.value !== '' ? input.value : (input.placeholder || '');
+            }
+        });
+
+        // Sync array fields
+        var arraySections = container.querySelectorAll('.array-section');
+        arraySections.forEach(function(section) {
+            var key = section.dataset.arrayKey;
+            var items = [];
+            section.querySelectorAll('.array-item').forEach(function(itemEl) {
+                var obj = {};
+                var fields = itemEl.querySelectorAll('[data-array-field]');
+                fields.forEach(function(input) {
+                    var fieldKey = input.dataset.arrayField;
+                    if (input.type === 'checkbox') {
+                        obj[fieldKey] = input.checked;
+                    } else if (input.type === 'number') {
+                        const source = input.value !== '' ? input.value : input.placeholder;
+                        obj[fieldKey] = parseFloat(source) || 0;
+                    } else if (input.dataset.fieldType === 'string_list') {
+                        const source = input.value !== '' ? input.value : (input.placeholder || '');
+                        obj[fieldKey] = source.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+                    } else {
+                        obj[fieldKey] = input.value !== '' ? input.value : (input.placeholder || '');
+                    }
+                });
+                items.push(obj);
+            });
+            props[key] = items;
+        });
+
+        const existingProps = eventListenersData[activeListenerName].properties || {};
+        const changed = !valuesEqual(existingProps, props);
+        eventListenersData[activeListenerName].properties = props;
+        if (changed) {
+            markDirty();
+        }
+        return changed;
+    }
+
+    // Auto-save listener fields on any change
+    function syncListenerFields() {
+        const name = activeListenerName;
+        if (!name || !eventListenersData[name]) return false;
+        const data = eventListenersData[name];
+        const propertiesChanged = syncPropertyFields();
+        const nextClassName = document.getElementById('evt-class-name').value.trim();
+        const nextMethod = document.getElementById('evt-methods').value;
+        const confidenceInput = document.getElementById('evt-confidence');
+        const confidence = parseFloat(confidenceInput.value || confidenceInput.placeholder);
+        const nextConfidence = Number.isFinite(confidence) ? confidence : 0.7;
+        const changed = propertiesChanged
+            || data.class_name !== nextClassName
+            || data.methods !== nextMethod
+            || data.confidence_threshold !== nextConfidence;
+
+        data.class_name = nextClassName;
+        data.methods = nextMethod;
+        data.confidence_threshold = nextConfidence;
+        updateActiveListenerSummary();
+
+        if (changed) {
+            markDirty();
+        }
+        return changed;
+    }
+
+    document.getElementById('evt-class-name').addEventListener('change', function() {
+        syncListenerFields();
+        const current = activeListenerName && eventListenersData[activeListenerName] ? eventListenersData[activeListenerName] : null;
+        const className = current ? current.class_name : document.getElementById('evt-class-name').value.trim();
+        setListenerTypeEditability(className, isListenerTypeEditable(current));
+        updateEventMethodOptions(className, current ? current.methods : document.getElementById('evt-methods').value);
+        updatePropertiesVisibility();
+    });
+    document.getElementById('evt-methods').addEventListener('change', function() { syncListenerFields(); updatePropertiesVisibility(); });
+    document.getElementById('evt-confidence').addEventListener('input', syncListenerFields);
+
+    function buildEventListenersJson() {
+        // Save current fields first
+        syncListenerFields();
+
+        const listeners = {};
+        for (const [name, data] of Object.entries(eventListenersData)) {
+            const entry = {
+                class_name: data.class_name,
+                methods: [data.methods],
+                confidence_threshold: data.confidence_threshold
+            };
+            if (data.properties && Object.keys(data.properties).length > 0) {
+                entry.properties = data.properties;
+            }
+            listeners[name] = entry;
+        }
+        return listeners;
+    }
+
+    function toggleDetectorSection() {
+        const detectorType = document.getElementById('cfg-detector-type').value;
+        document.getElementById('object-analysis-section').style.display = detectorType === 'object' ? 'block' : 'none';
+        document.getElementById('scene-analysis-section').style.display = detectorType === 'scene' ? 'block' : 'none';
+        document.getElementById('cfg-object-holdback-group').style.display = detectorType === 'object' ? 'flex' : 'none';
+        document.getElementById('cfg-scene-holdback-group').style.display = detectorType === 'scene' ? 'flex' : 'none';
+        document.getElementById('cfg-duration-group').style.display = detectorType === 'scene' ? 'flex' : 'none';
+        document.getElementById('cfg-auto-scene-throttle-group').style.display = detectorType === 'scene' ? 'flex' : 'none';
+        if (activeListenerName && eventListenersData[activeListenerName]) {
+            const current = eventListenersData[activeListenerName];
+            updateEventMethodOptions(current.class_name, current.methods);
+            updatePropertiesVisibility();
+        }
+    }
+
+    document.getElementById('cfg-detector-type').addEventListener('change', toggleDetectorSection);
+
+    function showStatus(message, isError) {
+        const el = document.getElementById('status-message');
+        if (!el) return;
+        if (statusHideTimer) clearTimeout(statusHideTimer);
+        if (statusClearTimer) clearTimeout(statusClearTimer);
+        el.textContent = message;
+        el.className = `visible ${isError ? 'error' : 'success'}`;
+        statusHideTimer = setTimeout(() => {
+            el.classList.remove('visible');
+            statusClearTimer = setTimeout(() => {
+                el.className = '';
+                el.textContent = '';
+            }, 240);
+        }, 3000);
+    }
+
+    async function getConfig() {
+        const apiUrl = getApiUrl();
+        if (!apiUrl) return;
+        try {
+            suppressDirtyTracking = true;
+            const response = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Basic ${encodedCredentials}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const config = await response.json();
+            populateForm(config);
+            showStatus('Config loaded successfully', false);
+
+        } catch (error) {
+            console.error("Error fetching config:", error);
+            showStatus(`Error loading config: ${error.message}`, true);
+        } finally {
+            suppressDirtyTracking = false;
+            updateIncomingStreamPanelState();
+        }
+    }
+
+    async function saveConfig() {
+        const config = buildConfigJson();
+        if (!config) return;
+        const validationErrors = collectValidationErrors(config);
+        if (validationErrors.length > 0) {
+            showStatus(validationErrors.join(' '), true);
+            return;
+        }
+
+        const isNew = isNewStream();
+        const apiUrl = isNew
+            ? `${serverUrl}/v1/server/plugin/vif/applications/${config.app_name}/streams/${config.stream_name}/config`
+            : getApiUrl();
+        if (!apiUrl) return;
+
+        try {
+            setSavingState(true);
+            const response = await fetch(apiUrl, {
+                method: isNew ? 'POST' : 'PUT',
+                body: JSON.stringify(config),
+                headers: {
+                    'Authorization': `Basic ${encodedCredentials}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            await response.json();
+            showStatus(isNew ? 'Stream config created successfully' : 'Config saved successfully', false);
+            lockListenerTypesAfterSave();
+            markClean(true);
+
+            if (isNew) {
+                const newValue = `${config.app_name}::${config.stream_name}`;
+                await loadStreams(newValue);
+            }
+
+        } catch (error) {
+            console.error("Error saving config:", error);
+            showStatus(`Error saving config: ${error.message}`, true);
+        } finally {
+            setSavingState(false);
+        }
+    }
+
+    async function deleteConfig() {
+        const stream = getSelectedStream();
+        if (!stream) return;
+
+        if (!confirm(`Delete stream config "${stream.appName} / ${stream.streamName}"?\n\nThis cannot be undone.`)) return;
+
+        const apiUrl = getApiUrl();
+        if (!apiUrl) return;
+
+        try {
+            const response = await fetch(apiUrl, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Basic ${encodedCredentials}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            showStatus('Stream config deleted successfully', false);
+            markClean(false);
+            await loadStreams();
+
+        } catch (error) {
+            console.error("Error deleting config:", error);
+            showStatus(`Error deleting config: ${error.message}`, true);
+        }
+    }
+
+    if (!window.__vifStreamConfigGlobalBindings) {
+        window.addEventListener('beforeunload', function(e) {
+            if (!isStreamConfigMounted() || !isDirty || isSaving) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
+
+        window.addEventListener('keydown', function(e) {
+            if (!isStreamConfigMounted()) return;
+            if (e.key === 'Escape') {
+                closeEventListenerInfo();
+                closeStreamMatchingInfo();
+            }
+        });
+
+        window.addEventListener('scroll', function() {
+            if (!isStreamConfigMounted()) return;
+            updateIncomingStreamPanelState();
+        }, { passive: true });
+
+        window.addEventListener('resize', function() {
+            if (!isStreamConfigMounted()) return;
+            updateIncomingStreamPanelState();
+        });
+
+        document.addEventListener('input', function(e) {
+            if (!isStreamConfigMounted()) return;
+            if (e.target.closest('#evt-properties-fields')) return;
+            if (e.target.id === 'evt-confidence') return;
+            if (shouldIgnoreGlobalDirtyTracking(e.target)) return;
+            markDirty();
+        });
+
+        document.addEventListener('change', function(e) {
+            if (!isStreamConfigMounted()) return;
+            if (e.target.closest('#evt-properties-fields')) return;
+            if (shouldIgnoreGlobalDirtyTracking(e.target)) return;
+            markDirty();
+        });
+
+        window.__vifStreamConfigGlobalBindings = true;
+    }
+
+    // Initialize
+    console.log(`VIF ${new Date().toISOString().slice(0, 10)}`);
+    initializeStaticFieldRules();
+    initializeStaticFieldTooltips();
+    toggleByteTrack();
+    toggleCheckpointPath();
+    toggleDetectorSection();
+    updateListenerTip('', '');
+    updateDirtyIndicator();
+    updateSaveButtonState();
+    updateIncomingStreamPanelState();
+    loadStreams();
+</script>

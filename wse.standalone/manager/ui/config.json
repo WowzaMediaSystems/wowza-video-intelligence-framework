@@ -1,0 +1,7 @@
+{
+	"active": true,
+	"name": "VIF",
+	"icon": "fa-cubes",
+	"page": "shm.html",
+	"playerToken": "ENV.PLAYER_TOKEN"
+}

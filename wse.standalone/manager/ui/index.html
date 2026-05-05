@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="wowza-logo-48x48-1-1.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="wowza-logo-48x48-1-1.ico" type="image/x-icon">
+
+    <title>Stream Health Monitor - Alerts Enabled</title>
+    <style>
+        :root {
+            /* Status Colors */
+            --good-color: #00e676; /* Green */
+            --alert-color: #ff5252; /* Red */
+            --alert-bg: #ffe5e5;
+            --warn-color: #cc9900; /* yellow/amber */
+            --warn-bg: #fff8e5;
+            --accent-color: #00bcd4;
+        }
+
+        body {
+            font-family: monospace;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+        }
+
+        h2 {
+            font-size: 18px;
+/*            padding-bottom: 10px;
+            margin: 16px;
+            margin-bottom: 10px;
+*/        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 10px;
+
+        }
+        /* Navbar - keeping black background */
+        .navbar-inverse {
+            background-color: #000;
+            border-color: transparent;
+            padding: 3px 16px;
+        }
+
+        .navbar-static-top {
+            z-index: 1000;
+            border-width: 0 0 1px;
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            padding: 3px 0;
+            font-size: 18px;
+            line-height: 20px;
+            height: 50px;
+            color: #eeeeee;
+            text-decoration: none;
+        }
+
+        .navbar-brand:hover {
+            color: #eeeeee;
+            text-decoration: none;
+        }
+
+        .navbar-brand-wse {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #eeeeee;
+            line-height: 1.2;
+        }
+
+        .navbar-brand-mgr {
+            text-transform: uppercase;
+            color: #999;
+            font-size: 0.65em;
+            font-weight: bold;
+        }
+
+        .navbar-logo {
+            height: 44px;
+            width: 44px;
+        }
+
+        .navbar-text-wrapper {
+            padding-left: 10px;
+        }
+
+        .navbar-inverse {
+            display: flex;
+            justify-content: space-between;
+            /*align-items: center;*/
+        }
+
+        .status-bar {
+            font-size: 0.85em;
+            color: #fff;
+            text-align: right;
+            margin-left: auto;
+            margin: 7px;
+        }
+
+/*        .status-bar {
+            text-align: right;
+            font-size: 12px;
+            color: #444;
+            margin: 16px;
+            margin-bottom: 0;
+        }*/
+
+        .content-wrapper {
+            padding: 16px;
+            width: 98%;            
+        }
+
+        .row {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        /* --- Host Info Grid --- */
+        .host-container {
+            display: flex;
+            flex-wrap: wrap;
+
+            grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .metric-card {
+            min-width: 120px;
+
+            background: #fafafa;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            transition: all 0.3s ease;
+        }
+
+        .metric-thumb-card {
+            min-width: 240px;
+
+            background: #fafafa;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            transition: all 0.3s ease;
+        }
+
+        .metric-label {
+            font-size: 0.85em;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+
+        .metric-value {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+            word-break: break-all;
+        }
+
+        /* Alert Classes */
+        .card-alert {
+            border: 1px solid var(--alert-color);
+            background-color: var(--alert-bg);
+        }
+        .card-alert .metric-value {
+            color: var(--alert-color);
+        }
+
+        .card-warn {
+            border: 1px solid var(--warn-color);
+            background-color: var(--warn-bg);
+        }
+        .card-warn .metric-value {
+            color: var(--warn-color);
+        }
+
+        .text-alert { color: var(--alert-color) !important; }
+        .text-warn { color: var(--warn-color) !important; }
+        .text-good { color: var(--good-color) !important; }
+
+        /* --- Streams Table --- */
+        .table-wrapper {
+            overflow-x: auto;
+            background: #fafafa;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            width: 100%;
+        }
+
+        #streams-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95em;
+            table-layout: auto;
+        }
+
+        thead {
+            background-color: #000;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ccc;
+        }
+
+        th {
+            color: #fff;
+            white-space: nowrap;
+            font-weight: normal;
+        }
+
+        tr:hover {
+            /*background-color: #f0f0f0;*/
+        }
+
+
+        .align-left {
+            text-align: left;
+        }
+
+        /* Button styling to match reference */
+        button {
+            padding: 0.4em 0.7em;
+            font-family: monospace;
+            font-size: 0.85em;
+            cursor: pointer;
+            background: #2a71ab;
+            border: 1px solid #ccc;
+            color: #ffffff;
+            border-radius: 4px;
+            margin-bottom: 4px;            
+        }
+
+        button:hover {
+            background: #225783;
+        }
+
+        button:disabled {
+          background-color: #cccccc;
+          color: #666666;
+          cursor: not-allowed;
+          pointer-events: none; /* Prevents click events in some cases, although the disabled attribute already does this */
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 10px;
+            max-width: 500px;
+        }
+
+        .slider {
+            accent-color: #2a71ab;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 2px;
+        }
+
+        /* The container - defines the size of the switch */
+        .switch {
+            position: relative;
+            display: flex;
+            width: 50px;
+            height: 23px;
+        }
+
+        /* Hide the default HTML checkbox */
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+                /* The slider (the track) */
+        .slider-switch {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 25px;
+        }
+
+        /* The knob (the circle that slides) */
+        .slider-switch:before {
+            position: absolute;
+            content: "";
+            height: 15px;
+            width: 15px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .item-right {
+          margin-left: auto; /* Pushes this specific item to the right */
+        }
+
+        /* Logic: When checked, change background color */
+        input:checked + .slider-switch {
+            background-color: #2a71ab;
+        }
+
+        /* Logic: When checked, move the knob to the right */
+        input:checked + .slider-switch:before {
+            transform: translateX(24px);
+        }
+        /* Thumbnail image styling */
+        #streams-table img {
+            border-radius: 4px;
+        }
+    </style>
+
+</head>
+<body>
+
+    <nav class="navbar navbar-inverse navbar-static-top">
+        <div class="container-full">
+            <a class="navbar-brand hidden-sm hidden-xs" href="/Home.htm#application/_defaultVHost_/live/live/main" target="_wsem">
+                <img class="navbar-logo" src="icon-wse.png" />
+                <div class="navbar-text-wrapper">
+                    <div class="navbar-brand-wse">Wowza Streaming Engine</div>
+                    <div class="navbar-brand-mgr">VIF Monitor</div>
+                </div>
+            </a>
+        </div>
+        <div class="status-bar">
+            Status: <span id="refresh-status">Live</span> | Last Update: <span id="last-updated">Waiting...</span>
+        </div>
+    </nav>
+    <div id="mainContent">
+    </div>
+</body>
+
+<script>
+
+
+function loadMainContent(page, params) {
+    loadContent("mainContent", page, params);
+}
+
+async function loadContent(divId, url, params) {
+    const element = document.getElementById(divId);
+
+    try {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            // Handle HTTP error statuses (e.g., 404, 500)
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const content = await response.text();
+        element.innerHTML = content;
+
+    } catch (error) {
+        // Handle network errors or errors thrown in the try block
+        console.error("Error loading image:", error);
+        imgElement.src = defaultImageUrl;
+    }
+}
+loadMainContent("shm.html","");
+
+</script>
+<script src="shm.js">
+
+</html>
