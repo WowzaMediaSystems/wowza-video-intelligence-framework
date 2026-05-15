@@ -100,6 +100,9 @@ services:
         # NVIDIA GPU configuration
           - NVIDIA_VISIBLE_DEVICES=all  # Or specify GPU IDs: '0,1'
           - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+        # Optional: Path were logfiles are stored. Default is ./logs
+        # - LOG_DIR=/var/logs/video-intelligence-service-gpu/
+          - LOG_PATH=${LOG_DIR:-/logs}
         volumes:
         # Mount models directory for checkpoints
           - ./vis/models:/build/models
@@ -107,6 +110,8 @@ services:
         # - ./certs:/certs:ro
         # Optional: Mount for RT-DETR v2 model cache (for offline usage)
         # - ~/.cache/huggingface:/root/.cache/huggingface:ro
+        # Mount log directory
+          - ./vis/logs:${LOG_PATH:-/logs}
         ports:
           - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
         env_file:
