@@ -453,10 +453,10 @@
     serverUrl = serverUrl.replaceAll("wse.docker", url.hostname);
     serverUrl = serverUrl.replaceAll("host.docker.internal", url.hostname);
     serverUrl = serverUrl.replace(/\/+$/, ''); // remove trailing slash if there is one
-    var pathPrefix = '/wse-plugins/server/vif/';
+    var pathPrefix = 'wse-plugins/server/vif/';
     var host = url.host;
     var protocol = url.protocol;
     var hostname = url.hostname;
 </script>
 
-<script src="/wse-plugins/server/vif/shm.js"></script>
+<script src="wse-plugins/server/vif/shm.js"></script>

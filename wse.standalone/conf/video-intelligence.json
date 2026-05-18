@@ -1,21 +1,24 @@
 {
+    "original_version" : "1.0.0",
+    "current_version": "1.0.0",
     //defaults for each stream defined below in the streams[]
     "active":false, //if we should do vi on the stream
     "vi_service_url":"${VIS_PROTOCOL}://${VIS_HOST}:${VIS_PORT}/ws/stream/",  //where the vif service is hosted
     "vi_service_api_key":"${VIS_API_KEY}",  //api key used to connect to vif service
-    "untracked_objects": false, //track untracked objects when tracking_method is set
+    "ignore_untracked_objects": false, //ignore untracked objects when tracking_method is set
 
     "vif_event_listeners": {
         //list of listeners to recieve VIF events, such as overlays, id3 tags, customer modules.
     },
 
-    "object_detections_holdback": 2,  //how long to hold detections for batch and rollup events
-    "scene_detections_holdback": 1,
+    "rollup_batch_interval": 2,  //how long to hold detections for batch and rollup events
     "auto_scene_frame_throttle": false, //when enabled, the service will automatically throttle scene detection frames to try to maintain the target_processing_ratio
-    
+
     "grayscaled": false, //converts images to grayscale to improve performance
     "resize_output": true,
     "duration": 2, //how many seconds to send (scene only)
+    "use_transcoder": true, //whether to use transcoder to capture frames
+    "frame_grab_interval": 1, //if not using transcoder, how often to capture frames in seconds
     "skip_frames": 0, //skipped frames per second
     "frame_buffer": 10, //buffer to hold frames to process
 
@@ -66,19 +69,20 @@
     },
     "scene_analysis": {
       "confidence_threshold":0.3,
-      "sensitivity":5 
+      "sensitivity":5
     },
     "streams":
     [
         {
             "active":true,
             "app_name": "live",         //application to watch
-            "stream_name": "object.*",  //regex pattern to match incoming streams to          
+            "stream_name": "object.*",  //regex pattern to match incoming streams to
             "vif_event_listeners": {
                 "Id3Tags": {
                     // "class_name": "com.wowza.wms.plugin.videointelligence.event.Id3Event",
                     "class_name": "Id3Event",
-                    "methods": ["rollup"]
+                    "methods": ["rollup"],
+                    "suppress_empty_detections": true //if true, will not send rollup events if there are no detections in the holdback window
                 },
                 "Webhooks": {
                     "class_name": "WebhookEvent2",
@@ -101,7 +105,7 @@
                     }
                 }
             },
-            "object_detections_holdback": 2,
+            "rollup_batch_interval": 2,
             "grayscaled": false,
             "log_timing": 0,
             "save_images": false,
@@ -176,12 +180,12 @@
                 },
                 "confidence_threshold": 0.3,
                 "class_names": [ "person", "car", "motorcycle", "truck", "traffic light", "bus"],
-                "model_name": "medium", 
+                "model_name": "medium",
                 "local_files_only": false
             },
 
             "log_max_messages": 20,
-            "log_timing": 2,                  
+            "log_timing": 2,
             "skip_frames": 0,
 
             "vif_event_listeners": {
@@ -196,7 +200,7 @@
                         "save_image": true,
                         //"save_image_path": "/mikev/mystest", //default is /usr/local/wse/vif/images
                         "object_label": "{{track_id}}:{{class_name}} {{confidence}}", //usedn if drawing object outside a region
-                        "draw_untracked_objects": true, //whether to draw objects that are not currently being tracked, only used when tracking_method is set   
+                        "draw_untracked_objects": true, //whether to draw objects that are not currently being tracked, only used when tracking_method is set
                         "untracked_object_label": "{{track_id}}:{{class_name}} {{confidence}}", //used if drawing untracked objects when tracking_method is set
                         "untracked_object_color": "gray", //color to draw untracked objects when tracking_method is set
                         "fade_step": 20, //how many frames it takes to fade objects out once they are no longer tracked
@@ -213,7 +217,7 @@
                             "draw_objects": true,
                             "color": "blue",
                             "label": "{{name}} ({{current}}:{{total}})",
-                            "object_label": "{{track_id}}:{{class_name}} {{trigger}} {{confidence}} {{direction}}@{{velocity}}", 
+                            "object_label": "{{track_id}}:{{class_name}} {{trigger}} {{confidence}} {{direction}}@{{velocity}}",
                             "triggers": ["inside::detected", "velocity_min::stalled", "direction::wrong way", "count_max::too many", "time_max::congestion"],  // inside, overlay, velocity_min, velocity_max, direction, count_min, count_max, time_min, time_max, TBDoutside/exit.
                             "class_names": ["all"],  //subset for class defined in object_analysis
                             "confidence_threshold": 0.5,          //only consider objects with confidence score above this threshold for triggers, default is 0
@@ -227,7 +231,7 @@
 
                             //objects at one time
                             "count_min": 0,                       //when trigger:count_min, if the number of objects in region goes below this value, default is 0
-                            "count_max": 1,                       //when trigger:count_max, if the number of objects in region goes above this value, default is 99999 
+                            "count_max": 1,                       //when trigger:count_max, if the number of objects in region goes above this value, default is 99999
 
                             "directions": ["NE","E","SE","N"],    //when trigger:direction, if objects direction in the region goes in this direction.  default is null, options are: N, NE, E, SE, S, SW, W, NW
                             "direction_count": 10,                //when trigger:direction, how many time the directions matches before trigger, default is 10
@@ -251,12 +255,12 @@
                             "class_names": ["all"],
                             "object_coordinate": "bottom-center", // which part of the object bounding box to use for determining if it's in the counting area. Options are: "all", "center", "bottom-center", "top-center", "left-center", "right-center"
                             "label": "{{name}} ({{current}}:{{total}})",
-                            "count_max": 1 
-                          }  
+                            "count_max": 1
+                          }
                         ],
                         "debug_responses": true,
                         "replace_video": true
-                    }                    
+                    }
                 }
             }
         },
@@ -280,7 +284,7 @@
                         "save_image": true,
                         "replace_video": true,
                         "title_string": "'Cam-01:' yyyy-MM-dd HH:mm:ss",  //show a string that can include current time such as "'Cur time:' HH:mm:ss MM-dd-yyyy" as a video overlay
-                        "draw_untracked_objects": false, //whether to draw objects that are not currently being tracked, only used when tracking_method is set   
+                        "draw_untracked_objects": false, //whether to draw objects that are not currently being tracked, only used when tracking_method is set
                         "untracked_object_label": "{{track_id}}:{{class_name}} {{confidence}}", //used if drawing untracked objects when tracking_method is set
                         "untracked_object_color": "gray", //color to draw untracked objects when tracking_method is set
                         "fade_step": 10, //how many frames it takes to fade objects out once they are no longer tracked
@@ -299,7 +303,7 @@
                             "draw_objects": true,
                             "color": "red",
                             "triggers": [
-                                "ixnside::detected",
+                                "inside::detected",
                                 "velocity_min::stalled"
                             ],
                             "class_names": [
@@ -317,9 +321,8 @@
                     }
                 }
             },
-            "untracked_objects": false,
-            "object_detections_holdback": 2.0,
-            "scene_detections_holdback": 1.0,
+            "ignore_untracked_objects": false,
+            "rollup_batch_interval": 2.0,
             "object_analysis": {
                 "stream_name": "stall.*",
                 "concurrent_executions": 10,
