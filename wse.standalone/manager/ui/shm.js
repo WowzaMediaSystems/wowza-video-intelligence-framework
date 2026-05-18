@@ -70,7 +70,7 @@
                 host: {
                     wse_version: "connecting",
                 }
-            };            
+            };
         }
 
         function defaultJson()
@@ -80,7 +80,7 @@
                     wse_version: "offline",
                 }
             };
-            lastStreamCount = 0;       
+            lastStreamCount = 0;
         }
 
         function releaseObjectUrlsInContainer(containerElement)
@@ -193,11 +193,11 @@
 
                 // --- RENDER HOST CARDS ---
                 hostContainer = document.getElementById('host-display');
-                hostContainer.innerHTML = ''; 
+                hostContainer.innerHTML = '';
                 hostContainer = document.getElementById('host-stats');
-                hostContainer.innerHTML = ''; 
+                hostContainer.innerHTML = '';
                 hostContainer = document.getElementById('host-nvidia');
-                hostContainer.innerHTML = ''; 
+                hostContainer.innerHTML = '';
 
                 if(jsonData.host.vif_module_version === undefined)
                 {
@@ -273,7 +273,7 @@
                 clearElementContent(tbody);
                 thumbWrap.style.display = "inline-block";
 
-                if (lastStreamCount !== streams.length) {                
+                if (lastStreamCount !== streams.length) {
                     clearElementContent(thumbnailDisplay);
                     streams.forEach((stream, index) => {
                         renderThumbnailCard('thumbnail-display', stream);
@@ -285,7 +285,7 @@
 
                     setThumbnail(id+"-thumbnail", stream);
                     setFramesDetected(id+"-frame-detect-avg", stream);
-                });           
+                });
             }
             else
             {
@@ -335,12 +335,13 @@
                             </td>
                             <td class="align-right">
                                 <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="source fps" id="${id}-fps"></div> / <div title="detected fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
-                                <div class="vif-controls align-right">
-                                    Skip Frames <input type="range" class="slider" id="${id}-skipSlider" min="0" max="${stream.frame_rate-1}" value="${stream.skip_frames}"><span id="${id}-skipValue">${stream.skip_frames}</span>
+                                <div class="vif-row" id="${id}-gopContainer" style="${stream.use_transcoder ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
+                                <div class="vif-controls align-right" id="${id}-skipSliderContainer" style="${stream.use_transcoder ? '' : 'display:none;'}">
+                                    Skipped fps<input type="range" class="slider" id="${id}-skipSlider" min="0" max="${stream.frame_rate-1}" value="${stream.skip_frames}"><span id="${id}-skipValue">${stream.skip_frames}</span>
                                 </div>
                                 <div class="align-right" id="${id}-vihost" style="font-style:italic"></div>
                                 <div id="${id}-sts"></div>
-                            </td>                    
+                            </td>
                             <td align="right"><div id="${id}-ping"></div></td>
                             <td align="right"><div id="${id}-ttl-proc"></div></td>
                             <td align="right"><div id="${id}-frame-detect" title="Total Object Processing Time"></div></td>
@@ -413,6 +414,22 @@
                     res.textContent = `${stream.width}x${stream.height}`;
                     fps = document.getElementById(id+"-fps");
                     fps.textContent = `${stream.frame_rate}fps`
+                    const gopContainer = document.getElementById(id+"-gopContainer");
+                    if (gopContainer) gopContainer.style.display = stream.use_transcoder ? 'none' : '';
+                    const gopEl = document.getElementById(id+"-gop");
+                    if (gopEl) {
+                        gopEl.textContent = stream.gop_size != null ? `Key Frame Interval:${stream.gop_size}` : '';
+                        if(stream.gop_size != null && stream.gop_size >0) {
+                            const mismatch = stream.gop_size != null && stream.frame_grab_interval != null
+                                && Math.round(stream.gop_size / stream.frame_rate * 1000) !== Math.round(stream.frame_grab_interval * 1000);
+                            gopEl.style.color = mismatch ? '#cc9900' : '';
+                            if (mismatch) {
+                                gopEl.textContent += ` (${Math.round(stream.gop_size / stream.frame_rate * 1000)}ms with frame grab of ${Math.round(stream.frame_grab_interval * 1000)}ms)`;
+                            }
+                        }
+                    }
+                    const skipSliderContainer = document.getElementById(id+"-skipSliderContainer");
+                    if (skipSliderContainer) skipSliderContainer.style.display = stream.use_transcoder ? '' : 'none';
                     slider = document.getElementById(id+"-skipSlider");
                     slider.max = Math.max(stream.frame_rate-1, 0);
                     if (!isSkipSliderInteracting(stream.app_name, stream.stream_name)) {
@@ -451,7 +468,7 @@
                         ttt_proc.textContent = `${Number(perf.total_processing_time_avg).toFixed(0)} ms`;
                     }
                     ttl_proc_avg = ttl_proc_avg + perf.total_processing_time_avg;
-                    
+
                     frame_detect = document.getElementById(id+"-frame-detect");
                     if(!stream.active) {
                         frame_detect.textContent = "-";
@@ -481,8 +498,13 @@
 
             const rand = new Date().getTime();
             const thumbnail_link = document.getElementById(thumbnailId+"-link");
-            thumbnail_link.href = `javascript:loadPlayerPage('${hostname}','${stream.app_name}','${stream.stream_name}-vi')`;
-            loadImage(`${serverUrl}/v2/server/plugin/vhosts/_defaultVHost_/applications/${stream.app_name}/instances/_definst_/streams/${stream.stream_name}-vi/thumbnail?fitMode=fitheight&height=180&random=+${rand}`,`${pathPrefix}thumb.png`,thumbnailId);
+            var stream_name = stream.stream_name;
+            loadImage(`${serverUrl}/v1/server/plugin/vif/applications/${stream.app_name}/streams/${stream_name}/thumbnail?fitMode=fitheight&height=180&overlay=true&random=+${rand}`,`${pathPrefix}thumb.png`,thumbnailId);
+            if(stream.use_transcoder)
+            {
+                stream_name = stream_name + "-vi";
+            }
+            thumbnail_link.href = `javascript:loadPlayerPage('${hostname}','${stream.app_name}','${stream_name}')`;
         }
 
         function getDetectorTypeIconPath(detectorType) {
@@ -555,7 +577,7 @@
             if(!stream.active) {
                 frame_detect2.textContent = `- | - | -`;
                 frame_detect2.className = '';
-            } 
+            }
             else {
                 let v = 0;
                 let frms = 0;
@@ -588,7 +610,7 @@
                  <a id="${id}-thumbnail-link"><img id="${id}-thumbnail" class="thumbnail-card-image" alt="Thumbnail"></a>
                 <br><div id="${id}-frame-detect-avg"></div>
             `;
-            hostContainer.appendChild(card);           
+            hostContainer.appendChild(card);
         }
 
         function renderHostCardValues(container, label, values, unit, yellow, red)
@@ -607,11 +629,11 @@
                     statsString+= `${Number(values[gpuId]).toFixed(0)}${unit}<br>`;
                 }
                 if (values[gpuId] > yellow) {
-                    alertClass = 'card-warn'; 
+                    alertClass = 'card-warn';
                 }
                 if (values[gpuId] > red) {
-                    alertClass = 'card-alert'; 
-                }                
+                    alertClass = 'card-alert';
+                }
             }
 
             const card = document.createElement('div');
@@ -627,14 +649,14 @@
         function renderHostCard(container, label, value, unit, yellow, red)
         {
             const hostContainer = document.getElementById(container);
-            
+
             // // Alert Logic for Host
             let alertClass = '';
             if (value > yellow) {
-                alertClass = 'card-warn'; 
+                alertClass = 'card-warn';
             }
             if (value > red) {
-                alertClass = 'card-alert'; 
+                alertClass = 'card-alert';
             }
             if(unit === undefined) {
                 unit = '';
@@ -742,7 +764,7 @@
         async function apiCall(appName, streamName, data)
         {
             const response = await fetch(`${serverUrl}/v1/server/plugin/vif/applications/${appName}/streams/${streamName}`, {
-                method: 'PUT', 
+                method: 'PUT',
                 body: JSON.stringify(data),
                 headers: {
                     'Authorization': `Basic ${encodedCredentials}`,
@@ -828,7 +850,7 @@
                 });
 
                 content = await response.text();
-                
+
             } catch (error) {
                 document.getElementById('config-streams').style.display = "none";
                 defaultJson();
@@ -960,5 +982,5 @@
         thumbnails = document.getElementById('thumbnailToggle');
         thumbnails.addEventListener('change', updateThumbnail.bind());
 
-        renderdashboardId = setInterval(renderDashboard, 1000); 
+        renderdashboardId = setInterval(renderDashboard, 1000);
         securityCheckId = setInterval(securityCheck,15000);

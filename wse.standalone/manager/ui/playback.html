@@ -1297,10 +1297,14 @@
         controls: true,
         loop: true,
         ui: flowplayer.ui.USE_PLAY_3,
-
         hls: {
-          native: false,
-          liveDurationInfinity: true
+            native: false,
+            liveDurationInfinity: true,
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 90,
+            interstitialAppendInPlace: false,
+            startPosition: 1.0
         }
       });
 
