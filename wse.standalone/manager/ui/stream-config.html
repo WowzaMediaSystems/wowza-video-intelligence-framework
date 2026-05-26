@@ -1013,18 +1013,19 @@
                 <input type="number" id="cfg-frame-grab" value="" placeholder="" min=".01" step="0.01">
                 <div class="field-help">Interval in seconds between frame grabs. Set to the GOP of the incoming stream.</div>
             </div>
-            <div class="form-group" id="cfg-skip-frames-group">
-                <label title="Higher values reduce the number of frames sent for analysis, which lowers load but can miss short events.">Skip Frames</label>
-                <input type="number" id="cfg-skip-frames" value="" placeholder="0" min="0" max="30" step="1">
-                <div class="field-help">How aggressively to reduce the number of frames sent per second for analysis. Higher values lower load but may miss short events.</div>
+            <div class="form-group" id="cfg-inference-fps-group">
+                <label title="Frames per second sent to the VIF service for analysis. Lower values reduce load but may miss short events.">Inference FPS</label>
+                <input type="number" id="cfg-inference-fps" value="" placeholder="30" min="1" max="120" step="1">
+                <div class="field-help">Frames per second sent for analysis. Lower values reduce load but may miss short events.</div>
             </div>
             <div class="form-group">
                 <label>Detector Type</label>
                 <select id="cfg-detector-type">
                     <option value="object" selected>Object</option>
                     <option value="scene">Scene</option>
+                    <option value="vlm">VLM</option>
                 </select>
-                <div class="field-help">Object detection tracks boxes like person/car. Scene detection classifies the whole frame or clip.</div>
+                <div class="field-help">Object detection tracks boxes like person/car. Scene detection classifies the whole frame or clip. VLM sends clips to a Vision Language Model endpoint.</div>
             </div>
 
             <div class="form-group" id="cfg-duration-group">
@@ -1034,12 +1035,12 @@
             </div>
 
             <div class="form-group" id="cfg-auto-scene-throttle-group">
-                <label title="When enabled, the plugin can increase or decrease skip_frames for scene analysis to keep inference from falling behind.">Auto Scene Frame Throttle</label>
+                <label title="When enabled, the plugin can increase or decrease inference_fps for scene analysis to keep inference from falling behind.">Auto Scene Frame Throttle</label>
                 <label class="switch">
                     <input type="checkbox" id="cfg-auto-scene-frame-throttle">
                     <span class="slider-switch"></span>
                 </label>
-                <div class="field-help">Lets the plugin adjust <code>skip_frames</code> for scene analysis when inference gets too slow.</div>
+                <div class="field-help">Lets the plugin adjust <code>inference_fps</code> for scene analysis when inference gets too slow.</div>
             </div>
 
             <!-- Object Analysis Section -->
@@ -1062,15 +1063,15 @@
                 </div>
                 <div class="form-group" id="checkpoint-path-group" style="display:none;">
                     <label>Checkpoint Path</label>
-                    <select id="cfg-checkpoint-path">
+                    <select id="cfg-checkpoint-path" onchange="updateClassNamesOptions()">
                         <option value="">Loading...</option>
                     </select>
                     <div class="field-help">Required when using a custom object model. This is the location of available customized models and model weights.</div>
                 </div>
                 <div class="form-group">
                     <label>Class Names</label>
-                    <textarea id="cfg-class-names" rows="3" placeholder="comma-separated, e.g. person,car,dog"></textarea>
-                    <div class="field-help">Comma-separated allowlist including only class names the object detection model supports. Leave empty only if you intentionally want the model's full class set.</div>
+                    <select id="cfg-class-names" multiple size="6"></select>
+                    <div class="field-help">Select class names to allowlist from the model's available classes. Leave nothing selected to pass all classes.</div>
                 </div>
 
                 <div class="form-group">
@@ -1157,6 +1158,63 @@
                 <div class="field-help">Minimum scene score to keep before listener filtering.</div>
             </div>
 
+            </div>
+
+            <!-- VLM Analysis Section -->
+            <div class="form-section" id="vlm-analysis-section" style="display:none;">
+                <div class="form-section-title">VLM Analysis</div>
+                <div class="section-help">
+                    Configure Vision Language Model (VLM) analysis using an external AI endpoint.
+                </div>
+
+                <div class="form-group">
+                    <label>Model Name</label>
+                    <input type="text" id="cfg-vlm-model-name" placeholder="e.g. gpt-4o">
+                    <div class="field-help">The name of the VLM model to use for analysis.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Endpoint URL</label>
+                    <input type="text" id="cfg-vlm-endpoint-url" placeholder="https://api.example.com/v1/chat/completions">
+                    <div class="field-help">URL of the VLM API endpoint. Leave empty to use the default for the model.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="cfg-vlm-api-key" placeholder="">
+                    <div class="field-help">API key for authenticating with the VLM endpoint.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Class Names</label>
+                    <textarea id="cfg-vlm-class-names" rows="3" placeholder="comma-separated, e.g. person walking, car, dog"></textarea>
+                    <div class="field-help">Comma-separated target phrases or labels for the model to classify against.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Request Timeout (seconds)</label>
+                    <input type="number" id="cfg-vlm-request-timeout" value="" placeholder="30" min="0" step="0.1">
+                    <div class="field-help">Timeout in seconds for each VLM API request.</div>
+                </div>
+
+                <!-- <div class="form-group">
+                    <label>Temperature</label>
+                    <input type="number" id="cfg-vlm-temperature" value="" placeholder="0.0" min="0" max="2" step="0.01">
+                    <div class="field-help">Controls randomness in model output. Lower values are more deterministic.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Max Tokens</label>
+                    <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" step="1">
+                    <div class="field-help">Maximum number of tokens in the VLM response.</div>
+                </div>
+
+
+                <div class="form-group">
+                    <label>Max Concurrent Requests</label>
+                    <input type="number" id="cfg-vlm-max-concurrent-requests" value="" placeholder="4" min="1" step="1">
+                    <div class="field-help">Maximum number of simultaneous VLM API requests.</div>
+                </div> -->
             </div>
 
             <!-- Debug Options Section -->
@@ -1301,6 +1359,8 @@
     </div>
 
 <script>
+    var COCO_CLASSES = ['airplane', 'apple', 'backpack', 'banana', 'baseball bat', 'baseball glove', 'bear', 'bed', 'bench', 'bicycle', 'bird', 'boat', 'book', 'bottle', 'bowl', 'broccoli', 'bus', 'cake', 'car', 'carrot', 'cat', 'cell phone', 'chair', 'clock', 'couch', 'cow', 'cup', 'dining table', 'dog', 'donut', 'elephant', 'fire hydrant', 'fork', 'frisbee', 'giraffe', 'hair drier', 'handbag', 'horse', 'hot dog', 'keyboard', 'kite', 'knife', 'laptop', 'microwave', 'motorcycle', 'mouse', 'orange', 'oven', 'parking meter', 'person', 'pizza', 'potted plant', 'refrigerator', 'remote', 'sandwich', 'scissors', 'sheep', 'sink', 'skateboard', 'skis', 'snowboard', 'spoon', 'sports ball', 'stop sign', 'suitcase', 'surfboard', 'teddy bear', 'tennis racket', 'tie', 'toaster', 'toilet', 'toothbrush', 'traffic light', 'train', 'truck', 'tv', 'umbrella', 'vase', 'wine glass', 'zebra'];
+
     url = new URL(window.location.href);
     serverUrl = serverUrl.replaceAll("wse.docker", url.hostname);
     serverUrl = serverUrl.replaceAll("host.docker.internal", url.hostname);
@@ -1321,7 +1381,7 @@
     var STREAM_CONFIG_SELECTION_STORAGE_KEY = `vif.stream-config.selected-stream.${window.location.host}`;
     // Validation ranges below are UI-owned and should be reviewed when config semantics change.
     var FIELD_RULES = {
-        'cfg-skip-frames': { min: 0, max: 30, integer: true, label: 'Skip Frames' },
+        'cfg-inference-fps': { min: 1, max: 120, integer: true, label: 'Inference FPS' },
         'cfg-rollup-batch-interval': { min: 0, max: 30, decimals: 1, label: 'Rollup Batch Interval' },
         'cfg-duration': { min: 0, max: 5, decimals: 1, label: 'Duration' },
         'cfg-confidence-threshold': { min: 0, max: 100, decimals: 1, label: 'Object Confidence Threshold %' },
@@ -1619,7 +1679,40 @@
     function toggleCheckpointPath() {
         const model = document.getElementById('cfg-model-name').value;
         document.getElementById('checkpoint-path-group').style.display = model === 'custom' ? 'flex' : 'none';
+        updateClassNamesOptions();
         markDirty();
+    }
+
+    function getModelClasses() {
+        const modelName = document.getElementById('cfg-model-name').value;
+        if (!defaultConfig || !defaultConfig.available_models || !defaultConfig.available_models.models) return [];
+        const models = defaultConfig.available_models.models;
+        let model;
+        if (modelName === 'custom') {
+            const checkpointPath = document.getElementById('cfg-checkpoint-path').value;
+            if (!checkpointPath) return [];
+            model = models.find(m => m.checkpoint_path === checkpointPath);
+        } else {
+            model = models.find(m => !m.is_custom && m.name && m.name.endsWith('-' +modelName));
+        }
+        if (!model) return [];
+        if (model.available_classes && model.available_classes.length > 0) return model.available_classes;
+        if (model.class_set === 'coco') return COCO_CLASSES;
+        return [];
+    }
+
+    function updateClassNamesOptions() {
+        const select = document.getElementById('cfg-class-names');
+        const classes = getModelClasses();
+        const selected = new Set(Array.from(select.selectedOptions).map(o => o.value));
+        select.innerHTML = '';
+        classes.forEach(cls => {
+            const opt = document.createElement('option');
+            opt.value = cls;
+            opt.textContent = cls;
+            if (selected.has(cls)) opt.selected = true;
+            select.appendChild(opt);
+        });
     }
 
     function toggleByteTrack() {
@@ -1690,7 +1783,7 @@
 
     // New stream default field values derive from defaultConfig where possible.
     function applySuggestedDefaultsForNewStream() {
-        const skipFramesInput = document.getElementById('cfg-skip-frames');
+        const inferenceFpsInput = document.getElementById('cfg-inference-fps');
         const rollupBatchTimeInput = document.getElementById('cfg-rollup-batch-interval');
         const objectConfidenceInput = document.getElementById('cfg-confidence-threshold');
         const logMaxMessagesInput = document.getElementById('cfg-log-max-messages');
@@ -1699,8 +1792,8 @@
         const btMaxLostFramesInput = document.getElementById('cfg-bt-max-lost-frames');
         const btMinOverlapInput = document.getElementById('cfg-bt-min-overlap');
         const btMinFramesInput = document.getElementById('cfg-bt-min-frames');
-        const skipFramesDefault = Number.isFinite(defaultConfig && defaultConfig.skip_frames)
-            ? defaultConfig.skip_frames
+        const inferenceFpsDefault = Number.isFinite(defaultConfig && defaultConfig.inference_fps)
+            ? defaultConfig.inference_fps
             : null;
         const rollupBatchTimeDefault = Number.isFinite(defaultConfig && defaultConfig.rollup_batch_interval)
             ? defaultConfig.rollup_batch_interval
@@ -1738,7 +1831,7 @@
             ? Math.round(defaultConfig.scene_analysis.confidence_threshold * 100)
             : null;
 
-        applyDefaultFieldValue(skipFramesInput, skipFramesDefault, '0');
+        applyDefaultFieldValue(inferenceFpsInput, inferenceFpsDefault, '30');
         applyDefaultFieldValue(rollupBatchTimeInput, rollupBatchTimeDefault, '2');
         applyDefaultFieldValue(objectConfidenceInput, objectConfidenceDefault, '30');
         applyDefaultFieldValue(logMaxMessagesInput, logMaxMessagesDefault, '20');
@@ -2115,7 +2208,7 @@
     function toDownloadableConfig(config) {
         const downloadConfig = JSON.parse(JSON.stringify(config || {}));
         delete downloadConfig.available_event_listeners;
-        delete downloadConfig.available_checkpoint_paths;
+        delete downloadConfig.available_models;
         if (downloadConfig.vi_service_api_key) {
             downloadConfig.vi_service_api_key = '${VIS_API_KEY}';
         }
@@ -2262,7 +2355,7 @@
             app_name: appName,
             stream_name: streamName,
             log_max_messages: readNumericInputValue('cfg-log-max-messages', true),
-            skip_frames: readNumericInputValue('cfg-skip-frames', true),
+            inference_fps: readNumericInputValue('cfg-inference-fps', true),
             use_transcoder: document.getElementById('cfg-use-transcoder').checked,
             frame_grab_interval: readNumericInputValue('cfg-frame-grab', false),
             duration: readNumericInputValue('cfg-duration', false),
@@ -2272,7 +2365,7 @@
             detector_type: detectorType
         };
 
-        if (detectorType === 'scene') {
+        if (detectorType === 'scene' || detectorType === 'vlm') {
             config.auto_scene_frame_throttle = document.getElementById('cfg-auto-scene-frame-throttle').checked;
         }
 
@@ -2280,10 +2373,7 @@
         config.ignore_untracked_objects = document.getElementById('cfg-ignore-untracked-objects').checked;
 
         if (detectorType === 'object') {
-            const classNames = document.getElementById('cfg-class-names').value
-                .split(',')
-                .map(s => s.trim())
-                .filter(s => s.length > 0);
+            const classNames = Array.from(document.getElementById('cfg-class-names').selectedOptions).map(o => o.value);
 
             const trackingMethod = document.getElementById('cfg-tracking-method').value;
 
@@ -2319,6 +2409,24 @@
                 class_names: sceneClassNames,
                 sensitivity: readNumericInputValue('cfg-scene-sensitivity', false),
                 confidence_threshold: readNumericInputValue('cfg-scene-confidence-threshold', false) / 100,
+            };
+        }
+
+        if (detectorType === 'vlm') {
+            const vlmClassNames = document.getElementById('cfg-vlm-class-names').value
+                .split(',')
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            config.vlm_analysis = {
+                model_name: document.getElementById('cfg-vlm-model-name').value || null,
+                endpoint_url: document.getElementById('cfg-vlm-endpoint-url').value || null,
+                api_key: document.getElementById('cfg-vlm-api-key').value || null,
+                class_names: vlmClassNames,
+                request_timeout_seconds: readNumericInputValue('cfg-vlm-request-timeout', false),
+                // temperature: readNumericInputValue('cfg-vlm-temperature', false),
+                // max_tokens: readNumericInputValue('cfg-vlm-max-tokens', true),
+                // max_concurrent_requests: readNumericInputValue('cfg-vlm-max-concurrent-requests', true),
             };
         }
 
@@ -2372,8 +2480,8 @@
         if (!config.app_name) errors.push('Application is required.');
         if (!config.stream_name) errors.push('Stream name / regex is required.');
 
-        if (!Number.isFinite(config.skip_frames) || config.skip_frames < 0 || config.skip_frames > 30 || !Number.isInteger(config.skip_frames)) {
-            errors.push('Skip Frames must be a whole number between 0 and 30.');
+        if (!Number.isFinite(config.inference_fps) || config.inference_fps < 1 || config.inference_fps > 120 || !Number.isInteger(config.inference_fps)) {
+            errors.push('Inference FPS must be a whole number between 1 and 120.');
         }
 
         if (!Number.isFinite(config.log_max_messages) || config.log_max_messages < 0 || config.log_max_messages > 1000 || !Number.isInteger(config.log_max_messages)) {
@@ -2423,6 +2531,14 @@
             }
             if (!Number.isFinite(sa.sensitivity) || sa.sensitivity < 0 || sa.sensitivity > 10) {
                 errors.push('Scene sensitivity must be between 0 and 10.');
+            }
+        }
+
+        if (config.detector_type === 'vlm') {
+            const va = config.vlm_analysis || {};
+            if (!va.model_name) errors.push('VLM model name is required.');
+            if (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > 5) {
+                errors.push('Duration must be between 0 and 5 for VLM detection.');
             }
         }
 
@@ -2489,7 +2605,7 @@
         suppressDirtyTracking = true;
         // Stream settings
         document.getElementById('cfg-active').checked = false;
-        document.getElementById('cfg-skip-frames').value = '';
+        document.getElementById('cfg-inference-fps').value = '';
         document.getElementById('cfg-use-transcoder').checked = false;
         document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
         document.getElementById('cfg-frame-grab').value = '';
@@ -2504,7 +2620,7 @@
         document.getElementById('cfg-detector-type').value = '';
 
         // Object analysis
-        document.getElementById('cfg-class-names').value = '';
+        document.getElementById('cfg-class-names').innerHTML = '';
         document.getElementById('cfg-model-name').value = '';
         document.getElementById('cfg-checkpoint-path').value = '';
         document.getElementById('cfg-confidence-threshold').value = '';
@@ -2520,6 +2636,16 @@
         document.getElementById('cfg-scene-class-names').value = '';
         document.getElementById('cfg-scene-sensitivity').value = '';
         document.getElementById('cfg-scene-confidence-threshold').value = '';
+
+        // VLM analysis
+        document.getElementById('cfg-vlm-model-name').value = '';
+        document.getElementById('cfg-vlm-endpoint-url').value = '';
+        document.getElementById('cfg-vlm-api-key').value = '';
+        document.getElementById('cfg-vlm-class-names').value = '';
+        document.getElementById('cfg-vlm-request-timeout').value = '';
+        // document.getElementById('cfg-vlm-temperature').value = '';
+        // document.getElementById('cfg-vlm-max-tokens').value = '';
+        // document.getElementById('cfg-vlm-max-concurrent-requests').value = '';
         suppressDirtyTracking = false;
     }
 
@@ -2533,8 +2659,8 @@
         if (config.log_max_messages !== undefined) {
             document.getElementById('cfg-log-max-messages').value = config.log_max_messages;
         }
-        if (config.skip_frames !== undefined) {
-            document.getElementById('cfg-skip-frames').value = config.skip_frames;
+        if (config.inference_fps !== undefined) {
+            document.getElementById('cfg-inference-fps').value = config.inference_fps;
         }
         if (config.use_transcoder !== undefined) {
             document.getElementById('cfg-use-transcoder').checked = config.use_transcoder;
@@ -2574,15 +2700,18 @@
 
         if (config.object_analysis || isNewStream()) {
             const oa = config.object_analysis || {};
-            if (oa.class_names) {
-                document.getElementById('cfg-class-names').value = oa.class_names.join(', ');
-            }
             if (oa.model_name) {
                 document.getElementById('cfg-model-name').value = oa.model_name;
             }
             if (oa.checkpoint_path) {
                 populateCheckpointPaths(oa.checkpoint_path);
                 document.getElementById('cfg-checkpoint-path').value = oa.checkpoint_path;
+            }
+            updateClassNamesOptions();
+            if (oa.class_names && oa.class_names.length > 0) {
+                const classSelect = document.getElementById('cfg-class-names');
+                const nameSet = new Set(oa.class_names);
+                Array.from(classSelect.options).forEach(opt => { opt.selected = nameSet.has(opt.value); });
             }
             if (oa.confidence_threshold !== undefined) {
                 document.getElementById('cfg-confidence-threshold').value = Math.round(oa.confidence_threshold * 100);
@@ -2618,6 +2747,34 @@
             if (sa.confidence_threshold !== undefined) {
                 document.getElementById('cfg-scene-confidence-threshold').value = Math.round(sa.confidence_threshold * 100);
             }
+        }
+
+        if (config.vlm_analysis || isNewStream()) {
+            const va = config.vlm_analysis || {};
+            if (va.model_name) {
+                document.getElementById('cfg-vlm-model-name').value = va.model_name;
+            }
+            if (va.endpoint_url) {
+                document.getElementById('cfg-vlm-endpoint-url').value = va.endpoint_url;
+            }
+            if (va.api_key) {
+                document.getElementById('cfg-vlm-api-key').value = va.api_key;
+            }
+            if (va.class_names) {
+                document.getElementById('cfg-vlm-class-names').value = va.class_names.join(', ');
+            }
+            if (va.request_timeout_seconds !== undefined) {
+                document.getElementById('cfg-vlm-request-timeout').value = va.request_timeout_seconds;
+            }
+            // if (va.temperature !== undefined) {
+            //     document.getElementById('cfg-vlm-temperature').value = va.temperature;
+            // }
+            // if (va.max_tokens !== undefined) {
+            //     document.getElementById('cfg-vlm-max-tokens').value = va.max_tokens;
+            // }
+            // if (va.max_concurrent_requests !== undefined) {
+            //     document.getElementById('cfg-vlm-max-concurrent-requests').value = va.max_concurrent_requests;
+            // }
         }
 
         // Event listeners
@@ -2739,8 +2896,9 @@
     function populateCheckpointPaths(existingPath) {
         var select = document.getElementById('cfg-checkpoint-path');
         select.innerHTML = '';
-        var paths = (defaultConfig && defaultConfig.available_checkpoint_paths) || [];
-        if (paths.length === 0) {
+        var models = (defaultConfig && defaultConfig.available_models && defaultConfig.available_models.models) || [];
+        var customModels = models.filter(function(m) { return m.is_custom; });
+        if (customModels.length === 0) {
             if (existingPath) {
                 var opt = document.createElement('option');
                 opt.value = existingPath;
@@ -2754,10 +2912,10 @@
             }
             return;
         }
-        paths.forEach(function(path) {
+        customModels.forEach(function(model) {
             var opt = document.createElement('option');
-            opt.value = path;
-            opt.textContent = path;
+            opt.value = model.checkpoint_path;
+            opt.textContent = model.checkpoint_path;
             select.appendChild(opt);
         });
     }
@@ -3030,7 +3188,7 @@
             return option.value;
         });
 
-        const detectorSpecificMethods = normalizedDetectorType === 'scene'
+        const detectorSpecificMethods = (normalizedDetectorType === 'scene' || normalizedDetectorType === 'vlm')
             ? metadata.scene_methods
             : normalizedDetectorType === 'object'
                 ? metadata.object_methods
@@ -3091,7 +3249,7 @@
     }
 
     function buildDetectorTypeSwitchConflictMessage(targetDetectorType, conflicts) {
-        const targetLabel = targetDetectorType === 'scene' ? 'Scene' : targetDetectorType === 'object' ? 'Object' : targetDetectorType;
+        const targetLabel = targetDetectorType === 'scene' ? 'Scene' : targetDetectorType === 'object' ? 'Object' : targetDetectorType === 'vlm' ? 'VLM' : targetDetectorType;
         const details = conflicts.map(function(conflict) {
             return conflict.name + ' (' + formatEventMethodLabel(conflict.method) + '; allowed: ' + conflict.allowedLabels.join(', ') + ')';
         }).join(', ');
@@ -3100,7 +3258,7 @@
     }
 
     function buildDetectorTypeSwitchConflictDialogMessage(targetDetectorType, conflicts) {
-        const targetLabel = targetDetectorType === 'scene' ? 'Scene' : targetDetectorType === 'object' ? 'Object' : targetDetectorType;
+        const targetLabel = targetDetectorType === 'scene' ? 'Scene' : targetDetectorType === 'object' ? 'Object' : targetDetectorType === 'vlm' ? 'VLM' : targetDetectorType;
         const details = conflicts.map(function(conflict) {
             const visibleAllowedLabels = conflict.allowedLabels.filter(function(label) {
                 return label !== 'Disabled';
@@ -3607,10 +3765,11 @@
         const useTranscoder = document.getElementById('cfg-use-transcoder').checked;
         document.getElementById('object-analysis-section').style.display = detectorType === 'object' ? 'block' : 'none';
         document.getElementById('scene-analysis-section').style.display = detectorType === 'scene' ? 'block' : 'none';
+        document.getElementById('vlm-analysis-section').style.display = detectorType === 'vlm' ? 'block' : 'none';
         document.getElementById('cfg-rollup-batch-interval-group').style.display = 'flex';
-        document.getElementById('cfg-duration-group').style.display = detectorType === 'scene' ? 'flex' : 'none';
-        document.getElementById('cfg-auto-scene-throttle-group').style.display = detectorType === 'scene' ? 'flex' : 'none';
-        document.getElementById('cfg-skip-frames-group').style.display = useTranscoder ? 'flex' : 'none';
+        document.getElementById('cfg-duration-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
+        document.getElementById('cfg-auto-scene-throttle-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
+        document.getElementById('cfg-inference-fps-group').style.display = useTranscoder ? 'flex' : 'none';
         document.getElementById('cfg-frame-grab-group').style.display = useTranscoder ? 'none' : 'flex';
         if (activeListenerName && eventListenersData[activeListenerName]) {
             const current = eventListenersData[activeListenerName];
@@ -3832,6 +3991,11 @@
 
     // Initialize
     console.log(`VIF ${new Date().toISOString().slice(0, 10)}`);
+
+    var vlmOptionEl = document.querySelector('#cfg-detector-type option[value="vlm"]');
+    var vlmEnabled = new URLSearchParams(window.location.search).get('vlm') === 'true';
+    if (!vlmEnabled) vlmOptionEl.style.display = 'none';
+
     initializeStaticFieldRules();
     initializeStaticFieldTooltips();
     toggleByteTrack();
