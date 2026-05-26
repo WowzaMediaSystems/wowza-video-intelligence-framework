@@ -5,6 +5,7 @@
     "active":false, //if we should do vi on the stream
     "vi_service_url":"${VIS_PROTOCOL}://${VIS_HOST}:${VIS_PORT}/ws/stream/",  //where the vif service is hosted
     "vi_service_api_key":"${VIS_API_KEY}",  //api key used to connect to vif service
+    //"model_idle_timeout_seconds": 60, //how long a model should stay loaded with no streams before it is unloaded, default is 60 seconds
     "ignore_untracked_objects": false, //ignore untracked objects when tracking_method is set
 
     "vif_event_listeners": {
@@ -19,7 +20,7 @@
     "duration": 2, //how many seconds to send (scene only)
     "use_transcoder": true, //whether to use transcoder to capture frames
     "frame_grab_interval": 1, //if not using transcoder, how often to capture frames in seconds
-    "skip_frames": 0, //skipped frames per second
+    "inference_fps": 30, //target fps for inference
     "frame_buffer": 10, //buffer to hold frames to process
 
     // how many parallel instances to create for each model type.
@@ -71,6 +72,8 @@
       "confidence_threshold":0.3,
       "sensitivity":5
     },
+    "vlm_analysis" : {
+    },
     "streams":
     [
         {
@@ -110,7 +113,7 @@
             "log_timing": 0,
             "save_images": false,
             "frame_buffer": 10,
-            "skip_frames": 13,
+            "inference_fps": 12,
             "resize_output": true,
 
             "detector_type":"object",
@@ -156,8 +159,8 @@
                  }
             },
             "frame_buffer": 10,
-            "skip_frames": 20,
-            "duration": 1,
+            "inference_fps": 5,
+            "duration": 2,
 
             "detector_type":"scene",
             "scene_analysis": {
@@ -186,7 +189,7 @@
 
             "log_max_messages": 20,
             "log_timing": 2,
-            "skip_frames": 0,
+            "inference_fps": 25,
 
             "vif_event_listeners": {
                 "ObjectTracking": {
@@ -351,7 +354,7 @@
             "self_paced_detections": true,
             "resize_output": true,
             "frame_buffer": 10,
-            "skip_frames": 0,
+            "inference_fps": 25,
             "duration": 0.0
         }
     ]

@@ -334,10 +334,10 @@
                                 </div>
                             </td>
                             <td class="align-right">
-                                <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="source fps" id="${id}-fps"></div> / <div title="detected fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
+                                <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div> / <div title="Inference fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
                                 <div class="vif-row" id="${id}-gopContainer" style="${stream.use_transcoder ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
                                 <div class="vif-controls align-right" id="${id}-skipSliderContainer" style="${stream.use_transcoder ? '' : 'display:none;'}">
-                                    Skipped fps<input type="range" class="slider" id="${id}-skipSlider" min="0" max="${stream.frame_rate-1}" value="${stream.skip_frames}"><span id="${id}-skipValue">${stream.skip_frames}</span>
+                                    Inference fps<input type="range" class="slider" id="${id}-skipSlider" min="1" max="${stream.frame_rate}" value="${stream.inference_fps}"><span id="${id}-skipValue">${stream.inference_fps}</span>
                                 </div>
                                 <div class="align-right" id="${id}-vihost" style="font-style:italic"></div>
                                 <div id="${id}-sts"></div>
@@ -431,13 +431,13 @@
                     const skipSliderContainer = document.getElementById(id+"-skipSliderContainer");
                     if (skipSliderContainer) skipSliderContainer.style.display = stream.use_transcoder ? '' : 'none';
                     slider = document.getElementById(id+"-skipSlider");
-                    slider.max = Math.max(stream.frame_rate-1, 0);
+                    slider.max = stream.frame_rate;
                     if (!isSkipSliderInteracting(stream.app_name, stream.stream_name)) {
-                        slider.value = stream.skip_frames;
+                        slider.value = stream.inference_fps;
                         updateSkipFrameDisplay(id);
                     }
                     dfps = document.getElementById(id+"-dfps");
-                    dfps.textContent = `${stream.frame_rate-stream.skip_frames}fps`
+                    dfps.textContent = `${stream.inference_fps}fps`;
                     equ = document.getElementById(id+"-equ");
                     equ.textContent = `${Number(1/stream.frame_rate*1000).toFixed(0)}ms`
 
@@ -815,7 +815,7 @@
             if (!slider) return;
             clearSkipFrameInteraction(appName, streamName);
             const data = {
-                skip_frames: slider.value
+                inference_fps: parseInt(slider.value)
             };
             try {
                 await runDashboardMutation(async () => {

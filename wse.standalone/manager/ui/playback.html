@@ -525,6 +525,15 @@
       border: 1px solid rgba(217,83,79,0.4);
     }
 
+    .detection-reasoning {
+      font-size: 0.85em;
+      color: #555;
+      font-style: italic;
+      font-weight: normal;
+      margin: 1px 0 4px 4px;
+      white-space: normal;
+    }
+
     .hidden { display: none; }
 
 /*    .navbar-logo { height: 44px; width: 44px; float: left; }
@@ -959,8 +968,7 @@
                   (typeof det.confidence === 'number') ? det.confidence :
                   null;
 
-                if (confidence === null) return;
-                detections.push({ label: det.class_name, confidence });
+                detections.push({ label: det.class_name, confidence, reasoning: det.reasoning || null });
               });
             }
           });
@@ -972,14 +980,17 @@
 
         const minScore = getMinScore();
         detections = detections
-          .filter(d => typeof d.confidence === 'number' && d.confidence >= minScore)
-          .sort((a, b) => b.confidence - a.confidence);
+          .filter(d => d.confidence === null || (typeof d.confidence === 'number' && d.confidence >= minScore))
+          .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
 
         if (detections.length === 0) return;
 
+        const isVlm = eventType === 'vlm-detection';
         const labels = detections.map(d => {
-          const confidenceClass = getConfidenceClass(d.confidence);
-          return `<span class="detection-label ${confidenceClass}">${escapeHtml(d.label)} (${Number(d.confidence).toFixed(2)})</span>`;
+          const confidenceClass = d.confidence !== null ? getConfidenceClass(d.confidence) : '';
+          const confidenceStr = d.confidence !== null ? ` (${Number(d.confidence).toFixed(2)})` : '';
+          const reasoningStr = isVlm && d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
+          return `<span class="detection-label ${confidenceClass}">${escapeHtml(d.label)}${confidenceStr}</span>${reasoningStr}`;
         }).join('');
 
         const content = `
@@ -1354,6 +1365,9 @@
         if (eventType === CONFIG.EVENT_TYPE_PDT) {
           updatePdtAnchorFromCue(cue);
           console.log('[pdt] anchor set', { pdtAnchorIso, pdtAnchorMediaTime });
+        }
+        else {
+            console.log(`[player] ID3 event: ${eventType}`, eventData);
         }
 
         const cueStart = (typeof cue.startTime === 'number') ? cue.startTime : NaN;
