@@ -1,0 +1,526 @@
+
+    <style>
+        :root {
+            --form-label-width: 200px;
+        }
+
+        .content-wrapper,
+        .content-wrapper * {
+            box-sizing: border-box;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .streams-header {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px 16px;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+        }
+
+        button {
+            padding: 0.4em 0.7em;
+            font-family: monospace;
+            font-size: 0.85em;
+            cursor: pointer;
+            background: #2a71ab;
+            border: 1px solid #ccc;
+            color: #ffffff;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+        button:hover { background: #225783; }
+        button:disabled {
+            background-color: #cccccc;
+            color: #666666;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .content-wrapper {
+            padding: 16px;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .form-wrapper {
+            background: #fafafa;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            max-width: 700px;
+        }
+
+        .form-section-title {
+            font-size: 0.85em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .section-help {
+            font-size: 0.82em;
+            color: #666;
+            margin-bottom: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .form-group label:not(.switch) {
+            flex: 0 0 var(--form-label-width);
+            max-width: var(--form-label-width);
+            font-size: 0.85em;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-align: right;
+            line-height: 1.35;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group input[type="number"] {
+            flex: 1 1 200px;
+            max-width: 320px;
+            padding: 5px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        .input-with-toggle {
+            display: flex;
+            flex: 1 1 200px;
+            max-width: 320px;
+            gap: 0;
+        }
+
+        .input-with-toggle input {
+            flex: 1 1 0;
+            min-width: 0;
+            max-width: none;
+            border-radius: 4px 0 0 4px;
+            border-right: none;
+        }
+
+        .input-with-toggle button {
+            flex: 0 0 auto;
+            padding: 5px 8px;
+            font-size: 0.8em;
+            border-radius: 0 4px 4px 0;
+            margin-bottom: 0;
+            border: 1px solid #ccc;
+            background: #e8e8e8;
+            color: #333;
+            white-space: nowrap;
+        }
+        .input-with-toggle button:hover { background: #d0d0d0; }
+
+        .field-help {
+            flex: 1 1 100%;
+            font-size: 0.78em;
+            color: #888;
+            padding-left: calc(var(--form-label-width) + 10px);
+            margin-top: -6px;
+        }
+
+        .field-help code {
+            background: #eee;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 0.95em;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-flex;
+            width: 50px;
+            height: 23px;
+            flex-shrink: 0;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider-switch {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 25px;
+        }
+        .slider-switch:before {
+            position: absolute;
+            content: "";
+            height: 15px; width: 15px;
+            left: 4px; bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input:checked + .slider-switch { background-color: #2a71ab; }
+        input:checked + .slider-switch:before { transform: translateX(24px); }
+
+        .form-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid #ddd;
+        }
+
+        #status-message {
+            font-size: 0.85em;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        #status-message.visible { opacity: 1; }
+        #status-message.success { color: #2a7a2a; }
+        #status-message.error   { color: #c0392b; }
+
+        fieldset {
+            border: none;
+            padding: 0;
+            margin: 0;
+            min-width: 0;
+        }
+    </style>
+
+    <div class="content-wrapper">
+        <div class="streams-header">
+            <h2>VIF Default Config</h2>
+            <div>
+                <button onclick="loadAjaxPluginContent('server','vif','shm.html','')">Back to Dashboard</button>
+            </div>
+        </div>
+
+        <fieldset id="default-fieldset">
+
+            <div class="form-wrapper" style="margin-bottom:16px;">
+                <div class="form-section-title">Service Connection</div>
+                <div class="section-help">
+                    Settings that apply to all streams unless overridden per-stream.
+                    Environment variable placeholders (e.g. <code>${VIS_API_KEY}</code>) are resolved at runtime.
+                </div>
+
+                <div class="form-group">
+                    <label title="Base URL of the VIF service">VIF Service URL</label>
+                    <input type="text" id="def-vi-service-url"
+                           placeholder="${VIS_PROTOCOL}://${VIS_HOST}:${VIS_PORT}/ws/stream/"
+                           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <div class="field-help">
+                        WebSocket endpoint for the VIF service.
+                        Supports <code>${ENV_VAR}</code> substitution.
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label title="API key sent to the VIF service">VIF Service API Key</label>
+                    <div class="input-with-toggle">
+                        <input type="password" id="def-vi-service-api-key"
+                               placeholder="${VIS_API_KEY}"
+                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <button type="button" id="def-api-key-toggle" onclick="toggleApiKeyVisibility()" title="Show/hide API key">Show</button>
+                    </div>
+                    <div class="field-help">
+                        Sent as <code>X-API-KEY</code> header.
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-wrapper">
+                <div class="form-section-title">Video Processing Defaults</div>
+
+                <div class="form-group">
+                    <label title="Default inference FPS for all streams">Inference FPS</label>
+                    <input type="number" id="def-inference-fps"
+                           placeholder="-1" min="-1" max="120" step="1">
+                    <div class="field-help">
+                        Default frames per second sent for analysis. Set to <code>-1</code> to match each stream's frame rate.
+                        Per-stream configs can override this value.
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label title="Use transcoder output as the frame source">Use Transcoder</label>
+                    <label class="switch">
+                        <input type="checkbox" id="def-use-transcoder">
+                        <span class="slider-switch"></span>
+                    </label>
+                    <div class="field-help">
+                        When enabled, frames are pulled from the transcoder output instead of the incoming stream.
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label title="Interval in seconds between frame grabs">Frame Grab Interval</label>
+                    <input type="number" id="def-frame-grab-interval"
+                           placeholder="1" min="0.01" step="0.01">
+                    <div class="field-help">
+                        Seconds between frame grabs when not using the transcoder. Set to the GOP of the incoming stream.
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label title="Clip duration in seconds (scene/VLM only)">Duration (seconds)</label>
+                    <input type="number" id="def-duration"
+                           placeholder="2" min="0" max="5" step="0.1">
+                    <div class="field-help">
+                        Scene/VLM only. Length of the clip sent to the VIF service per analysis request.
+                    </div>
+                </div>
+
+                <div class="form-section-title" style="margin-top:16px;">Concurrent Executions</div>
+
+                <div class="form-group">
+                    <label title="Max parallel object detection inferences">Object Detection</label>
+                    <input type="number" id="def-concurrent-object"
+                           placeholder="10" min="1" step="1">
+                    <div class="field-help">
+                        Max simultaneous object detection inferences. Increase if GPU usage stays below 50% at full load.
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label title="Max parallel scene detection inferences">Scene Detection</label>
+                    <input type="number" id="def-concurrent-scene"
+                           placeholder="1" min="1" step="1">
+                    <div class="field-help">
+                        Max simultaneous scene detection inferences.
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <span id="status-message"></span>
+                    <button id="def-save-btn" onclick="saveDefaultConfig()" style="margin-left:auto;">Save all changes</button>
+                </div>
+            </div>
+
+        </fieldset>
+    </div>
+
+<script>
+    (function () {
+        // ── globals injected by Wowza Manager parent frame ──────────────────
+        var _serverUrl = (typeof serverUrl !== 'undefined' ? serverUrl : '');
+        var url = new URL(window.location.href);
+        _serverUrl = _serverUrl.replaceAll('wse.docker', url.hostname);
+        _serverUrl = _serverUrl.replaceAll('host.docker.internal', url.hostname);
+        _serverUrl = _serverUrl.replace(/\/+$/, '');
+        var _credentials = (typeof username !== 'undefined' ? username : '') + ':' +
+                           (typeof password !== 'undefined' ? password : '');
+        var _encoded = btoa(_credentials);
+
+        var API_URL = _serverUrl + '/v1/server/plugin/vif/config';
+        var HEADERS = { 'Authorization': 'Basic ' + _encoded, 'Content-Type': 'application/json' };
+
+        // ── status ───────────────────────────────────────────────────────────
+        var statusTimer = null;
+        function showStatus(msg, isError) {
+            var el = document.getElementById('status-message');
+            if (!el) return;
+            clearTimeout(statusTimer);
+            el.textContent = msg;
+            el.className = 'visible ' + (isError ? 'error' : 'success');
+            statusTimer = setTimeout(function () {
+                el.classList.remove('visible');
+            }, 3500);
+        }
+
+        // ── api key toggle ────────────────────────────────────────────────────
+        window.toggleApiKeyVisibility = function () {
+            var input  = document.getElementById('def-vi-service-api-key');
+            var btn    = document.getElementById('def-api-key-toggle');
+            var hidden = input.type === 'password';
+            input.type = hidden ? 'text' : 'password';
+            btn.textContent = hidden ? 'Hide' : 'Show';
+        };
+
+        function sanitizeNumericString(raw, rule) {
+            if (raw === '') return '';
+            var allowNeg = Number.isFinite(rule.min) && rule.min < 0;
+            var str = String(raw);
+            var isNeg = allowNeg && str.startsWith('-');
+            var value = str.replace(/[^0-9.]/g, '');
+            var dot = value.indexOf('.');
+            if (dot !== -1) {
+                value = value.slice(0, dot + 1) + value.slice(dot + 1).replace(/\./g, '');
+            }
+            if (rule.integer) {
+                value = value.split('.')[0];
+            }
+            if (isNeg && value !== '') value = '-' + value;
+            return value;
+        }
+
+        function validateNumericValue(raw, rule) {
+            if (raw === '' || raw == null) return false;
+            var value = sanitizeNumericString(raw, rule);
+            if (value === '' || value === '.') return false;
+            var n = rule.integer ? parseInt(value, 10) : parseFloat(value);
+            if (!Number.isFinite(n)) return false;
+            if (Number.isFinite(rule.min) && n < rule.min) return false;
+            if (Number.isFinite(rule.max) && n > rule.max) return false;
+            return true;
+        }
+
+        function normalizeNumericValue(raw, rule) {
+            var sanitized = sanitizeNumericString(raw, rule);
+            if (sanitized === '' || sanitized === '.') return '';
+            var n = rule.integer ? parseInt(sanitized, 10) : parseFloat(sanitized);
+            if (!Number.isFinite(n)) return '';
+            if (Number.isFinite(rule.min)) n = Math.max(rule.min, n);
+            if (Number.isFinite(rule.max)) n = Math.min(rule.max, n);
+            return String(n);
+        }
+
+        var INF_FPS_RULE       = { min: -1,   max: 120, integer: true };
+        var FRAME_GRAB_RULE    = { min: 0.01,           decimals: 2  };
+        var DURATION_RULE      = { min: 0,    max: 5,   decimals: 1  };
+        var CONCURRENT_RULE    = { min: 1,              integer: true };
+
+        function bindNumericInput(id, rule, hint) {
+            var el = document.getElementById(id);
+            el.addEventListener('input', function () {
+                var s = sanitizeNumericString(el.value, rule);
+                if (el.value !== s) el.value = s;
+                var valid = el.value === '' || validateNumericValue(el.value, rule);
+                el.setCustomValidity(valid ? '' : hint);
+            });
+            el.addEventListener('blur', function () {
+                el.value = normalizeNumericValue(el.value, rule);
+                var valid = el.value === '' || validateNumericValue(el.value, rule);
+                el.setCustomValidity(valid ? '' : hint);
+            });
+        }
+
+        var fpsInput = document.getElementById('def-inference-fps');
+        bindNumericInput('def-inference-fps',      INF_FPS_RULE,    'Whole number -1 or 1–120');
+        bindNumericInput('def-frame-grab-interval', FRAME_GRAB_RULE, 'Must be ≥ 0.01');
+        bindNumericInput('def-duration',            DURATION_RULE,   'Must be 0–5');
+        bindNumericInput('def-concurrent-object',   CONCURRENT_RULE, 'Must be a whole number ≥ 1');
+        bindNumericInput('def-concurrent-scene',    CONCURRENT_RULE, 'Must be a whole number ≥ 1');
+
+        // ── populate form from API response ───────────────────────────────────
+        function setNumeric(id, val) {
+            document.getElementById(id).value = (val != null) ? val : '';
+        }
+
+        function populateForm(config) {
+            document.getElementById('def-vi-service-url').value = config.vi_service_url || '';
+            document.getElementById('def-vi-service-api-key').value = config.vi_service_api_key || '';
+            document.getElementById('def-use-transcoder').checked = !!config.use_transcoder;
+            setNumeric('def-inference-fps',       config.inference_fps);
+            setNumeric('def-frame-grab-interval', config.frame_grab_interval);
+            setNumeric('def-duration',            config.duration);
+            var ce = config.concurrent_executions || {};
+            setNumeric('def-concurrent-object', ce.object_detection && ce.object_detection.default != null ? ce.object_detection.default : null);
+            setNumeric('def-concurrent-scene',  ce.scene_detection  && ce.scene_detection.default  != null ? ce.scene_detection.default  : null);
+        }
+
+        // ── load ──────────────────────────────────────────────────────────────
+        async function loadDefaultConfig() {
+            document.getElementById('def-save-btn').disabled = true;
+            document.getElementById('default-fieldset').disabled = true;
+            try {
+                var resp = await fetch(API_URL, { method: 'GET', headers: HEADERS });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+                var config = await resp.json();
+                populateForm(config);
+                document.getElementById('def-save-btn').disabled = false;
+                document.getElementById('default-fieldset').disabled = false;
+            } catch (err) {
+                showStatus('Error loading config: ' + err.message + ' — refresh to retry.', true);
+            }
+        }
+
+        // ── save ──────────────────────────────────────────────────────────────
+        window.saveDefaultConfig = async function () {
+            var urlVal       = document.getElementById('def-vi-service-url').value.trim();
+            var keyVal       = document.getElementById('def-vi-service-api-key').value.trim();
+            var fpsVal       = fpsInput.value.trim();
+            var grabVal      = document.getElementById('def-frame-grab-interval').value.trim();
+            var durationVal  = document.getElementById('def-duration').value.trim();
+            var concObjVal   = document.getElementById('def-concurrent-object').value.trim();
+            var concScnVal   = document.getElementById('def-concurrent-scene').value.trim();
+
+            if (fpsVal !== '' && !validateNumericValue(fpsVal, INF_FPS_RULE)) {
+                showStatus('Inference FPS must be a whole number between 1 and 120, or -1 to match the stream frame rate.', true);
+                fpsInput.focus();
+                return;
+            }
+            if (grabVal !== '' && !validateNumericValue(grabVal, FRAME_GRAB_RULE)) {
+                showStatus('Frame Grab Interval must be ≥ 0.01.', true);
+                document.getElementById('def-frame-grab-interval').focus();
+                return;
+            }
+            if (durationVal !== '' && !validateNumericValue(durationVal, DURATION_RULE)) {
+                showStatus('Duration must be between 0 and 5.', true);
+                document.getElementById('def-duration').focus();
+                return;
+            }
+            if (concObjVal !== '' && !validateNumericValue(concObjVal, CONCURRENT_RULE)) {
+                showStatus('Object Detection concurrent executions must be a whole number ≥ 1.', true);
+                document.getElementById('def-concurrent-object').focus();
+                return;
+            }
+            if (concScnVal !== '' && !validateNumericValue(concScnVal, CONCURRENT_RULE)) {
+                showStatus('Scene Detection concurrent executions must be a whole number ≥ 1.', true);
+                document.getElementById('def-concurrent-scene').focus();
+                return;
+            }
+
+            var body = {};
+            if (urlVal !== '')      body.vi_service_url       = urlVal;
+            if (keyVal !== '')      body.vi_service_api_key   = keyVal;
+            if (fpsVal !== '')      body.inference_fps        = parseInt(fpsVal, 10);
+            if (grabVal !== '')     body.frame_grab_interval  = parseFloat(grabVal);
+            if (durationVal !== '') body.duration             = parseFloat(durationVal);
+            body.use_transcoder = document.getElementById('def-use-transcoder').checked;
+            if (concObjVal !== '' || concScnVal !== '') {
+                body.concurrent_executions = {};
+                if (concObjVal !== '') body.concurrent_executions.object_detection = { default: parseInt(concObjVal, 10) };
+                if (concScnVal !== '') body.concurrent_executions.scene_detection  = { default: parseInt(concScnVal, 10) };
+            }
+
+            document.getElementById('def-save-btn').disabled = true;
+            try {
+                var resp = await fetch(API_URL, {
+                    method: 'PUT',
+                    headers: HEADERS,
+                    body: JSON.stringify(body)
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+                var result = await resp.json();
+                // Refresh form with the merged values the server echoes back
+                if (result && (result.vi_service_url !== undefined || result.inference_fps !== undefined)) {
+                    populateForm(result);
+                }
+                showStatus('Saved successfully', false);
+            } catch (err) {
+                showStatus('Error saving: ' + err.message, true);
+            } finally {
+                document.getElementById('def-save-btn').disabled = false;
+            }
+        };
+
+        // ── init ──────────────────────────────────────────────────────────────
+        loadDefaultConfig();
+    })();
+</script>

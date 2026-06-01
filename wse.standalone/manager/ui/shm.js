@@ -214,7 +214,7 @@
                     return;
                 }
 
-                document.getElementById('config-streams').style.display = "inline-block";
+                document.getElementById('config-streams').style.display = "flex";
 
                 renderHostCard('host-display', "WSE", jsonData.host.wse_version);
                 renderHostCard('host-display', "WSE VIF Module", jsonData.host.vif_module_version);

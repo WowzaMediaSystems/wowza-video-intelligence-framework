@@ -181,12 +181,12 @@ The top level configuration contains the default settings then per steam configu
 
 ## API
 ### API pattern is
-* `/v1/{server}/plugin/vif/status` current system status with all streams
-* `/v1/{server}/plugin/vif/config` default config
-* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}` current active config
-* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}/config` current saved config
-* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}/status` current stream status
-* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}/thumbnail` get a thumbnail image
+* `/v1/{server}/plugin/vif/status` (GET) current system status with all streams
+* `/v1/{server}/plugin/vif/config` (GET/PUT) default config
+* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}` (GET/PUT) current active config
+* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}/config` (GET/PUT/POST/DELETE) current saved config
+* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}/status` (GET) current stream status
+* `/v1/{server}/plugin/vif/applications/{appName}/streams/{streamName}/thumbnail` (GET) get a thumbnail image
   *   query param: overlay=true|false
   *   query param: frameId=### (0 is latest)
 
