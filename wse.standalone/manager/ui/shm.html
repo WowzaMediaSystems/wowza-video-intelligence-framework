@@ -395,7 +395,8 @@
 
         <div class="streams-header">
             <h2>VIF Dashboard</h2>
-            <div id="config-streams" class="item-right" style="display: none;">
+            <div id="config-streams" class="item-right" style="display: none; flex-direction: column; gap: 4px; align-items: flex-end;">
+                <button onclick="loadAjaxPluginContent('server','vif','default.html','')">Default Config</button>
                 <button onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
             </div>
         </div>

@@ -24,6 +24,12 @@
             margin: 0;
         }
 
+        .sticky-page-header {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: #fff;
+        }
         .streams-header {
             display: flex;
             align-items: flex-end;
@@ -192,8 +198,8 @@
         }
 
         .top-config-panel {
-            background: #cccccc;
-            border-color: #b6b6b6;
+            background: #e8e8e8;
+            border-color: #d0d0d0;
             color: #111;
             width: 100%;
             max-width: 100%;
@@ -690,9 +696,16 @@
             pointer-events: none;
         }
 
-        .two-column > .form-wrapper {
+        .two-column > .form-wrapper,
+        .two-column > .left-column {
             flex: 1;
             min-width: 0;
+        }
+
+        .left-column {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
 
         @media (max-width: 900px) {
@@ -723,6 +736,7 @@
             }
 
             .two-column > .form-wrapper,
+            .two-column > .left-column,
             .two-column > .event-listeners-panel {
                 width: 100%;
             }
@@ -907,10 +921,95 @@
             color: #888;
         }
 
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .collapsible-header .collapse-chevron {
+            font-size: 0.7em;
+            color: #666;
+            transition: transform 0.2s ease;
+            display: inline-block;
+        }
+        .collapsible-header.collapsed .collapse-chevron {
+            transform: rotate(-90deg);
+        }
+        .collapsible-body {
+            overflow: hidden;
+            transition: opacity 0.15s ease;
+        }
+        .collapsible-body.collapsed {
+            display: none;
+        }
+
+        .form-panel-header {
+            background: #e8e8e8;
+            border-bottom: 1px solid #d0d0d0;
+            color: #111;
+            margin: -20px -20px 16px -20px;
+            padding: 12px 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .form-wrapper.has-header {
+            overflow: hidden;
+        }
+        .form-wrapper.has-header.collapsed {
+            padding-bottom: 0;
+        }
+        .form-wrapper.has-header.collapsed .form-panel-header {
+            margin-bottom: 0;
+        }
+        .event-listeners-panel.has-header {
+            overflow: hidden;
+        }
+        .event-listeners-panel.has-header.collapsed {
+            padding-bottom: 0;
+        }
+        .event-listeners-panel.has-header.collapsed .form-panel-header {
+            margin-bottom: 0;
+        }
+        .form-panel-header button {
+            text-transform: none;
+            letter-spacing: 0;
+            margin-bottom: 0;
+        }
+
+        .input-with-toggle {
+            display: flex;
+            flex: 1 1 200px;
+            max-width: 320px;
+            gap: 0;
+        }
+        .input-with-toggle input {
+            flex: 1 1 0;
+            min-width: 0;
+            max-width: none;
+            border-radius: 4px 0 0 4px;
+            border-right: none;
+        }
+        .input-with-toggle button {
+            flex: 0 0 auto;
+            padding: 5px 8px;
+            font-size: 0.8em;
+            border-radius: 0 4px 4px 0;
+            margin-bottom: 0;
+            border: 1px solid #ccc;
+            background: #e8e8e8;
+            color: #333;
+            white-space: nowrap;
+        }
+        .input-with-toggle button:hover { background: #d0d0d0; }
     </style>
 
     <div class="content-wrapper">
 
+        <div class="sticky-page-header">
         <div class="streams-header">
             <h2>VIF Stream Configuration</h2>
             <div class="item-right">
@@ -919,13 +1018,12 @@
         </div>
 
         <!-- Stream Selector -->
-        <div class="form-wrapper top-config-panel" style="margin-bottom: 16px; position: sticky; top: 0; z-index: 10;">
+        <div class="form-wrapper top-config-panel" style="margin-bottom: 16px;">
 
             <div class="top-config-toolbar">
                 <div class="top-config-toolbar-main">
                     <div class="top-config-toolbar-heading">
                         <div class="form-section-title" style="margin-bottom:0;">Incoming Stream</div>
-                        <button type="button" class="info-trigger" onclick="openStreamMatchingInfo(event)" title="How stream matching works">?</button>
                     </div>
                     <select id="cfg-stream-select" onchange="onStreamSelected()" style="font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
                         <option value="">Loading streams...</option>
@@ -935,7 +1033,20 @@
                     <button id="btn-save-top" data-save-config-btn="true" onclick="saveConfig()">Save all changes</button>
                     <button id="btn-clone-top" onclick="cloneConfig()" style="display:none;">Clone Config</button>
                     <button id="btn-delete-top" class="btn-danger" onclick="deleteConfig()" style="display:none;">Delete Config</button>
+                    <button id="download-config-btn" class="save-meta-icon-button" type="button" onclick="downloadConfigFile()" title="Download video-intelligence.json" aria-label="Download video-intelligence.json">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M5 20h14v-2H5v2zm7-18c-.55 0-1 .45-1 1v8.59l-2.3-2.29-1.4 1.41L12 16l4.7-5.29-1.4-1.41-2.3 2.29V3c0-.55-.45-1-1-1z"></path>
+                        </svg>
+                    </button>
                 </div>
+                <div class="section-help" style="margin-top:6px; margin-bottom:0;">
+                    Choose which incoming streams VIF should analyze. <strong>Application</strong> must match exactly. <strong>Stream Name</strong> can be an exact name or a regex pattern — e.g. application <code>live</code> and stream name <code>traffic.*</code> matches <code>rtmp://…/live/traffic_cam1</code>.
+                </div>
+
+            </div>
+            <div class="save-meta">
+                <div id="status-message"></div>
+                <div id="dirty-indicator" style="visibility:hidden;">Saved</div>
             </div>
 
             <div id="new-stream-fields" style="display:none;">
@@ -950,23 +1061,20 @@
                     <div class="field-help">Use an exact name like <code>traffic_cam1</code> or a regex pattern like <code>traffic.*</code>.</div>
                 </div>
             </div>
-            <div class="save-meta">
-                <div id="status-message"></div>
-                <div id="dirty-indicator" style="visibility:hidden;">Saved</div>
-                <button id="download-config-btn" class="save-meta-icon-button" type="button" onclick="downloadConfigFile()" title="Download video-intelligence.json" aria-label="Download video-intelligence.json">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M5 20h14v-2H5v2zm7-18c-.55 0-1 .45-1 1v8.59l-2.3-2.29-1.4 1.41L12 16l4.7-5.29-1.4-1.41-2.3 2.29V3c0-.55-.45-1-1-1z"></path>
-                    </svg>
-                </button>
-            </div>
         </div>
+        </div><!-- end sticky-page-header -->
 
         <!-- Two column layout -->
         <div class="two-column">
 
-        <!-- Config Form -->
-        <div class="form-wrapper">
-            <div class="form-section-title">Video Processing</div>
+        <!-- Left column: Video Processing + Debug Options -->
+        <div class="left-column">
+        <div class="form-wrapper has-header">
+            <div class="form-panel-header collapsible-header" onclick="togglePanel(this)" title="Expand/collapse video processing">
+                <span class="collapse-chevron">&#9660;</span>
+                Video Processing
+            </div>
+            <div class="collapsible-body">
             <div class="section-help">
                Stream configuration settings that control how VIF processes incoming video for this stream. Adjust these to balance performance and accuracy.
             </div>
@@ -1015,8 +1123,8 @@
             </div>
             <div class="form-group" id="cfg-inference-fps-group">
                 <label title="Frames per second sent to the VIF service for analysis. Lower values reduce load but may miss short events.">Inference FPS</label>
-                <input type="number" id="cfg-inference-fps" value="" placeholder="30" min="1" max="120" step="1">
-                <div class="field-help">Frames per second sent for analysis. Lower values reduce load but may miss short events.</div>
+                <input type="number" id="cfg-inference-fps" value="" placeholder="30" min="-1" max="120" step="1">
+                <div class="field-help">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</div>
             </div>
             <div class="form-group">
                 <label>Detector Type</label>
@@ -1217,11 +1325,41 @@
                 </div> -->
             </div>
 
-            <!-- Debug Options Section -->
-            <div class="form-section">
-                <div class="form-section-title">Debug Options</div>
+            </div><!-- end collapsible-body (Video Processing) -->
+        </div>
+
+        <!-- Advanced Options Panel -->
+        <div class="form-wrapper has-header collapsed">
+            <div class="form-panel-header collapsible-header collapsed" onclick="togglePanel(this)" title="Expand/collapse advanced options">
+                <span class="collapse-chevron">&#9660;</span>
+                Advanced Options
+            </div>
+            <div class="collapsible-body collapsed">
+                <div class="form-section-title">Service Connection</div>
                 <div class="section-help">
-                    Recommended for troubleshooting. High values can produce noisy logs in production.
+                    Service connection overrides. Leave blank to inherit defaults.
+                </div>
+
+                <div class="form-group">
+                    <label title="Override the VIF service URL for this stream">VIF Service URL</label>
+                    <input type="text" id="cfg-vi-service-url" value="" placeholder="inherited from default config"
+                           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <div class="field-help">Override the VIF service WebSocket URL for this stream only. Supports <code>${ENV_VAR}</code> substitution.</div>
+                </div>
+
+                <div class="form-group">
+                    <label title="Override the VIF service API key for this stream">VIF Service API Key</label>
+                    <div class="input-with-toggle">
+                        <input type="password" id="cfg-vi-service-api-key" value="" placeholder="inherited from default config"
+                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <button type="button" id="cfg-vi-service-api-key-toggle" onclick="toggleVisServiceApiKeyVisibility()" title="Show/hide API key">Show</button>
+                    </div>
+                    <div class="field-help">Override the <code>X-API-KEY</code> header sent to the VIF service for this stream only.</div>
+                </div>
+                <hr>
+                <div class="form-section-title" style="margin-top:12px;">Debug Options</div>
+                <div class="section-help">
+                    Troubleshooting settings for this stream. Leave blank to inherit defaults.
                 </div>
 
                 <div class="form-group">
@@ -1233,23 +1371,25 @@
                 <div class="form-group">
                     <label>Log Timing</label>
                     <input type="number" id="cfg-log-timing" value="" placeholder="0" min="0" max="60" step="1">
-                    <div class="field-help">Delay in seconds between writing logging details/timing metrics to /tmp/vif/&lt;stream_name&gt; 0 is disabled.</div>
+                    <div class="field-help">Delay in seconds between writing logging details/timing metrics to /tmp/vif/&lt;stream_name&gt;. 0 is disabled.</div>
                 </div>
             </div>
-
         </div>
 
+        </div><!-- end left-column -->
+
         <!-- Event Listeners Panel (right side) -->
-        <div class="event-listeners-panel">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-                <div class="form-section-title" style="margin-bottom:0;">Event Listeners</div>
-                <button type="button" class="info-trigger" onclick="openEventListenerInfo(event)" title="About event listeners">?</button>
-                <div class="item-right">
-                    <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()">Create New Listener</button>
-                </div>
+        <div class="event-listeners-panel has-header">
+            <div class="form-panel-header collapsible-header" onclick="togglePanel(this)" title="Expand/collapse event listeners">
+                <span class="collapse-chevron">&#9660;</span>
+                Event Listeners
             </div>
-            <div class="section-help">
-                Event listeners are triggered by detections. Use Select Listener to Edit for an existing listener or Create New Listener to add another one. Listener type stays fixed after creation.
+            <div class="collapsible-body">
+            <div style="display:flex; align-items:center; margin-bottom:10px;">
+                <div class="section-help" style="margin-bottom:0; flex:1;">
+                    Event listeners are triggered by detections. Use Select Listener to Edit for an existing listener or Create New Listener to add another one. Listener type stays fixed after creation.
+                </div>
+                <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()" style="flex-shrink:0; margin-left:12px;">Create New Listener</button>
             </div>
             <div id="evt-active-summary" class="event-listener-summary" aria-live="polite"></div>
             <div class="form-group" id="cfg-rollup-batch-interval-group">
@@ -1322,39 +1462,12 @@
                 <div id="evt-properties-fields"></div>
             </div>
 
+            </div><!-- end collapsible-body (Event Listeners) -->
         </div>
 
         </div><!-- end two-column -->
 
-        <div id="event-listener-info-overlay" class="overlay-backdrop" onclick="onEventListenerOverlayBackdrop(event)">
-            <div class="overlay-card" onclick="event.stopPropagation()">
-                <button type="button" class="overlay-close" onclick="closeEventListenerInfo()" aria-label="Close">x</button>
-                <div class="form-section-title" style="margin-bottom:12px;">Event Listener Examples</div>
-                <div class="section-help" style="margin-bottom:0;">Examples:</div>
-                <ul class="overlay-list">
-                    <li><code>OverlayEvent</code> draws boxes/labels on video</li>
-                    <li><code>Id3Event</code> writes timed metadata into the stream</li>
-                    <li><code>LogFileEvent</code> writes detection data to logs</li>
-                    <li><code>WebhookEvent2</code> sends detection data to an external HTTP endpoint</li>
-                    <li><code>ObjectTracking</code> applies tracking and region logic, then triggers outputs based on movement, count, time spent in one location, and similar rules</li>
-                </ul>
-            </div>
-        </div>
 
-        <div id="stream-matching-info-overlay" class="overlay-backdrop" onclick="onStreamMatchingOverlayBackdrop(event)">
-            <div class="overlay-card" onclick="event.stopPropagation()">
-                <button type="button" class="overlay-close" onclick="closeStreamMatchingInfo()" aria-label="Close">x</button>
-                <div class="form-section-title" style="margin-bottom:12px;">How Matching Works</div>
-                <div class="section-help">
-                    Use this stream matching configuration rule to choose which incoming streams VIF should analyze.
-                </div>
-                <ul class="overlay-list">
-                    <li><strong>Application</strong> must match exactly.</li>
-                    <li><strong>Stream Name</strong> can be an exact name <b>or</b> a regex pattern.</li>
-                    <li><strong>Example:</strong> Application <code>live</code> and Stream Name <code>traffic.*</code> will match the ingest stream <code>rtmp://my-wowza-streaming-engine.com/live/traffic_cam1</code>.</li>
-                </ul>
-            </div>
-        </div>
 
     </div>
 
@@ -1381,7 +1494,7 @@
     var STREAM_CONFIG_SELECTION_STORAGE_KEY = `vif.stream-config.selected-stream.${window.location.host}`;
     // Validation ranges below are UI-owned and should be reviewed when config semantics change.
     var FIELD_RULES = {
-        'cfg-inference-fps': { min: 1, max: 120, integer: true, label: 'Inference FPS' },
+        'cfg-inference-fps': { min: -1, max: 120, integer: true, label: 'Inference FPS' },
         'cfg-rollup-batch-interval': { min: 0, max: 30, decimals: 1, label: 'Rollup Batch Interval' },
         'cfg-duration': { min: 0, max: 5, decimals: 1, label: 'Duration' },
         'cfg-confidence-threshold': { min: 0, max: 100, decimals: 1, label: 'Object Confidence Threshold %' },
@@ -1461,7 +1574,10 @@
 
     function sanitizeNumericString(rawValue, rule) {
         if (rawValue === '') return '';
-        let value = String(rawValue).replace(/[^0-9.]/g, '');
+        const allowNegative = Number.isFinite(rule.min) && rule.min < 0;
+        const raw = String(rawValue);
+        const isNegative = allowNegative && raw.startsWith('-');
+        let value = raw.replace(/[^0-9.]/g, '');
         const firstDot = value.indexOf('.');
         if (firstDot !== -1) {
             value = value.slice(0, firstDot + 1) + value.slice(firstDot + 1).replace(/\./g, '');
@@ -1473,6 +1589,7 @@
             parts[1] = (parts[1] || '').slice(0, rule.decimals);
             value = parts[0] + '.' + parts[1];
         }
+        if (isNegative && value !== '') value = '-' + value;
         return value;
     }
 
@@ -1608,43 +1725,7 @@
         });
     }
 
-    function openEventListenerInfo(event) {
-        if (event) event.stopPropagation();
-        const overlay = document.getElementById('event-listener-info-overlay');
-        if (!overlay) return;
-        overlay.classList.add('open');
-    }
 
-    function closeEventListenerInfo() {
-        const overlay = document.getElementById('event-listener-info-overlay');
-        if (!overlay) return;
-        overlay.classList.remove('open');
-    }
-
-    function onEventListenerOverlayBackdrop(event) {
-        if (event.target.id === 'event-listener-info-overlay') {
-            closeEventListenerInfo();
-        }
-    }
-
-    function openStreamMatchingInfo(event) {
-        if (event) event.stopPropagation();
-        const overlay = document.getElementById('stream-matching-info-overlay');
-        if (!overlay) return;
-        overlay.classList.add('open');
-    }
-
-    function closeStreamMatchingInfo() {
-        const overlay = document.getElementById('stream-matching-info-overlay');
-        if (!overlay) return;
-        overlay.classList.remove('open');
-    }
-
-    function onStreamMatchingOverlayBackdrop(event) {
-        if (event.target.id === 'stream-matching-info-overlay') {
-            closeStreamMatchingInfo();
-        }
-    }
 
     function markDirty() {
         if (!isStreamConfigMounted() || suppressDirtyTracking || isSaving) return;
@@ -1831,7 +1912,7 @@
             ? Math.round(defaultConfig.scene_analysis.confidence_threshold * 100)
             : null;
 
-        applyDefaultFieldValue(inferenceFpsInput, inferenceFpsDefault, '30');
+        applyDefaultFieldValue(inferenceFpsInput, inferenceFpsDefault, '-1');
         applyDefaultFieldValue(rollupBatchTimeInput, rollupBatchTimeDefault, '2');
         applyDefaultFieldValue(objectConfidenceInput, objectConfidenceDefault, '30');
         applyDefaultFieldValue(logMaxMessagesInput, logMaxMessagesDefault, '20');
@@ -1876,6 +1957,22 @@
         const source = raw !== '' ? raw : fallback;
         if (source === '') return NaN;
         return integer ? parseInt(source, 10) : parseFloat(source);
+    }
+
+    function togglePanel(header) {
+        const body = header.nextElementSibling;
+        header.classList.toggle('collapsed');
+        body.classList.toggle('collapsed');
+        const wrapper = header.closest('.form-wrapper') || header.closest('.event-listeners-panel');
+        if (wrapper) wrapper.classList.toggle('collapsed');
+    }
+
+    function toggleVisServiceApiKeyVisibility() {
+        const input = document.getElementById('cfg-vi-service-api-key');
+        const btn   = document.getElementById('cfg-vi-service-api-key-toggle');
+        const hide  = input.type === 'password';
+        input.type      = hide ? 'text' : 'password';
+        btn.textContent = hide ? 'Hide' : 'Show';
     }
 
     function getApiUrl() {
@@ -2354,6 +2451,8 @@
             active: document.getElementById('cfg-active').checked,
             app_name: appName,
             stream_name: streamName,
+            vi_service_url: document.getElementById('cfg-vi-service-url').value.trim() || null,
+            vi_service_api_key: document.getElementById('cfg-vi-service-api-key').value.trim() || null,
             log_max_messages: readNumericInputValue('cfg-log-max-messages', true),
             inference_fps: readNumericInputValue('cfg-inference-fps', true),
             use_transcoder: document.getElementById('cfg-use-transcoder').checked,
@@ -2480,8 +2579,8 @@
         if (!config.app_name) errors.push('Application is required.');
         if (!config.stream_name) errors.push('Stream name / regex is required.');
 
-        if (!Number.isFinite(config.inference_fps) || config.inference_fps < 1 || config.inference_fps > 120 || !Number.isInteger(config.inference_fps)) {
-            errors.push('Inference FPS must be a whole number between 1 and 120.');
+        if (!Number.isFinite(config.inference_fps) || (config.inference_fps < 1 && config.inference_fps !== -1) || config.inference_fps > 120 || !Number.isInteger(config.inference_fps)) {
+            errors.push('Inference FPS must be a whole number between 1 and 120, or -1 to match the stream frame rate.');
         }
 
         if (!Number.isFinite(config.log_max_messages) || config.log_max_messages < 0 || config.log_max_messages > 1000 || !Number.isInteger(config.log_max_messages)) {
@@ -2615,6 +2714,8 @@
         document.getElementById('cfg-grayscaled').checked = false;
         document.getElementById('cfg-resize-output').checked = false;
         document.getElementById('cfg-auto-scene-frame-throttle').checked = false;
+        document.getElementById('cfg-vi-service-url').value = '';
+        document.getElementById('cfg-vi-service-api-key').value = '';
         document.getElementById('cfg-log-max-messages').value = '';
         document.getElementById('cfg-log-timing').value = '';
         document.getElementById('cfg-detector-type').value = '';
@@ -2653,6 +2754,12 @@
         resetForm();
         suppressDirtyTracking = true;
 
+        if (config.vi_service_url !== undefined) {
+            document.getElementById('cfg-vi-service-url').value = config.vi_service_url;
+        }
+        if (config.vi_service_api_key !== undefined) {
+            document.getElementById('cfg-vi-service-api-key').value = config.vi_service_api_key;
+        }
         if (config.active !== undefined) {
             document.getElementById('cfg-active').checked = config.active;
         }
@@ -3952,13 +4059,6 @@
             e.returnValue = '';
         });
 
-        window.addEventListener('keydown', function(e) {
-            if (!isStreamConfigMounted()) return;
-            if (e.key === 'Escape') {
-                closeEventListenerInfo();
-                closeStreamMatchingInfo();
-            }
-        });
 
         window.addEventListener('scroll', function() {
             if (!isStreamConfigMounted()) return;
