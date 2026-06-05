@@ -16,11 +16,11 @@
     "auto_scene_frame_throttle": false, //when enabled, the service will automatically throttle scene detection frames to try to maintain the target_processing_ratio
 
     "grayscaled": false, //converts images to grayscale to improve performance
-    "resize_output": true,
     "duration": 2, //how many seconds to send (scene only)
     "use_transcoder": true, //whether to use transcoder to capture frames
     "frame_grab_interval": 1, //if not using transcoder, how often to capture frames in seconds
-    "inference_fps": -1, //target fps for inference
+    "inference_fps": -1, //target fps for inference, -1 matches source fps
+    "inference_video_height": 0, //-1 matches source video height, 0 matches model, values > 0 resize video to that height
     "frame_buffer": 10, //buffer to hold frames to process
 
     // how many parallel instances to create for each model type.
@@ -114,7 +114,6 @@
             "save_images": false,
             "frame_buffer": 10,
             "inference_fps": 12,
-            "resize_output": true,
 
             "detector_type":"object",
             "object_analysis": {

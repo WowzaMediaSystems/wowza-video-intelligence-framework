@@ -128,9 +128,9 @@ The top level configuration contains the default settings then per steam configu
 | ignore_untracked_objects | false |  ignore untracked objects when object tracking_method is set |
 | frame_buffer | 10 | size of the frame buffer to hold frames to send to VIF service |
 | use_transcoder| true | use transcoder to grab frames |
-| skip_frames | 0 | number of frames to skip per second when use_transcoder = true |
+| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true |
+| inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
-| resize_output | true | Resize the `<streamname>-vi` output to the size of model (i.e. 704x396) |
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
