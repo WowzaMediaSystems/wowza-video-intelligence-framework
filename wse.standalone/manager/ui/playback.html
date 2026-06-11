@@ -1,7 +1,4 @@
-  <script src="//cdn.flowplayer.com/releases/native/3/stable/flowplayer.min.js"></script>
-  <script src="//cdn.flowplayer.com/releases/native/3/stable/plugins/hls.min.js"></script>
-  <script src="//cdn.flowplayer.com/releases/native/3/stable/plugins/id3.min.js"></script>
-  <link rel="stylesheet" href="//cdn.flowplayer.com/releases/native/3/stable/style/flowplayer.css">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
   <style>
 /*    * { box-sizing: border-box; }
@@ -735,7 +732,7 @@
         PAUSED: '#f0ad4e',
         ERROR: '#d9534f'
       },
-      FLOWPLAYER_TOKEN: pluginProperties.playerToken || '',
+
       FORMATTED_IDLE_PLACEHOLDER_HTML: '<div class="placeholder-text">Waiting for playback to start...<br>Click play to see ID3 metadata events</div>',
       RAW_IDLE_PLACEHOLDER_HTML: '<div class="placeholder-text">Waiting for playback to start...<br>Click play to see raw ID3 metadata</div>',
       MAX_HISTORY_ITEMS: 100
@@ -1263,6 +1260,14 @@
       loadAjaxPluginContent("server","vif", "shm.html","");
     }
 
+	document.addEventListener('visibilitychange', function() {
+		if (document.visibilityState === 'visible') {
+			console.log('Page is visible again, resuming stream loading if paused.');
+		    const videoElement = document.querySelector('#playerElement video');
+			videoElement.currentTime = myPlayer.liveSyncPosition;
+		}
+	});
+
     // --- Player creation ---
     function createPlayer() {
       const url = elements.playerUrl.value.trim();
@@ -1300,90 +1305,103 @@
 
       updateStatusBadge('Loading...', CONFIG.BADGE_COLORS.LOADING);
 
-      myPlayer = flowplayer("#playerElement", {
-        src: url,
-        token: CONFIG.FLOWPLAYER_TOKEN,
-        autoplay: true,
-        title: "ID3 Tags",
-        controls: true,
-        loop: true,
-        ui: flowplayer.ui.USE_PLAY_3,
-        hls: {
-            native: false,
-            liveDurationInfinity: true,
-            enableWorker: true,
-            lowLatencyMode: true,
-            backBufferLength: 90,
-            interstitialAppendInPlace: false,
-            startPosition: 1.0
+      const video = document.createElement('video');
+      video.controls = true;
+      video.playsInline = true;
+      video.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+      elements.playerElement.appendChild(video);
+
+      function onId3Cue(cue) {
+        if (!hasUserPressedPlay || isPaused) return;
+        const v = cue.value;
+        if (!v) return;
+
+        const eventType = v.info;
+        const eventData = v.data;
+
+        if (eventType === CONFIG.EVENT_TYPE_PDT) {
+          updatePdtAnchorFromCue({ value: v, startTime: cue.startTime });
+          console.log('[pdt] anchor set', { pdtAnchorIso, pdtAnchorMediaTime });
+        } else {
+          console.log(`[player] ID3 event: ${eventType}`, eventData);
         }
+
+        const timestamp = formatTimestampForDisplay(cue.startTime, video.currentTime);
+        displayEvent(eventType, eventData, timestamp);
+        displayRawLog(eventType, eventData, timestamp);
+      }
+
+      video.textTracks.addEventListener('addtrack', (e) => {
+        if (e.track.kind !== 'metadata') return;
+        e.track.mode = 'hidden';
+        e.track.addEventListener('cuechange', () => {
+          const cues = e.track.activeCues;
+          if (!cues) return;
+          for (let i = 0; i < cues.length; i++) onId3Cue(cues[i]);
+        });
       });
 
-      myPlayer.on('ready', () => {
-        updateStatusBadge('Ready', CONFIG.BADGE_COLORS.READY);
-        console.log('[player] ready');
-      });
-
-      myPlayer.on('play', () => {
+      video.addEventListener('play', () => {
         hasUserPressedPlay = true;
         if (!playerStartTime) playerStartTime = Date.now();
-
         isPaused = false;
-
         updateStatusBadge('Playing', CONFIG.BADGE_COLORS.PLAYING);
         console.log('[player] play');
-
         clearPlaceholder(elements.eventDisplay);
         clearPlaceholder(elements.logDisplay);
-
         if (!elements.eventDisplay.querySelector('.event-item')) resetFormattedDisplay();
         if (!elements.logDisplay.querySelector('.log-entry')) resetRawDisplay();
-
         elements.eventDisplay.scrollTop = 0;
         elements.logDisplay.scrollTop = 0;
       });
 
-      // Option A: no forced pause, no freeze loop, no video currentTime rewrites
-      myPlayer.on('pause', () => {
-        console.log('[player] pause');
+      video.addEventListener('pause', () => {
         isPaused = true;
         updateStatusBadge('Paused', CONFIG.BADGE_COLORS.PAUSED);
+        console.log('[player] pause');
       });
 
-      myPlayer.on(flowplayer.id3.events.ID3, ({ data }) => {
-        const v = document.querySelector('#playerElement video');
-        const cue = data?.cue;
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          liveSyncDurationCount: 0,
+          liveDurationInfinity: true,
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 90
+        });
+        myPlayer = hls;
+        hls.loadSource(url);
+        hls.attachMedia(video);
 
-        if (!hasUserPressedPlay) return;
-        if (isPaused) return;
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          updateStatusBadge('Ready', CONFIG.BADGE_COLORS.READY);
+          console.log('[player] ready');
+          video.play().catch(e => console.warn('[player] autoplay blocked:', e));
+        });
 
-        if (!cue || !cue.value) return;
-
-        const eventType = cue.value.info;
-        const eventData = cue.value.data;
-
-        if (eventType === CONFIG.EVENT_TYPE_PDT) {
-          updatePdtAnchorFromCue(cue);
-          console.log('[pdt] anchor set', { pdtAnchorIso, pdtAnchorMediaTime });
-        }
-        else {
-            console.log(`[player] ID3 event: ${eventType}`, eventData);
-        }
-
-        const cueStart = (typeof cue.startTime === 'number') ? cue.startTime : NaN;
-        const videoNow = (v && typeof v.currentTime === 'number') ? v.currentTime : NaN;
-        const timestamp = formatTimestampForDisplay(cueStart, videoNow);
-
-        displayEvent(eventType, eventData, timestamp);
-        displayRawLog(eventType, eventData, timestamp);
-      });
-
-      myPlayer.on('error', (error) => {
-        console.error('Player error:', error);
-        if (url !== currentLoadingUrl) return;
-        updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
-        showError('Failed to load stream. Please check the URL format and try again.');
-      });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (!data.fatal) return;
+          console.error('[player] fatal error:', data);
+          if (url !== currentLoadingUrl) return;
+          updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
+          showError('Failed to load stream. Please check the URL format and try again.');
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS (Safari)
+        myPlayer = { destroy: () => { video.src = ''; } };
+        video.src = url;
+        video.addEventListener('loadedmetadata', () => {
+          updateStatusBadge('Ready', CONFIG.BADGE_COLORS.READY);
+          video.play().catch(e => console.warn('[player] autoplay blocked:', e));
+        });
+        video.addEventListener('error', () => {
+          if (url !== currentLoadingUrl) return;
+          updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
+          showError('Failed to load stream. Please check the URL format and try again.');
+        });
+      } else {
+        showError('HLS playback is not supported in this browser.');
+      }
     }
 
     if (srcParam) createPlayer();
