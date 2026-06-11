@@ -1,232 +1,166 @@
-# name: Wowza Streaming Engine Video Intelligence Framework
-services:
-    wse:
-        hostname: wse.docker
-        image: wowza/wowza-streaming-engine:latest-beta-vif
-        pull_policy: always
-        #platform: linux/arm64
-        profiles: ["", "wse", "wse-only", "default"]
-        restart: unless-stopped # Automatically restarts unless manually stopped
-        ##### comment deploy section below for non gpu support
-        deploy:
-          resources:
-            reservations:
-              devices:
-                - driver: nvidia
-                  capabilities: [video, gpu, compute, utility]
-                  count: all
-        environment:
-            - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
-            - ADMIN_USER=${WSE_ADMIN_USER}
-            - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
-            - IPWHITELIST=*
-            - LOG_LEVEL=INFO #DEBUG INFO WARN ERROR
-            - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change
-            - VIS_API_KEY=${VIS_API_KEY}
-            - VIS_LICENSE=${VIS_LICENSE}
-            - VIS_PROTOCOL=${VIS_PROTOCOL}
-            - VIS_HOST=${VIS_HOST}
-            - VIS_PORT=${VIS_PORT:-5001}
-        #to persist the configurations between starts of Wowza Streaming Engine, uncomment the lines below:
-        volumes:
-             - ./wse/conf:/usr/local/WowzaStreamingEngine/conf
-             - ./wse/content:/usr/local/WowzaStreamingEngine/content
-             - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
-             - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
+#!/usr/bin/env bash
+#
+# Entrypoint for the bundled vLLM VLM sidecar (the `vlm` service in
+# docker-compose.yaml). Runs unchanged on any supported GPU: defaults
+# adapt to the hardware at startup, and everything else is tunable through
+# VLM_* variables in .env -- you should not need to edit this file.
+#
+# FIXED flags (not overridable) are tuned to the VIS workload -- unique,
+# non-repeating video frames with short structured responses:
+#   --no-enable-prefix-caching   frames never repeat, so prefix caching
+#                                only adds overhead
+#   --mm-processor-cache-gb 0    same reason, for the multimodal
+#                                preprocessor cache
+#
+# AUTO-DETECTED at startup:
+#   kv-cache dtype               fp8 when every GPU the server uses has
+#                                compute capability >= 8.9 (Ada/Hopper or
+#                                newer), else "auto" -- fp8 KV cache is
+#                                not supported on older GPUs such as
+#                                A10G/A100. Set VLM_KV_CACHE_DTYPE to
+#                                override.
+#
+# TUNABLE via .env (defaults fit Qwen3-VL-4B-Instruct-FP8 on a DEDICATED
+# 24 GB-class GPU):
+#   VLM_GPU_IDS                  Pin the sidecar to specific GPU(s), e.g.
+#                                "1" or "2,3". Indices match `nvidia-smi`
+#                                order. Unset = first visible GPU (GPU 0),
+#                                which WSE and VIS also use -- pin this on
+#                                multi-GPU hosts so they don't contend.
+#   VLM_TENSOR_PARALLEL_SIZE     Shard the model across N GPUs (default 1).
+#   VLM_GPU_MEMORY_UTILIZATION   Fraction of the GPU vLLM reserves
+#                                (default 0.90). Best practice: give the
+#                                VLM a dedicated GPU via VLM_GPU_IDS and
+#                                keep other workloads on other cards; the
+#                                ~10% left over still fits a lightweight
+#                                object-detection model. Lower it only
+#                                when heavier workloads must share the
+#                                card.
+#   VLM_PORT                     Served port (default 8000). The compose
+#                                healthcheck follows it; point your
+#                                streams' `endpoint_url` at the same port.
+# plus VLM_MODEL, VLM_MAX_MODEL_LEN, VLM_MAX_NUM_SEQS, VLM_KV_CACHE_DTYPE,
+# VLM_MAX_NUM_BATCHED_TOKENS, VLM_MAX_PIXELS / VLM_MIN_PIXELS,
+# VLM_MAX_IMAGES_PER_PROMPT, and VLM_EXTRA_ARGS (raw passthrough).
+#
+# HF_TOKEN (higher rate limits on the first-boot weight download) and
+# HF_HUB_OFFLINE=1 (skip Hub probes on air-gapped hosts with pre-seeded
+# weights) are read by vLLM/HuggingFace directly, not by this script;
+# set them in .env like the VLM_* knobs (see the `vlm` service in
+# docker-compose.yaml).
+#
+# SIZING CONCURRENCY: there is no universal "right" --max-num-seqs; vLLM
+# computes the real ceiling for your GPU at startup and prints it. Watch
+# the boot log for:
+#
+#   Maximum concurrency for <max_model_len> tokens per request: <Y>x
+#
+# By default (VLM_MAX_NUM_SEQS=auto) the flag is omitted and vLLM sizes
+# the ceiling to your GPU's KV-cache capacity. To pin it instead, set
+# VLM_MAX_NUM_SEQS to floor(<Y>) -- useful on a constrained GPU if
+# preemptions climb (`vllm:num_preemptions_total`).
+#
+# Use the same <Y> to size the `max_concurrent_requests` cap in the VIS
+# WebSocket VLM config -- vLLM does not expose the ceiling over HTTP, so
+# VIS cannot read it automatically.
 
-        ports:
-            - 80:80                     #HLS
-            - 443:443                   #SSL
-            - 554:554                   #RTSP
-            - 1935:1935                 #RTMP
-            - 8087:8087                 #REST API
-            - 8089:8089                 #REST API Documenation
-            - 6970-6999:6970-6999/udp   #WEBRTC
-            - 10000:10000/udp           #SRT
-        env_file:
-            - .env
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
+set -euo pipefail
 
-    manager:
-        hostname: wsem.docker
-        image: wowza/wowza-streaming-engine-manager:latest-beta-vif
-        pull_policy: always
-        #platform: linux/arm64
-        profiles: ["", "wse", "wsem", "default"]
-        environment:
-            - LOG_LEVEL=WARN #DEBUG INFO WARN ERROR
-            - WSE_HOST=http://wse.docker:8087
-            - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change <http://localhost:8088/RESTAPIDocumentation/>
-            - PLAYER_TOKEN=${PLAYER_TOKEN}
-            - ADMIN_USER=${WSE_ADMIN_USER}
-            - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
-            # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
-            # - JKS_PASSWORD=tbd
-        ports:
-            - 8088:8080
-            - 8443:8443
-        env_file:
-            - .env
-        extra_hosts:
-          - "host.docker.internal:host-gateway"
+# Bump on every edit to this file.
+ENTRYPOINT_REVISION="2026-06-10"
+echo "[vlm-entrypoint] revision ${ENTRYPOINT_REVISION}"
 
-    video-intelligence-service-gpu:
-        hostname: video-intelligence-service.docker
-        image: wowza/wowza-video-intelligence-service:latest-gpu
-        pull_policy: always
-        #platform: linux/arm64
-        profiles: ["", "vi-service", "default", "vlm"]
-        restart: unless-stopped
-        environment:
-        # Core service configuration
-          - VIS_PORT=${VIS_PORT:-5001}
-          - LOG_LEVEL=INFO
-          - ENABLE_NETWORK_METRICS_LOGGING=false  # Set to 'true' to enable periodic network logging
-          - VIDEO_FRAME_REQUEST_TIMEOUT_SECONDS=2.0  # Timeout (seconds) for waiting on video frame responses
-        # Optional: Inference thread pool tuning (default: 32 threads per GPU)
-        # - INFERENCE_THREADS_PER_GPU=32
-        # Optional: Enable API key authentication
-          - VIS_API_KEY=${VIS_API_KEY}
-        # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
-        # - TRT_MODELS=object-detection-medium
-        # - TRT_MODELS=object-detection-nano,my-custom-model.pth
-        # License key string required to run VIS
-          - VIS_LICENSE=${VIS_LICENSE}
-        # Optional: Enable SSL/TLS for HTTPS and WSS
-        # - SSL_KEYFILE=/certs/server-key.pem
-        # - SSL_CERTFILE=/certs/server-cert.pem
-        # - SSL_KEYFILE_PASSWORD=optional-key-password
-        # NVIDIA GPU configuration
-          - NVIDIA_VISIBLE_DEVICES=all  # Or specify GPU IDs: '0,1'
-          - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-        # Optional: container path where log files are written. Set LOG_DIR
-        # in .env to override (default /logs); the ./vis/logs bind mount
-        # below follows it.
-          - LOG_PATH=${LOG_DIR:-/logs}
-        volumes:
-        # Mount models directory for checkpoints
-          - ./vis/models:/build/models
-        # Optional: Mount SSL certificates for HTTPS/WSS
-        # - ./certs:/certs:ro
-        # Optional: Mount for RT-DETR v2 model cache (for offline usage)
-        # - ~/.cache/huggingface:/root/.cache/huggingface:ro
-        # Mount log directory (target follows LOG_DIR from .env)
-          - ./vis/logs:${LOG_DIR:-/logs}
-        ports:
-          - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
-        env_file:
-            - .env
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        healthcheck:
-          test: ["CMD", "sh", "-c", "nc -z localhost ${VIS_PORT:-5001}"]
-          interval: 30s
-          timeout: 10s
-          retries: 3
-          start_period: 10s
-        deploy:
-          resources:
-            reservations:
-              devices:
-                - driver: nvidia
-                  capabilities: [gpu, compute, utility]
-                  count: all
+MODEL="${VLM_MODEL:-Qwen/Qwen3-VL-4B-Instruct-FP8}"
+MAX_MODEL_LEN="${VLM_MAX_MODEL_LEN:-16384}"
+GPU_MEM_UTIL="${VLM_GPU_MEMORY_UTILIZATION:-0.90}"
+MAX_NUM_BATCHED_TOKENS="${VLM_MAX_NUM_BATCHED_TOKENS:-8192}"
+MAX_NUM_SEQS="${VLM_MAX_NUM_SEQS:-auto}"
+TENSOR_PARALLEL_SIZE="${VLM_TENSOR_PARALLEL_SIZE:-1}"
+MIN_PIXELS="${VLM_MIN_PIXELS:-3136}"        # 4*28*28
+MAX_PIXELS="${VLM_MAX_PIXELS:-401408}"      # 512*28*28 ~= 512 vision tokens/image
+MAX_IMAGES="${VLM_MAX_IMAGES_PER_PROMPT:-8}"
+PORT="${VLM_PORT:-8000}"
 
-    # ── VLM sidecar (opt-in) ───────────────────────────────────────────────
-    # OpenAI-compatible vLLM server backing the standalone `detector_type=vlm`
-    # analyzer and the `vlm_verification` overlay on scene/object detectors.
-    #
-    # Opt-in via the `vlm` compose profile -- a bare `docker compose up`
-    # never starts it:
-    #   docker compose up                                  # full stack, no vlm
-    #   docker compose --profile vlm up                    # vis + vlm only
-    #   docker compose --profile default --profile vlm up  # full stack + vlm
-    # Teardown: a bare `docker compose down` leaves vlm running; use
-    # `docker compose --profile vlm down` to stop it.
-    #
-    # Start order doesn't matter: VIS connects on demand, so vLLM's
-    # multi-minute model warmup never blocks VIS or scene/object detection.
-    # Streams opt in by setting `endpoint_url: http://vlm.docker:8000/v1` in
-    # their VLM config (the service also resolves as plain `vlm`).
-    #
-    # All VLM_* tuning knobs and the concurrency-sizing procedure are
-    # documented in ./vis/vlm-entrypoint.sh; defaults fit the bundled
-    # Qwen3-VL-4B-Instruct-FP8 model on a dedicated 24 GB-class GPU.
-    vlm:
-        hostname: vlm.docker
-        image: vllm/vllm-openai:v0.21.0
-        profiles: ["vlm"]
-        restart: unless-stopped
-        volumes:
-          - ./vis/vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
-        # Model weights are downloaded here on first boot and reused on later
-        # boots. For air-gapped deployments, pre-seed it on a machine with
-        # internet access:
-        #   pip install -U huggingface_hub
-        #   HF_HOME=./vis/vlm-models hf download Qwen/Qwen3-VL-4B-Instruct-FP8
-        # then copy ./vis/vlm-models to this host and set HF_HUB_OFFLINE=1 in
-        # .env so boots don't probe the HuggingFace Hub. (Alternatively, run
-        # the stack once on a connected machine and copy the populated
-        # directory.)
-          - ./vis/vlm-models:/root/.cache/huggingface
-        # vLLM writes its torch.compile artifacts here; persisting them
-        # skips the ~40 s model recompile whenever the container is
-        # recreated (image update, compose edit). Safe to delete -- the
-        # next boot just recompiles.
-          - ./vis/vlm-cache:/root/.cache/vllm
-        entrypoint: ["/bin/bash", "/vlm-entrypoint.sh"]
-        # Set any of these in .env (or the shell) to override; defaults and
-        # per-knob docs live in ./vis/vlm-entrypoint.sh. Unlike the other
-        # services, this third-party container does not load the whole .env,
-        # only the variables listed here reach it, and an empty value behaves
-        # the same as unset for every one of them.
-        environment:
-          - VLM_MODEL=${VLM_MODEL:-}
-          - VLM_GPU_IDS=${VLM_GPU_IDS:-}                                # pin to specific card(s), e.g. "1" or "2,3"
-          - VLM_TENSOR_PARALLEL_SIZE=${VLM_TENSOR_PARALLEL_SIZE:-}      # shard the model across N GPUs (default 1)
-          - VLM_MAX_MODEL_LEN=${VLM_MAX_MODEL_LEN:-}
-          - VLM_GPU_MEMORY_UTILIZATION=${VLM_GPU_MEMORY_UTILIZATION:-}  # default 0.90; prefer a dedicated GPU for the VLM (see VLM_GPU_IDS)
-          - VLM_MAX_NUM_SEQS=${VLM_MAX_NUM_SEQS:-}                      # integer, or "auto" to let vLLM size it
-          - VLM_MAX_NUM_BATCHED_TOKENS=${VLM_MAX_NUM_BATCHED_TOKENS:-}
-          - VLM_KV_CACHE_DTYPE=${VLM_KV_CACHE_DTYPE:-}                  # unset = probed (fp8 on compute cap >= 8.9, else auto)
-          - VLM_MAX_PIXELS=${VLM_MAX_PIXELS:-}
-          - VLM_MIN_PIXELS=${VLM_MIN_PIXELS:-}
-          - VLM_MAX_IMAGES_PER_PROMPT=${VLM_MAX_IMAGES_PER_PROMPT:-}
-          - VLM_PORT=${VLM_PORT:-}                                      # served port (default 8000); the healthcheck follows it
-          - VLM_EXTRA_ARGS=${VLM_EXTRA_ARGS:-}
-        # Read by vLLM / HuggingFace directly, not by the entrypoint:
-          - VLLM_API_KEY=${VLLM_API_KEY:-}      # require this key on the endpoint (see ports note below)
-          - HF_TOKEN=${HF_TOKEN:-}              # optional HuggingFace token: higher rate limits on the first-boot weight download
-          - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-}  # set to 1 on air-gapped hosts (see weights-cache note above)
-        ipc: host   # vLLM workers need large shared memory (esp. tensor parallel)
-        # The endpoint is only reachable on the internal compose network by
-        # default. To reach it from other machines (e.g. VIS running on a
-        # different host), publish the port by uncommenting below -- and set
-        # VLLM_API_KEY in .env to require a key, as the endpoint is otherwise
-        # unauthenticated (streams then pass the same key as `api_key`):
-        # ports:
-        #   - "${VLM_PORT:-8000}:${VLM_PORT:-8000}"
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        healthcheck:
-          test: ["CMD-SHELL", "curl -fsS http://localhost:$${VLM_PORT:-8000}/health"]
-          interval: 30s
-          timeout: 10s
-          retries: 5
-          # First boot downloads ~5 GB of weights into ./vis/vlm-models; the
-          # long grace covers slow links. Later boots reuse the cache and are
-          # marked healthy as soon as the first check passes.
-          start_period: 1800s
-        deploy:
-          resources:
-            reservations:
-              devices:
-                # All GPUs are exposed, but vLLM runs on the first visible
-                # card (GPU 0) unless sharded via VLM_TENSOR_PARALLEL_SIZE.
-                # On multi-GPU hosts, set VLM_GPU_IDS in .env (e.g.
-                # VLM_GPU_IDS=1) to give the sidecar its own card so it
-                # doesn't contend with WSE/VIS.
-                - driver: nvidia
-                  capabilities: [gpu, compute, utility]
-                  count: all
+# Pin the sidecar to the GPU(s) named in VLM_GPU_IDS; indices match
+# `nvidia-smi` output.
+if [ -n "${VLM_GPU_IDS:-}" ]; then
+  export CUDA_DEVICE_ORDER=PCI_BUS_ID
+  export CUDA_VISIBLE_DEVICES="${VLM_GPU_IDS}"
+  echo "[vlm-entrypoint] VLM_GPU_IDS=${VLM_GPU_IDS} -> pinned via CUDA_VISIBLE_DEVICES."
+fi
+
+# Log the detected hardware so the startup "Maximum concurrency" line can
+# be sanity-checked against it.
+if command -v nvidia-smi >/dev/null 2>&1; then
+  echo "[vlm-entrypoint] Detected GPU(s):"
+  nvidia-smi --query-gpu=index,name,memory.total,compute_cap --format=csv,noheader || true
+else
+  echo "[vlm-entrypoint] nvidia-smi not found; skipping GPU probe."
+fi
+
+# Lowest compute capability among the GPU(s) the server will actually use
+# (only the VLM_GPU_IDS-pinned cards, when set).
+min_compute_cap() {
+  local -a query=(--query-gpu=compute_cap --format=csv,noheader)
+  if [ -n "${VLM_GPU_IDS:-}" ]; then
+    query=(-i "${VLM_GPU_IDS}" "${query[@]}")
+  fi
+  nvidia-smi "${query[@]}" 2>/dev/null | sort -t. -k1,1n -k2,2n | head -n1
+}
+
+# fp8 KV cache halves KV memory (more concurrency per GB) but is not
+# supported on pre-Ada GPUs. Unless VLM_KV_CACHE_DTYPE is set, pick fp8
+# only when the hardware supports it.
+KV_CACHE_DTYPE="${VLM_KV_CACHE_DTYPE:-}"
+if [ -z "${KV_CACHE_DTYPE}" ]; then
+  COMPUTE_CAP="$(min_compute_cap || true)"
+  if [ -n "${COMPUTE_CAP}" ] && awk -v c="${COMPUTE_CAP}" 'BEGIN { exit !(c + 0 >= 8.9) }'; then
+    KV_CACHE_DTYPE="fp8"
+    echo "[vlm-entrypoint] compute capability ${COMPUTE_CAP} >= 8.9 -> --kv-cache-dtype fp8."
+  else
+    KV_CACHE_DTYPE="auto"
+    echo "[vlm-entrypoint] compute capability '${COMPUTE_CAP:-unknown}' (< 8.9 or probe failed) -> --kv-cache-dtype auto."
+  fi
+fi
+
+LIMIT_MM="{\"image\": ${MAX_IMAGES}, \"video\": 0}"
+MM_KWARGS="{\"min_pixels\": ${MIN_PIXELS}, \"max_pixels\": ${MAX_PIXELS}}"
+
+ARGS=(
+  --port="${PORT}"
+  --max-model-len="${MAX_MODEL_LEN}"
+  --gpu-memory-utilization="${GPU_MEM_UTIL}"
+  --max-num-batched-tokens="${MAX_NUM_BATCHED_TOKENS}"
+  --tensor-parallel-size="${TENSOR_PARALLEL_SIZE}"
+  --kv-cache-dtype="${KV_CACHE_DTYPE}"
+  --no-enable-prefix-caching
+  --mm-processor-cache-gb=0
+  "--limit-mm-per-prompt=${LIMIT_MM}"
+  "--mm-processor-kwargs=${MM_KWARGS}"
+)
+
+# --max-num-seqs: pin to the value, or omit when "auto" so vLLM sizes it
+# to this GPU's KV capacity.
+if [ "${MAX_NUM_SEQS}" = "auto" ]; then
+  echo "[vlm-entrypoint] VLM_MAX_NUM_SEQS=auto -> letting vLLM derive --max-num-seqs from KV capacity."
+else
+  ARGS+=(--max-num-seqs="${MAX_NUM_SEQS}")
+fi
+
+# Escape hatch for vLLM flags not exposed above (e.g. --disable-log-requests,
+# --quantization). Space-separated; flag values containing spaces cannot be
+# passed here.
+if [ -n "${VLM_EXTRA_ARGS:-}" ]; then
+  set -f
+  # shellcheck disable=SC2206
+  EXTRA=(${VLM_EXTRA_ARGS})
+  set +f
+  ARGS+=("${EXTRA[@]}")
+fi
+
+echo "[vlm-entrypoint] Launching vLLM with:"
+printf '  %s\n' "${MODEL}" "${ARGS[@]}"
+echo "[vlm-entrypoint] On startup, find: 'Maximum concurrency for ${MAX_MODEL_LEN} tokens per request: <Y>x'"
+echo "[vlm-entrypoint] -> set VLM_MAX_NUM_SEQS to floor(<Y>) to match THIS GPU's KV capacity."
+
+exec vllm serve "${MODEL}" "${ARGS[@]}"
