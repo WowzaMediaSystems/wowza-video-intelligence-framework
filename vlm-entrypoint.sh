@@ -159,7 +159,7 @@ services:
         profiles: ["vlm"]
         restart: unless-stopped
         volumes:
-          - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
+          - ./vis/vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
         # Model weights are downloaded here on first boot and reused on later
         # boots. For air-gapped deployments, pre-seed it on a machine with
         # internet access:
