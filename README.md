@@ -18,7 +18,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 | **What it is** | Ready-to-run WSE configuration with prebuilt plugin JARs for video intelligence workflows |
 | **Primary workflow** | Object detection |
 | **Experimental workflow** | Scene understanding |
-| **How it runs** | `docker compose --profile all up` starts three containers: `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU) |
+| **How it runs** | `docker compose up` starts three containers: `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU) |
 | **Alternative workflow (optional)** | `docker compose --profile wse up` starts only `wse` and `manager`. Use this only when connecting to a remote VIS endpoint. |
 | **VI Service deployment** | Connect to a remote VI Service instance (`wss://`) or run VIF locally via Docker |
 
@@ -122,7 +122,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 
 > [!IMPORTANT]
 > **`VIS_HOST` value depends on your deployment:**
-> - **Local Docker (`--profile all`):** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
+> - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
 > - **Remote VIS:** Set `VIS_HOST` to the hostname or IP of your remote VIS instance.
 
 > [!CAUTION]  
@@ -132,7 +132,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 2. Start WSE + Manager + VIS:
 
 ```bash
-docker compose --profile all up
+docker compose up
 ```
 
 > [!TIP]  

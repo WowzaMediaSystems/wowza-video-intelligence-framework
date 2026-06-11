@@ -1,0 +1,208 @@
+# VLM Analysis Guide
+
+The Video Intelligence framework can run a **vision-language model (VLM)** over your live streams. Unlike the scene and object detectors, which score a fixed set of trained classes, a VLM understands free-text vocabulary — "person wearing a hard hat", "forklift near pedestrians", "smoke without visible flames" — and explains its reasoning with every result.
+
+There are two ways to use it, and they compose:
+
+- **Standalone VLM analysis** (`detector_type: "vlm"`) — the VLM watches the stream directly. Give it a list of classes (any short phrase works) and it returns a per-class verdict with reasoning.
+- **VLM verification** (`vlm_verification` on a scene or object stream) — the fast detector does the watching, and the VLM double-checks its detections asynchronously. Use this to suppress false positives before you page someone at 3 a.m.
+
+The VLM is any **OpenAI-compatible HTTP endpoint** — the framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar serving **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly), so everything can run locally on your GPU, or you can point at a hosted provider instead.
+
+---
+
+## Quick start
+
+Prerequisites: a working framework checkout with `.env` populated (licenses, admin credentials — see [README](README.md)), an NVIDIA GPU with current drivers, and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+**1. Start the full stack with the VLM sidecar:**
+
+```bash
+docker compose --profile default --profile vlm up -d
+```
+
+The first boot downloads ~5 GB of model weights into `./vis/vlm-models` (reused on every later boot). Watch progress and wait for `vlm` to report healthy:
+
+```bash
+docker compose logs -f vlm     # model download + load progress
+docker compose ps              # 'vlm' flips to (healthy) when ready
+```
+
+**2. Publish a stream whose name starts with `vlm`** — the default configuration ships a ready-made VLM stream entry matching `vlm.*` on the `live` application:
+
+```bash
+ffmpeg -re -stream_loop -1 -i your-clip.mp4 -c copy -f flv rtmp://localhost:1935/live/vlm-demo
+```
+
+**3. Watch the results.** The default entry detects `fire`, `smoke`, `person`, and `vehicle`, and surfaces results through the standard event listeners:
+
+```bash
+tail -f wse/logs/wowzastreamingengine_vi.log
+```
+
+You'll see one entry per analysis window with each detected class and the model's reasoning. The same results are embedded as ID3 tags in the stream, and an overlay rendition named `vlm-demo-vi` shows detected classes burned into the video (play it from the Engine Manager test player at `http://localhost:8088`, or directly at `http://localhost/live/vlm-demo-vi/playlist.m3u8`).
+
+**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing `wse/conf/video-intelligence.json` and restarting the engine to apply:
+
+```bash
+docker compose restart wse
+```
+
+---
+
+## Deployment topologies
+
+The three moving parts are the **engine** (WSE + the Video Intelligence Controller), **VIS** (the inference service), and the **VLM endpoint**:
+
+```
+engine ──WebSocket──▶ VIS ──HTTP──▶ VLM endpoint
+```
+
+Any permutation works — everything on one machine, the engine split from VIS, one engine fanning out to many VIS instances, or many engines sharing one VIS.
+
+### 1. Everything on one machine (default)
+
+```
+┌─────────────────────────────────────┐
+│  engine ──▶ VIS ──▶ vlm sidecar     │
+│              GPU(s)                 │
+└─────────────────────────────────────┘
+docker compose --profile default --profile vlm up -d
+```
+
+Works out of the box — see [Defaults](#defaults-it-just-works) below. On a multi-GPU machine, give the VLM its own card with `VLM_GPU_IDS` in `.env`.
+
+### 2. Engine on one machine, VIS + VLM on another
+
+Put inference on the GPU box and keep the engine wherever your streaming runs:
+
+```
+┌── box A ───────────┐      ┌── box B (GPU) ──────────┐
+│  engine + manager  │─────▶│  VIS ──▶ vlm sidecar    │
+└────────────────────┘ :5001└─────────────────────────┘
+
+box B:  docker compose --profile vlm up -d          # VIS + VLM only
+box A:  docker compose --profile wse up -d          # engine + manager only
+        # .env on box A: VIS_PROTOCOL=ws  VIS_HOST=<box B address>  VIS_PORT=5001
+```
+
+The default VLM `endpoint_url` works unchanged. Set `VIS_API_KEY` (same value in both `.env` files) to authenticate the engine→VIS connection across the network, and use `VIS_PROTOCOL=wss` with SSL configured on VIS for untrusted networks.
+
+### 3. One engine, many VIS
+
+Spread streams or applications across several GPU boxes. `vi_service_url` is overridable per stream entry:
+
+```jsonc
+"streams": [
+  { "stream_name": "lobby.*",  "vi_service_url": "ws://gpu-box-1:5001/ws/stream/", ... },
+  { "stream_name": "garage.*", "vi_service_url": "ws://gpu-box-2:5001/ws/stream/", ... }
+]
+```
+
+Run each GPU box with `docker compose --profile vlm up -d` — with the default configuration, each VIS uses its own local VLM sidecar.
+
+### 4. Many engines, one VIS
+
+Multiple engines can share one VIS deployment — point each engine's `VIS_HOST` at the same box. VIS pools models across streams, and all streams targeting the same VLM endpoint share one HTTP client pool. Note that the pool's `request_timeout_seconds` and `max_concurrent_requests` are set by the **first** stream to use that endpoint; later streams with different values keep the first ones (a WARNING is logged).
+
+> **Splitting VIS and the VLM across machines** is also possible: uncomment the `ports:` block on the `vlm` service to publish its port, set `VLLM_API_KEY` in `.env` on the VLM box (the endpoint is otherwise unauthenticated), and point `endpoint_url` at `http://<vlm box>:8000/v1` with the same key as `api_key`.
+
+---
+
+## Defaults: it just works
+
+Spin up everything on one machine and the pieces are pre-wired end to end:
+
+| What | Default | Why it works |
+|---|---|---|
+| Model | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Bundled, commercial-use friendly, fits a 24 GB GPU |
+| Endpoint | `http://vlm.docker:8000/v1` | Pre-set in the shipped `video-intelligence.json`; resolves on the compose network |
+| Demo stream | `vlm.*` on app `live` | Publish `live/vlm-anything` and analysis starts |
+| Weights | cached in `./vis/vlm-models` | One ~5 GB download, ever; pre-seedable for air-gapped hosts |
+| Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
+| GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
+
+GPU placement is the one thing worth a decision on multi-GPU machines: the sidecar reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) so the detector models still fit.
+
+---
+
+## Configuration reference
+
+### Sidecar tuning (`.env`)
+
+All knobs are environment variables read by `vis/vlm-entrypoint.sh` (which also documents them in detail — defaults adapt to your hardware, and you should never need to edit the file itself):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VLM_MODEL` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Any vLLM-supported vision model |
+| `VLM_GPU_IDS` | unset (first visible GPU) | Pin the sidecar to specific card(s), e.g. `1` or `2,3`; indices match `nvidia-smi` |
+| `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
+| `VLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the GPU vLLM reserves; assumes a dedicated card |
+| `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
+| `VLM_MAX_MODEL_LEN` | `16384` | Context window per request |
+| `VLM_MAX_NUM_SEQS` | `auto` | Concurrency ceiling; `auto` lets vLLM size it to your GPU's KV capacity |
+| `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
+| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | `401408` / `3136` | Per-image resolution cap (≈512 vision tokens/image at the default) |
+| `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
+| `VLM_PORT` | `8000` | Served port; the compose healthcheck follows it |
+| `VLLM_API_KEY` | unset | Require an API key on the endpoint (set when publishing the port) |
+| `HF_TOKEN` | unset | HuggingFace token for the first-boot weight download (higher rate limits) |
+| `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
+| `VLM_EXTRA_ARGS` | unset | Raw passthrough for any other `vllm serve` flag |
+
+Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
+
+### Stream configuration (`wse/conf/video-intelligence.json`)
+
+Settings live in the `vlm_analysis` block — globally for defaults, per-stream to override. Two stream-level settings control the request rate: `inference_fps × duration` ≈ frames per request, one request per `duration` window (e.g. `inference_fps: 2`, `duration: 2` → 4 frames every 2 seconds).
+
+#### Standalone VLM (`detector_type: "vlm"` + `vlm_analysis`)
+
+| Field | Default | Meaning |
+|---|---|---|
+| `model_name` | from global block | Model name sent to the endpoint |
+| `endpoint_url` | from global block | OpenAI-compatible endpoint URL |
+| `api_key` | none | Bearer token; omit for the bundled sidecar |
+| `class_names` | none | Open-vocabulary classes to detect; results are per-class verdicts with reasoning. **Keep this set** — the engine only surfaces per-class results |
+| `class_groups` | none | Advanced: split classes into groups analyzed in parallel, each with optional per-group `system_prompt`, `user_prompt`, `temperature`, `max_tokens`, `response_schema` (e.g. a strict safety group and a lenient inventory group) |
+| `temperature` | `0.1` | Sampling temperature (0.0–2.0) |
+| `max_tokens` | `512` | Response budget per request |
+| `response_schema` | auto | JSON Schema for structured output; a per-class results schema is applied automatically when `class_names` is set |
+| `request_timeout_seconds` | `60.0` | Per-request HTTP timeout, including queue wait at the endpoint |
+| `max_concurrent_requests` | `16` | Cap on in-flight requests to this endpoint from this VIS |
+
+#### Verification (`vlm_verification` inside `scene_analysis` or `object_analysis`)
+
+Adds a VLM second opinion to an existing detector. Note: this block does **not** inherit from `vlm_analysis` — set `model_name` and `endpoint_url` explicitly.
+
+```jsonc
+"detector_type": "scene",
+"scene_analysis": {
+    "class_names": ["fire", "smoke", "fighting"],
+    "sensitivity": 5,
+    "vlm_verification": {
+        "model_name": "Qwen/Qwen3-VL-4B-Instruct-FP8",
+        "endpoint_url": "http://vlm.docker:8000/v1",
+        "cooldown_seconds": 30
+    }
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `model_name`, `endpoint_url`, `api_key` | — | As above; required except `api_key` |
+| `cooldown_seconds` | `30.0` | Minimum seconds between verifications per class group — controls VLM load and cost |
+| `class_groups` | none | Verify related classes together, with optional per-group prompts and `cooldown_seconds` (e.g. verify fire/smoke every 10 s, everything else every 60 s) |
+| `system_prompt` / `user_prompt` | built-in | Override the verification prompts; `{class_list}` and `{detector_type}` placeholders are substituted |
+| `temperature` | `0.1` | Sampling temperature |
+| `max_tokens` | `256` | Response budget |
+| `response_schema` | built-in | Verification verdict schema (`class_name`, `verified`, `reasoning`) |
+| `max_pending_verifications` | `8` | Per-stream cap on queued + in-flight verifications; excess requests are dropped (with a WARNING) rather than piling up behind a slow VLM |
+| `request_timeout_seconds` | `60.0` | Per-request HTTP timeout |
+| `max_concurrent_requests` | `16` | Per-endpoint in-flight cap |
+
+### What you receive
+
+- **Standalone VLM** results carry, per class, the class name and the model's `reasoning`. Delivered through the same event listeners as every detector: ID3 tags, webhooks, log files, and video overlays (overlays show class names — VLM results have no bounding boxes).
+- **Verification** results arrive asynchronously after the original detection (typically within a few seconds), correlated to it by request ID, with `vlm_confirmed` (`true`/`false`) and `vlm_reasoning` per class. The original detections are never delayed — verification is purely additive.
+- **Resilience**: VLM streams stay alive while the endpoint is unreachable — VIS emits empty results (with a periodic status log) and resumes analysis automatically once the endpoint is up, so a stream started during the sidecar's multi-minute first boot simply begins analyzing when the model finishes loading. Scene/object detection with verification attached is likewise unaffected by a VLM outage.
