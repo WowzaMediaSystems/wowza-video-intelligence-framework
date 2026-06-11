@@ -1097,14 +1097,7 @@
                 <div class="field-help">Converts frames to grayscale before analysis to reduce bandwidth and processing overhead.</div>
             </div>
 
-            <div class="form-group">
-                <label>Resize Output</label>
-                <label class="switch">
-                    <input type="checkbox" id="cfg-resize-output" checked>
-                    <span class="slider-switch"></span>
-                </label>
-                <div class="field-help">Uses model-sized for video output instead of full source size. Usually the safer choice for performance.</div>
-            </div>
+
             <div class="form-group">
                 <label>Use Transcoder</label>
                 <label class="switch">
@@ -1127,6 +1120,19 @@
                 <div class="field-help">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</div>
             </div>
             <div class="form-group">
+                <label title="Height of video frames sent for inference. Source uses the original stream height, Model uses the model's native input size, Custom lets you specify a pixel height.">Inference Video Height</label>
+                <div style="display:flex; flex-direction:column; gap:4px; flex:1 1 200px; max-width:320px;">
+                    <select id="cfg-inference-video-height-mode">
+                        <option value="">DEFAULT</option>
+                        <option value="source">SOURCE</option>
+                        <option value="model">MODEL</option>
+                        <option value="custom">CUSTOM</option>
+                    </select>
+                    <input type="number" id="cfg-inference-video-height-custom" value="" placeholder="pixels (≥ 2)" min="2" step="1" style="display:none;">
+                </div>
+                <div class="field-help">SOURCE sends frames at the original stream height. MODEL uses the model's native input size. CUSTOM lets you specify an exact pixel height.</div>
+            </div>
+            <div class="form-group">
                 <label>Detector Type</label>
                 <select id="cfg-detector-type">
                     <option value="object" selected>Object</option>
@@ -1142,13 +1148,28 @@
                     <div class="field-help">Scene-only clip duration sent to the VIF service for each analysis request.</div>
             </div>
 
-            <div class="form-group" id="cfg-auto-scene-throttle-group">
-                <label title="When enabled, the plugin can increase or decrease inference_fps for scene analysis to keep inference from falling behind.">Auto Scene Frame Throttle</label>
+            <div class="form-group" id="cfg-auto-frame-throttle-group">
+                <label title="Opt-in, off by default. When enabled, the plugin reduces inference_fps when inference falls behind. Object detection: its latency lever, keeping the analyzed frame near live and contiguous for the tracker. Scene/VLM: a pre-step that throttles before Catch Up To Live resorts to skipping.">Auto Frame Throttle</label>
                 <label class="switch">
-                    <input type="checkbox" id="cfg-auto-scene-frame-throttle">
+                    <input type="checkbox" id="cfg-auto-frame-throttle">
                     <span class="slider-switch"></span>
                 </label>
-                <div class="field-help">Lets the plugin adjust <code>inference_fps</code> for scene analysis when inference gets too slow.</div>
+                <div class="field-help">Reduce <code>inference_fps</code> when inference can't keep up. Off by default (opt-in). <strong>Object detection:</strong> its latency control (object can't skip without breaking tracking). <strong>Scene/VLM:</strong> a pre-step — throttle first (fewer coverage gaps) before Catch Up To Live skips ahead.</div>
+            </div>
+
+            <div class="form-group" id="cfg-catch-up-to-live-group">
+                <label title="When inference can't keep up, keep detections close to live. Scene/VLM skip the stale backlog to the live edge; object detection reduces the analyzed frame rate.">Catch Up To Live</label>
+                <label class="switch">
+                    <input type="checkbox" id="cfg-catch-up-to-live">
+                    <span class="slider-switch"></span>
+                </label>
+                <div class="field-help">When inference is persistently slower than real time, keep detections near live instead of trailing by the whole buffer depth. Scene/VLM skip stale frames; object detection reduces the analyzed frame rate (tracking-safe). Temporary slowdowns are still absorbed by the buffer.</div>
+            </div>
+
+            <div class="form-group" id="cfg-catch-up-max-behind-group">
+                <label>Catch-up Max Behind (seconds)</label>
+                <input type="number" id="cfg-catch-up-max-behind" value="" placeholder="auto (~2s)" min="0" max="30" step="0.1">
+                <div class="field-help">Scene/VLM: how far behind live detections may fall before catch-up skips ahead; leave blank for auto (~2s). Object: not used — object latency is bounded by the inference_fps throttle; the slow-inference warning fires at a fixed ~1s single-frame round-trip.</div>
             </div>
 
             <!-- Object Analysis Section -->
@@ -1495,8 +1516,10 @@
     // Validation ranges below are UI-owned and should be reviewed when config semantics change.
     var FIELD_RULES = {
         'cfg-inference-fps': { min: -1, max: 120, integer: true, label: 'Inference FPS' },
+        'cfg-inference-video-height-custom': { min: 2, integer: true, label: 'Inference Video Height' },
         'cfg-rollup-batch-interval': { min: 0, max: 30, decimals: 1, label: 'Rollup Batch Interval' },
         'cfg-duration': { min: 0, max: 5, decimals: 1, label: 'Duration' },
+        'cfg-catch-up-max-behind': { min: 0, max: 30, decimals: 1, label: 'Catch-up Max Behind (s)' },
         'cfg-confidence-threshold': { min: 0, max: 100, decimals: 1, label: 'Object Confidence Threshold %' },
         'cfg-bt-min-confidence': { min: 0, max: 100, decimals: 1, label: 'Min Track Confidence' },
         'cfg-bt-max-lost-frames': { min: 0, max: 60, integer: true, label: 'Max Lost Track Frames' },
@@ -2455,17 +2478,27 @@
             vi_service_api_key: document.getElementById('cfg-vi-service-api-key').value.trim() || null,
             log_max_messages: readNumericInputValue('cfg-log-max-messages', true),
             inference_fps: readNumericInputValue('cfg-inference-fps', true),
+            inference_video_height: getInferenceVideoHeight(),
             use_transcoder: document.getElementById('cfg-use-transcoder').checked,
             frame_grab_interval: readNumericInputValue('cfg-frame-grab', false),
             duration: readNumericInputValue('cfg-duration', false),
             grayscaled: document.getElementById('cfg-grayscaled').checked,
-            resize_output: document.getElementById('cfg-resize-output').checked,
+
             log_timing: readNumericInputValue('cfg-log-timing', true),
             detector_type: detectorType
         };
 
+        // auto_frame_throttle (frame-rate throttle) is an opt-in for all modes (default off):
+        // object's latency lever, and a scene/VLM throttle-first pre-step.
+        config.auto_frame_throttle = document.getElementById('cfg-auto-frame-throttle').checked;
+        // catch_up_to_live (skip stale frames to live) is scene/VLM only — object can't skip
+        // without breaking tracking.
         if (detectorType === 'scene' || detectorType === 'vlm') {
-            config.auto_scene_frame_throttle = document.getElementById('cfg-auto-scene-frame-throttle').checked;
+            config.catch_up_to_live = document.getElementById('cfg-catch-up-to-live').checked;
+            // Optional: blank => null (backend derives ~2s). Don't use readNumericInputValue here —
+            // it substitutes the placeholder and so could never produce null.
+            const catchUpMaxBehindRaw = document.getElementById('cfg-catch-up-max-behind').value.trim();
+            config.catch_up_max_behind_seconds = catchUpMaxBehindRaw === '' ? null : parseFloat(catchUpMaxBehindRaw);
         }
 
         config.rollup_batch_interval = readNumericInputValue('cfg-rollup-batch-interval', false);
@@ -2593,6 +2626,11 @@
         if (!Number.isFinite(config.rollup_batch_interval) || config.rollup_batch_interval < 0 || config.rollup_batch_interval > 30) {
             errors.push('Rollup/Batch Time must be between 0 and 30.');
         }
+        // Optional: null/blank = auto. Only validate when a value was provided.
+        if (config.catch_up_max_behind_seconds !== null && config.catch_up_max_behind_seconds !== undefined &&
+            (!Number.isFinite(config.catch_up_max_behind_seconds) || config.catch_up_max_behind_seconds < 0 || config.catch_up_max_behind_seconds > 30)) {
+            errors.push('Catch-up Max Behind must be between 0 and 30 seconds, or left blank for auto.');
+        }
 
         if (config.detector_type === 'object') {
             const oa = config.object_analysis || {};
@@ -2705,6 +2743,9 @@
         // Stream settings
         document.getElementById('cfg-active').checked = false;
         document.getElementById('cfg-inference-fps').value = '';
+        document.getElementById('cfg-inference-video-height-mode').value = '';
+        document.getElementById('cfg-inference-video-height-custom').value = '';
+        document.getElementById('cfg-inference-video-height-custom').style.display = 'none';
         document.getElementById('cfg-use-transcoder').checked = false;
         document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
         document.getElementById('cfg-frame-grab').value = '';
@@ -2712,8 +2753,10 @@
         document.getElementById('cfg-ignore-untracked-objects').checked = false;
         document.getElementById('cfg-duration').value = '';
         document.getElementById('cfg-grayscaled').checked = false;
-        document.getElementById('cfg-resize-output').checked = false;
-        document.getElementById('cfg-auto-scene-frame-throttle').checked = false;
+
+        document.getElementById('cfg-auto-frame-throttle').checked = false;
+        document.getElementById('cfg-catch-up-to-live').checked = true;
+        document.getElementById('cfg-catch-up-max-behind').value = '';
         document.getElementById('cfg-vi-service-url').value = '';
         document.getElementById('cfg-vi-service-api-key').value = '';
         document.getElementById('cfg-log-max-messages').value = '';
@@ -2769,6 +2812,7 @@
         if (config.inference_fps !== undefined) {
             document.getElementById('cfg-inference-fps').value = config.inference_fps;
         }
+		setInferenceVideoHeightFromValue(config.inference_video_height);
         if (config.use_transcoder !== undefined) {
             document.getElementById('cfg-use-transcoder').checked = config.use_transcoder;
             document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
@@ -2792,11 +2836,21 @@
         if (config.grayscaled !== undefined) {
             document.getElementById('cfg-grayscaled').checked = config.grayscaled;
         }
-        if (config.resize_output !== undefined) {
-            document.getElementById('cfg-resize-output').checked = config.resize_output;
+
+        // auto_frame_throttle (renamed from auto_scene_frame_throttle). Opt-in, default OFF for all
+        // modes. Prefer the new key; for scene/VLM fall back to the legacy auto_scene_frame_throttle
+        // key (where it originally applied); unset => off.
+        let autoFrameThrottle = config.auto_frame_throttle;
+        if (autoFrameThrottle === undefined && config.detector_type !== 'object') {
+            autoFrameThrottle = config.auto_scene_frame_throttle;
         }
-        if (config.auto_scene_frame_throttle !== undefined) {
-            document.getElementById('cfg-auto-scene-frame-throttle').checked = config.auto_scene_frame_throttle;
+        document.getElementById('cfg-auto-frame-throttle').checked = (autoFrameThrottle === true);
+        if (config.catch_up_to_live !== undefined) {
+            document.getElementById('cfg-catch-up-to-live').checked = config.catch_up_to_live;
+        }
+        // null/absent => leave blank so the "auto (~2s)" placeholder shows
+        if (config.catch_up_max_behind_seconds !== undefined && config.catch_up_max_behind_seconds !== null) {
+            document.getElementById('cfg-catch-up-max-behind').value = config.catch_up_max_behind_seconds;
         }
         if (config.log_timing !== undefined) {
             document.getElementById('cfg-log-timing').value = config.log_timing;
@@ -3866,6 +3920,39 @@
         return listeners;
     }
 
+    function getInferenceVideoHeight()
+    {
+        const mode = document.getElementById('cfg-inference-video-height-mode').value;
+        if (mode === 'source') return -1;
+        if (mode === 'model') return 0;
+        if (mode === 'custom') return readNumericInputValue('cfg-inference-video-height-custom', true);
+        return null;
+    }
+
+    function setInferenceVideoHeightFromValue(val)
+    {
+        const modeSelect = document.getElementById('cfg-inference-video-height-mode');
+        const customInput = document.getElementById('cfg-inference-video-height-custom');
+        if (val === -1)
+        {
+            modeSelect.value = 'source';
+            customInput.style.display = 'none';
+            customInput.value = '';
+        }
+        else if (val != null && val > 1)
+        {
+            modeSelect.value = 'custom';
+            customInput.style.display = '';
+            customInput.value = val;
+        }
+        else
+        {
+            modeSelect.value = 'model';
+            customInput.style.display = 'none';
+            customInput.value = '';
+        }
+    }
+
     function toggleDetectorSection() {
         const detectorTypeSelect = document.getElementById('cfg-detector-type');
         const detectorType = detectorTypeSelect.value;
@@ -3875,7 +3962,9 @@
         document.getElementById('vlm-analysis-section').style.display = detectorType === 'vlm' ? 'block' : 'none';
         document.getElementById('cfg-rollup-batch-interval-group').style.display = 'flex';
         document.getElementById('cfg-duration-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
-        document.getElementById('cfg-auto-scene-throttle-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
+        document.getElementById('cfg-auto-frame-throttle-group').style.display = (detectorType === 'object' || detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
+        document.getElementById('cfg-catch-up-to-live-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
+        document.getElementById('cfg-catch-up-max-behind-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
         document.getElementById('cfg-inference-fps-group').style.display = useTranscoder ? 'flex' : 'none';
         document.getElementById('cfg-frame-grab-group').style.display = useTranscoder ? 'none' : 'flex';
         if (activeListenerName && eventListenersData[activeListenerName]) {
@@ -3907,16 +3996,21 @@
         markDirty();
     });
 
+    document.getElementById('cfg-inference-video-height-mode').addEventListener('change', function() {
+        const customInput = document.getElementById('cfg-inference-video-height-custom');
+        customInput.style.display = this.value === 'custom' ? '' : 'none';
+        if (this.value !== 'custom') customInput.value = '';
+        document.getElementById('cfg-use-transcoder-warning').style.display = 'block';
+        markDirty();
+    });
+
     document.getElementById('cfg-use-transcoder').addEventListener('change', function() {
         toggleDetectorSection();
         document.getElementById('cfg-use-transcoder-warning').style.display = 'block';
         markDirty();
     });
 
-    document.getElementById('cfg-resize-output').addEventListener('change', function() {
-        document.getElementById('cfg-use-transcoder-warning').style.display = 'block';
-        markDirty();
-    });
+
 
     document.getElementById('cfg-frame-grab').addEventListener('input', function() {
         document.getElementById('cfg-use-transcoder-warning').style.display = 'block';

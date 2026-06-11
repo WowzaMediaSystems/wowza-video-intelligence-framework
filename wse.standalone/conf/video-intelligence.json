@@ -13,14 +13,16 @@
     },
 
     "rollup_batch_interval": 2,  //how long to hold detections for batch and rollup events
-    "auto_scene_frame_throttle": false, //when enabled, the service will automatically throttle scene detection frames to try to maintain the target_processing_ratio
+    //"auto_frame_throttle": false, //opt-in (default off, all modes): reduce inference_fps when inference falls behind. object detection: its latency lever; scene/vlm: a pre-step before catch_up_to_live skips. Renamed from auto_scene_frame_throttle (still accepted on read).
+    "catch_up_to_live": true, //scene/vlm only: when inference stays slower than real-time, skip the stale backlog to the live edge instead of trailing by the whole buffer depth. Temporary slowdowns are still absorbed by the buffer. (Object bounds latency via auto_frame_throttle instead — it can't skip without breaking tracking.) Detections carry behind_live_ms; scene/vlm carry caught_up/skipped_frames/skipped_ms on the first detection after a skip.
+    //"catch_up_max_behind_seconds": 2, //scene/vlm: how far (seconds) detections may fall behind live before catch-up skips; unset = 2s, bounding latency near (inference_time + 2s); lower for tighter latency, raise to tolerate more lag. object: not used (object latency is bounded by the inference_fps throttle; the slow-inference warning fires at a fixed ~1s single-frame round-trip).
 
     "grayscaled": false, //converts images to grayscale to improve performance
-    "resize_output": true,
-    "duration": 2, //how many seconds to send (scene only)
+    "duration": 2, //how many seconds to send (scene/vlm only)
     "use_transcoder": true, //whether to use transcoder to capture frames
     "frame_grab_interval": 1, //if not using transcoder, how often to capture frames in seconds
-    "inference_fps": -1, //target fps for inference
+    "inference_fps": -1, //target fps for inference, -1 matches source fps
+    "inference_video_height": 0, //-1 matches source video height, 0 matches model, values > 0 resize video to that height
     "frame_buffer": 10, //buffer to hold frames to process
 
     // how many parallel instances to create for each model type.
@@ -73,6 +75,12 @@
       "sensitivity":5
     },
     "vlm_analysis" : {
+        // defaults below match the vLLM sidecar bundled with the Video Intelligence
+        // framework (docker compose --profile vlm), so VLM streams work out of the box.
+        // Point endpoint_url at any OpenAI-compatible endpoint to use another provider.
+        "model_name": "Qwen/Qwen3-VL-4B-Instruct-FP8",
+        "endpoint_url": "http://vlm.docker:8000/v1"
+        //"api_key": "your-api-key" //only needed for authenticated endpoints; the bundled sidecar needs none
     },
     "streams":
     [
@@ -114,7 +122,6 @@
             "save_images": false,
             "frame_buffer": 10,
             "inference_fps": 12,
-            "resize_output": true,
 
             "detector_type":"object",
             "object_analysis": {
@@ -166,6 +173,49 @@
             "scene_analysis": {
                 "class_names":["fire","fighting","running", "person climbing fence","crowd of people","taking pictures","walking","standing","color bars"],
                 "sensitivity": 5
+            }
+        },
+        {
+            "active":true,
+            "app_name": "live",
+            "stream_name": "vlm.*",
+            "vif_event_listeners": {
+                "Id3Tags": {
+                    "class_name": "Id3Event",
+                    "methods": ["immediate"]
+                },
+                "Webhooks": {
+                    "class_name": "WebhookEvent2",
+                    "methods": ["disabled"]
+                },
+                "LogFiles": {
+                    "class_name": "LogFileEvent",
+                    "methods": ["immediate"]
+                },
+                "Overlays": {
+                    "class_name": "OverlayEvent",
+                    "methods": ["immediate"],
+                    "properties": {
+                        "debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",
+                        "show_stats": true
+                    }
+                }
+            },
+            "frame_buffer": 10,
+            //VLM requests are heavier than scene/object inference: 2 fps over a
+            //2 second window sends one request of 4 frames every 2 seconds.
+            "inference_fps": 2,
+            "duration": 2,
+
+            "detector_type":"vlm",
+            "vlm_analysis": {
+                //model_name and endpoint_url are inherited from the global vlm_analysis
+                //defaults above (the bundled vLLM sidecar); override here to use a
+                //different model or endpoint for this stream.
+                //class_names is open vocabulary: any short word or phrase works (e.g.
+                //"person wearing a hard hat"). Keep it set: the engine surfaces
+                //per-class results only.
+                "class_names":["fire","smoke","person","vehicle"]
             }
         }
     ]

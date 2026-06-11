@@ -15,7 +15,8 @@ Changes to the top-level defaults in [video-intelligence.json](/docker/conf/vide
 - `object_detections_holdback`
 - `scene_detections_holdback`
 - `duration`
-- `auto_scene_frame_throttle`
+- `catch_up_to_live`
+- `auto_frame_throttle`
 - `log_max_messages`
 - `log_timing`
 - `object_analysis.confidence_threshold`

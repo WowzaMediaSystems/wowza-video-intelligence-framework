@@ -127,10 +127,13 @@ The top level configuration contains the default settings then per steam configu
 | scene_analysis | null | object detections configuration, see vif-service for details |
 | ignore_untracked_objects | false |  ignore untracked objects when object tracking_method is set |
 | frame_buffer | 10 | size of the frame buffer to hold frames to send to VIF service |
+| catch_up_to_live | true | **Scene/VLM only.** When inference stays slower than real-time, skip the stale buffered backlog and resume at the live edge instead of letting latency grow to the full `frame_buffer` depth. Temporary slowdowns are still absorbed by the buffer. (Object detection bounds latency via `auto_frame_throttle` instead — it can't skip without breaking ByteTrack, so this option has no effect for object.) Every detection reports `behind_live_ms`; the first scene/VLM detection after a skip also carries `caught_up`/`skipped_frames`/`skipped_ms`. |
+| catch_up_max_behind_seconds | null (=2s) | **Scene/VLM:** how far behind live (seconds) detections may fall before catch-up skips to live. **Object:** not used — object latency is bounded by the `inference_fps` throttle toward the sustainable rate, and the slow-inference warning fires at a fixed ~1s single-frame round-trip. For **Scene/VLM**, unset derives to the buffer's design headroom (~2s), bounding latency near `inference_time + 2s`; lower for tighter latency, raise to tolerate more lag. |
+| auto_frame_throttle | false | Opt-in frame-rate throttle (default **off**, all modes): reduce `inference_fps` when inference falls behind. **Object detection:** its latency lever — keeps the analyzed frame near live and contiguous for the tracker. **Scene/VLM:** a pre-step that throttles before `catch_up_to_live` resorts to skipping, for fewer coverage gaps. Renamed from `auto_scene_frame_throttle` (still accepted on read). |
 | use_transcoder| true | use transcoder to grab frames |
-| skip_frames | 0 | number of frames to skip per second when use_transcoder = true |
+| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true |
+| inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
-| resize_output | true | Resize the `<streamname>-vi` output to the size of model (i.e. 704x396) |
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
