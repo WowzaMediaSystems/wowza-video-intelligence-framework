@@ -105,9 +105,9 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
     ```bash
     cp .env.example .env
     ```
-
+    
     Example:
-   
+    
     ```text
     WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
     WSE_ADMIN_USER=admin
