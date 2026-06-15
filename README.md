@@ -138,7 +138,7 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
    * NVIDIA driver reports a version greaterthan or equal to 570
    * CUDA version is greater than or equal to 12.8
    
-> [!TIP]
+> [!NOTE]
 > You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
 #### 4. Start WSE + Manager + VIS:
