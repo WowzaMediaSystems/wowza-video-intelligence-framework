@@ -172,9 +172,14 @@ Out of the box, VIF renders bounding box overlays on the transcoded `-vi` stream
 > - Streams can be managed via REST or configured using the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page in Wowza Streaming Engine Manager.
 
 1. [Install FFmpeg](https://www.ffmpeg.org/download.html).
-2. Start WSE using the quick-start steps above.
-3. Use the sample clips in `./videos/`, or publish your own files. For best results, keep source videos under 720p resolution.
-4. For object detection, publish a stream to the WSE `live` application. The default configuration matches stream names using the `object.*` regex — any name starting with `object` will trigger object detection:
+2. Verify docker and nvidia drivers run the following command:
+   ```
+   docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+   ```
+   Make sure the NVIDIA driver reports a version greaterthan or equal to 570 and CUDA version is greater than or equal to 12.8
+4. Start WSE using the quick-start steps above.
+5. Use the sample clips in `./videos/`, or publish your own files. For best results, keep source videos under 720p resolution.
+6. For object detection, publish a stream to the WSE `live` application. The default configuration matches stream names using the `object.*` regex — any name starting with `object` will trigger object detection:
 
 ```bash
 ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/object_mystream1"
