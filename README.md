@@ -102,23 +102,23 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
 
 1. Create `.env` from the example and edit values:
 
-```bash
-cp .env.example .env
-```
+   ```bash
+   cp .env.example .env
+   ```
 
-Example:
-
-```text
-WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
-WSE_ADMIN_USER=admin
-WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
-PLAYER_TOKEN=REPLACE_WITH_YOUR_FLOWPLAYER_TOKEN
-VIS_PROTOCOL=ws
-VIS_HOST=video-intelligence-service.docker
-VIS_PORT=5001
-VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
-VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
-```
+   Example:
+   
+   ```text
+   WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
+   WSE_ADMIN_USER=admin
+   WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
+   PLAYER_TOKEN=REPLACE_WITH_YOUR_FLOWPLAYER_TOKEN
+   VIS_PROTOCOL=ws
+   VIS_HOST=video-intelligence-service.docker
+   VIS_PORT=5001
+   VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
+   VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
+   ```
 
 > [!IMPORTANT]
 > **`VIS_HOST` value depends on your deployment:**
@@ -130,13 +130,14 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
 2. Verify docker and the NVIDIA drivers run the following command:
+   
    ```
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
    ```
    Check the version:
    * NVIDIA driver reports a version greaterthan or equal to 570
    * CUDA version is greater than or equal to 12.8
-   * 
+
 > [!TIP]
 > You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
