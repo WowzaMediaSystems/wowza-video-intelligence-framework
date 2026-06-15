@@ -129,11 +129,14 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
-2. Verify docker and nvidia drivers run the following command:
+2. Verify docker and the NVIDIA drivers run the following command:
    ```
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
    ```
-   Make sure the NVIDIA driver reports a version greaterthan or equal to 570 and CUDA version is greater than or equal to 12.8
+   Check the version:
+   * NVIDIA driver reports a version greaterthan or equal to 570
+   * CUDA version is greater than or equal to 12.8
+   * 
 > [!TIP]
 > You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
