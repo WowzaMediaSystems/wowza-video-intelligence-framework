@@ -100,8 +100,8 @@ Make sure you have a valid [Wowza Streaming Engine key](https://www.wowza.com/fr
 
 Before starting, confirm your machine meets the [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif). The default local workflow runs all three containers (`wse`, `manager`, and `video-intelligence-service-gpu`).
 
-1. Create `.env` from the example and edit values:
-
+#### 1. Create `.env` from the example and edit values:
+    
 ```bash
 cp .env.example .env
 ```
@@ -129,34 +129,46 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
-2. Start WSE + Manager + VIS:
+#### 2. Verify docker and the NVIDIA drivers run the following command:
+   
+   ```
+   docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+   ```
+   Check the version:
+   * NVIDIA driver reports a version greaterthan or equal to 570
+   * CUDA version is greater than or equal to 12.8
+   
+> [!NOTE]
+> You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
-```bash
-docker compose up
-```
+#### 3. Start WSE + Manager + VIS:
 
+   ```bash
+   docker compose up
+   ```
+   
 > [!TIP]  
 > If you change images or mounted config between runs, run `docker compose down` first.
 
-3. Verify services are running:
+#### 4. Verify services are running:
 
-| Service | URL |
-|---|---|
-| Manager UI | `http://localhost:8088` |
-| WSE REST API | `http://localhost:8087` |
-
-**Exposed ports:**
-
-| Port | Protocol | Purpose |
-|---|---|---|
-| `80` | HTTP | HLS |
-| `443` | HTTPS | TLS |
-| `554` | RTSP | RTSP |
-| `1935` | TCP | RTMP |
-| `8087` | HTTP | REST API |
-| `8089` | HTTP | REST API docs (if enabled) |
-| `10000` | UDP | SRT |
-
+   | Service | URL |
+   |---|---|
+   | Manager UI | `http://localhost:8088` |
+   | WSE REST API | `http://localhost:8087` |
+   
+   **Exposed ports:**
+   
+   | Port | Protocol | Purpose |
+   |---|---|---|
+   | `80` | HTTP | HLS |
+   | `443` | HTTPS | TLS |
+   | `554` | RTSP | RTSP |
+   | `1935` | TCP | RTMP |
+   | `8087` | HTTP | REST API |
+   | `8089` | HTTP | REST API docs (if enabled) |
+   | `10000` | UDP | SRT |
+   
 > [!NOTE]  
 > - The first time Docker Compose is run, the containers may take up to 20 minutes to download all required files. Actual time may vary based on available bandwidth  
 > - Each time the Video Intelligence Service (VIS) container starts, it may take approximately 3 minutes before detections are available
