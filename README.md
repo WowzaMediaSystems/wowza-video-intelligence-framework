@@ -120,9 +120,9 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
    VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    ```
 
-   > [!IMPORTANT]
-   > **`VIS_HOST` value depends on your deployment:**
-   > - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
+>> [!IMPORTANT]
+>> **`VIS_HOST` value depends on your deployment:**
+>> - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
    > - **Remote VIS:** Set `VIS_HOST` to the hostname or IP of your remote VIS instance.
    
    > [!CAUTION]  
