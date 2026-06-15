@@ -100,7 +100,7 @@ Make sure you have a valid [Wowza Streaming Engine key](https://www.wowza.com/fr
 
 Before starting, confirm your machine meets the [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif). The default local workflow runs all three containers (`wse`, `manager`, and `video-intelligence-service-gpu`).
 
-1. Create `.env` from the example and edit values:
+### 1. Create `.env` from the example and edit values:
 
     ```bash
     cp .env.example .env
