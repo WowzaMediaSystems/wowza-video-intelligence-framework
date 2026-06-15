@@ -120,14 +120,14 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
    VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    ```
 
->> [!IMPORTANT]
->> **`VIS_HOST` value depends on your deployment:**
->> - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
-   > - **Remote VIS:** Set `VIS_HOST` to the hostname or IP of your remote VIS instance.
-   
-   > [!CAUTION]  
-   > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
-   > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
+> [!IMPORTANT]
+> **`VIS_HOST` value depends on your deployment:**
+> - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
+> - **Remote VIS:** Set `VIS_HOST` to the hostname or IP of your remote VIS instance.
+
+> [!CAUTION]  
+> `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
+> `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
 2. Verify docker and the NVIDIA drivers run the following command:
    
