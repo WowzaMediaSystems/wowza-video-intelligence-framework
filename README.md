@@ -102,23 +102,23 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
 
 1. Create `.env` from the example and edit values:
 
-   ```bash
-   cp .env.example .env
-   ```
+    ```bash
+    cp .env.example .env
+    ```
 
-   Example:
+    Example:
    
-   ```text
-   WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
-   WSE_ADMIN_USER=admin
-   WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
-   PLAYER_TOKEN=REPLACE_WITH_YOUR_FLOWPLAYER_TOKEN
-   VIS_PROTOCOL=ws
-   VIS_HOST=video-intelligence-service.docker
-   VIS_PORT=5001
-   VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
-   VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
-   ```
+    ```text
+    WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
+    WSE_ADMIN_USER=admin
+    WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
+    PLAYER_TOKEN=REPLACE_WITH_YOUR_FLOWPLAYER_TOKEN
+    VIS_PROTOCOL=ws
+    VIS_HOST=video-intelligence-service.docker
+    VIS_PORT=5001
+    VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
+    VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
+    ```
 
     > [!IMPORTANT]
     > **`VIS_HOST` value depends on your deployment:**
