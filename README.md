@@ -129,7 +129,7 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
-2. Verify docker and the NVIDIA drivers run the following command:
+#### 2. Verify docker and the NVIDIA drivers run the following command:
    
    ```
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
@@ -141,7 +141,7 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
 > [!TIP]
 > You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
-4. Start WSE + Manager + VIS:
+#### 4. Start WSE + Manager + VIS:
 
    ```bash
    docker compose up
@@ -150,7 +150,7 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
 > [!TIP]  
 > If you change images or mounted config between runs, run `docker compose down` first.
 
-5. Verify services are running:
+#### 5. Verify services are running:
 
    | Service | URL |
    |---|---|
