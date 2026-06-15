@@ -120,14 +120,14 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
    VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    ```
 
-> [!IMPORTANT]
-> **`VIS_HOST` value depends on your deployment:**
-> - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
-> - **Remote VIS:** Set `VIS_HOST` to the hostname or IP of your remote VIS instance.
-
-> [!CAUTION]  
-> `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
-> `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
+   > [!IMPORTANT]
+   > **`VIS_HOST` value depends on your deployment:**
+   > - **Local Docker:** Set `VIS_HOST=video-intelligence-service.docker`. WSE and VIS run in the same Docker network; using `localhost` will not work because it resolves to the WSE container itself, not the VIS container.
+   > - **Remote VIS:** Set `VIS_HOST` to the hostname or IP of your remote VIS instance.
+   
+   > [!CAUTION]  
+   > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
+   > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
 2. Verify docker and the NVIDIA drivers run the following command:
    
@@ -137,41 +137,41 @@ Before starting, confirm your machine meets the [Compute Requirements (Self-Host
    Check the version:
    * NVIDIA driver reports a version greaterthan or equal to 570
    * CUDA version is greater than or equal to 12.8
-
-> [!TIP]
-> You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
+   
+   > [!TIP]
+   > You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
 4. Start WSE + Manager + VIS:
 
-```bash
-docker compose up
-```
+   ```bash
+   docker compose up
+   ```
+   
+   > [!TIP]  
+   > If you change images or mounted config between runs, run `docker compose down` first.
 
-> [!TIP]  
-> If you change images or mounted config between runs, run `docker compose down` first.
+5. Verify services are running:
 
-4. Verify services are running:
-
-| Service | URL |
-|---|---|
-| Manager UI | `http://localhost:8088` |
-| WSE REST API | `http://localhost:8087` |
-
-**Exposed ports:**
-
-| Port | Protocol | Purpose |
-|---|---|---|
-| `80` | HTTP | HLS |
-| `443` | HTTPS | TLS |
-| `554` | RTSP | RTSP |
-| `1935` | TCP | RTMP |
-| `8087` | HTTP | REST API |
-| `8089` | HTTP | REST API docs (if enabled) |
-| `10000` | UDP | SRT |
-
-> [!NOTE]  
-> - The first time Docker Compose is run, the containers may take up to 20 minutes to download all required files. Actual time may vary based on available bandwidth  
-> - Each time the Video Intelligence Service (VIS) container starts, it may take approximately 3 minutes before detections are available
+   | Service | URL |
+   |---|---|
+   | Manager UI | `http://localhost:8088` |
+   | WSE REST API | `http://localhost:8087` |
+   
+   **Exposed ports:**
+   
+   | Port | Protocol | Purpose |
+   |---|---|---|
+   | `80` | HTTP | HLS |
+   | `443` | HTTPS | TLS |
+   | `554` | RTSP | RTSP |
+   | `1935` | TCP | RTMP |
+   | `8087` | HTTP | REST API |
+   | `8089` | HTTP | REST API docs (if enabled) |
+   | `10000` | UDP | SRT |
+   
+   > [!NOTE]  
+   > - The first time Docker Compose is run, the containers may take up to 20 minutes to download all required files. Actual time may vary based on available bandwidth  
+   > - Each time the Video Intelligence Service (VIS) container starts, it may take approximately 3 minutes before detections are available
 
 ## Testing Object Detection and Scene Understanding
 
