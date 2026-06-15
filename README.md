@@ -134,8 +134,10 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
    ```
    Make sure the NVIDIA driver reports a version greaterthan or equal to 570 and CUDA version is greater than or equal to 12.8
+> [!TIP]
+> You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
-3. Start WSE + Manager + VIS:
+4. Start WSE + Manager + VIS:
 
 ```bash
 docker compose up
