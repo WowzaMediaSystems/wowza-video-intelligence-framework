@@ -141,7 +141,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > [!NOTE]
 > You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
-#### 4. Start WSE + Manager + VIS:
+#### 3. Start WSE + Manager + VIS:
 
    ```bash
    docker compose up
@@ -150,7 +150,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > [!TIP]  
 > If you change images or mounted config between runs, run `docker compose down` first.
 
-#### 5. Verify services are running:
+#### 4. Verify services are running:
 
    | Service | URL |
    |---|---|
