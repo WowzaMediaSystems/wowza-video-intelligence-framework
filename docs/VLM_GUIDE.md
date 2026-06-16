@@ -42,11 +42,7 @@ tail -f wse/logs/wowzastreamingengine_vi.log
 
 You'll see one entry per analysis window with each detected class and the model's reasoning. The same results are embedded as ID3 tags in the stream, and an overlay rendition named `vlm-demo-vi` shows detected classes burned into the video (play it from the Engine Manager test player at `http://localhost:8088`, or directly at `http://localhost/live/vlm-demo-vi/playlist.m3u8`).
 
-**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing `wse/conf/video-intelligence.json` and restarting the engine to apply:
-
-```bash
-docker compose restart wse
-```
+**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing `wse/conf/video-intelligence.json` and restarting the stream to apply - either by toggling its active state or by restarting the encoder.
 
 ---
 
