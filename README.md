@@ -26,7 +26,6 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Docker Engine](https://docs.docker.com/engine/install/)
 - A valid [Wowza Streaming Engine](https://auth.wowza.com/register?type=engine) license key
 - A valid Video Intelligence Service license (`VIS_LICENSE`) for local VIS deployments
-- A valid Flowplayer license key (Provided by Wowza)
 - For local GPU inference: an NVIDIA GPU and compatible NVIDIA drivers
 - (Optional) [FFmpeg](https://www.ffmpeg.org/download.html) for publishing test streams
 
@@ -112,7 +111,6 @@ Example:
 WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
 WSE_ADMIN_USER=admin
 WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
-PLAYER_TOKEN=REPLACE_WITH_YOUR_FLOWPLAYER_TOKEN
 VIS_PROTOCOL=ws
 VIS_HOST=video-intelligence-service.docker
 VIS_PORT=5001
