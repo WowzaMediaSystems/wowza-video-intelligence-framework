@@ -58,7 +58,6 @@ services:
             - LOG_LEVEL=WARN #DEBUG INFO WARN ERROR
             - WSE_HOST=http://wse.docker:8087
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change <http://localhost:8088/RESTAPIDocumentation/>
-            - PLAYER_TOKEN=${PLAYER_TOKEN}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
             # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
