@@ -230,3 +230,78 @@ services:
                 - driver: nvidia
                   capabilities: [gpu, compute, utility]
                   count: all
+
+    # ── Synthetic Video Detector NIM sidecar (opt-in) ──────────────────────
+    # NVIDIA Maxine Synthetic Video Detector (SVD) NIM backing the
+    # `detector_type=synthetic` analyzer. Bidirectional-streaming gRPC: VIS
+    # relays each VIC-remuxed H.264 window (no re-encode) and returns a
+    # per-window Real/Fake verdict.
+    #
+    # Opt-in via the `svd` compose profile -- a bare `docker compose up`
+    # never starts it:
+    #   docker compose --profile svd up                    # vis + svd only
+    #   docker compose --profile default --profile svd up  # full stack + svd
+    # Teardown: a bare `docker compose down` leaves svd running; use
+    # `docker compose --profile svd down` to stop it.
+    #
+    # ACCESS-GATED IMAGE: nvcr.io/nim/nvidia/synthetic-video-detector is
+    # distributed through NVIDIA NGC / NVIDIA AI Enterprise and requires the
+    # VI-550 partnership entitlement. Before first run, authenticate to NGC
+    # and set NGC_API_KEY in .env (the container also reads it to pull the
+    # model profile on first boot):
+    #   docker login nvcr.io   # username: $oauthtoken   password: <NGC_API_KEY>
+    #
+    # Streams opt in by setting `endpoint: "svd.docker:8001"` + `ssl_mode:
+    # "disabled"` in their synthetic config (the service also resolves as
+    # plain `svd`). For a hosted / bring-your-own endpoint instead, skip this
+    # profile and point `endpoint` at it (e.g. grpc.nvcf.nvidia.com:443 with
+    # api_key + function_id).
+    #
+    # GPU REQUIREMENT: the NIM decodes on the GPU and needs NVDEC/NVENC +
+    # Tensor cores -- T4 / A10 / A16 / A40 / L4 / L40 / RTX 4090 / 5090 /
+    # RTX PRO 6000 Blackwell. NOT A100 / H100 / B100 (no NVENC/NVDEC).
+    # Full deploy + air-gap guide: ./docs/SYNTHETIC_VIDEO_DETECTOR.md
+    svd:
+        hostname: svd.docker
+        image: ${SVD_NIM_IMAGE:-nvcr.io/nim/nvidia/synthetic-video-detector:latest}
+        profiles: ["svd"]
+        restart: unless-stopped
+        shm_size: "8gb"   # NIM decode + inference need large shared memory
+        environment:
+          - NGC_API_KEY=${NGC_API_KEY:-}                       # NGC key; also pulls the model profile on first boot
+          - NIM_MANIFEST_PROFILE=${SVD_NIM_MANIFEST_PROFILE:-} # optional GPU-arch profile id; auto-selected when empty (see docs)
+          - NIM_CACHE_PATH=/opt/nim/.cache
+          - NVIDIA_VISIBLE_DEVICES=${SVD_GPU_IDS:-all}         # pin to specific card(s) on multi-GPU hosts, e.g. "1"
+        # The GPU-specific model profile is downloaded here on first boot and
+        # reused after. For air-gapped hosts, pre-seed it on a connected
+        # machine (run the NIM once, or `nim download`), copy
+        # ./vis/svd-nim-cache over, and keep NGC_API_KEY set -- the cached
+        # profile is then served with no runtime download or phone-home.
+        volumes:
+          - ./vis/svd-nim-cache:/opt/nim/.cache
+        # gRPC (8001) + HTTP mgmt/health (8000) are reachable on the compose
+        # network by default (VIS connects to svd.docker:8001 in-network). To
+        # reach the NIM from a VIS on another host, publish the gRPC port:
+        # ports:
+        #   - "8001:8001"   # gRPC inference
+        #   - "8000:8000"   # HTTP metadata / metrics / health
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        healthcheck:
+          test: ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/health/ready || exit 1"]
+          interval: 30s
+          timeout: 10s
+          retries: 5
+          # First boot downloads the GPU-specific model profile; the long
+          # grace covers slow links. Later boots reuse ./vis/svd-nim-cache.
+          start_period: 1800s
+        deploy:
+          resources:
+            reservations:
+              devices:
+                # `video` capability is REQUIRED: the NIM uses NVDEC/NVENC.
+                # All GPUs are exposed; pin to a dedicated card on multi-GPU
+                # hosts via SVD_GPU_IDS in .env (indices match nvidia-smi).
+                - driver: nvidia
+                  capabilities: [video, gpu, compute, utility]
+                  count: all

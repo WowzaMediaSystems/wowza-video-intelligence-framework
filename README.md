@@ -38,6 +38,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Default Model Coverage and Configuration](#default-model-coverage-and-configuration)
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
+- [Synthetic / Deepfake Detection (Optional)](#synthetic--deepfake-detection-optional)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
@@ -236,6 +237,12 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 - Includes field-level options and behavior for VIF settings exposed through the Manager UI, REST API, and the underlying `video-intelligence.json` schema.
 - Useful when tuning object detection settings (for example `model_name`, `checkpoint_path`, thresholds, and per-stream overrides).
+
+## Synthetic / Deepfake Detection (Optional)
+
+VIF can flag **synthetic / AI-generated (deepfake)** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Maxine Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC (VI-550 partnership) and needs an NVENC/NVDEC GPU (T4/A10/A40/L4/L40/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
+
+See [`docs/SYNTHETIC_VIDEO_DETECTOR.md`](docs/SYNTHETIC_VIDEO_DETECTOR.md) for the full deployment, GPU support matrix, air-gapped pre-seed, stream-config, and EU AI Act context.
 
 ## Deploying Your Own VIF Service (Optional)
 
