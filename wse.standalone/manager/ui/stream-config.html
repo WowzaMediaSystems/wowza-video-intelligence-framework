@@ -584,49 +584,6 @@
             color: #1f4d9b;
         }
 
-        .save-meta-icon-button {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 30px;
-            height: 30px;
-            padding: 0;
-            border: 1px solid rgba(0, 0, 0, 0.15);
-            border-radius: 6px;
-            background: rgba(255, 255, 255, 0.85);
-            color: #222;
-            cursor: pointer;
-            flex-shrink: 0;
-            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-        }
-
-        .save-meta-icon-button:hover {
-            background: #fff;
-            border-color: rgba(0, 0, 0, 0.28);
-            transform: translateY(-1px);
-        }
-
-        .save-meta-icon-button:focus-visible {
-            outline: 2px solid #2b6cb0;
-            outline-offset: 2px;
-        }
-
-        .save-meta-icon-button svg {
-            width: 16px;
-            height: 16px;
-            fill: currentColor;
-        }
-
-        .top-config-panel .save-meta-icon-button {
-            border-color: rgba(0, 0, 0, 0.14);
-            background: rgba(255, 255, 255, 0.9);
-            color: #111;
-        }
-
-        .top-config-panel .save-meta-icon-button:hover {
-            background: #fff;
-            border-color: rgba(0, 0, 0, 0.24);
-        }
 
         .top-config-panel #btn-save-top {
             background: #2a71ab;
@@ -1033,11 +990,6 @@
                     <button id="btn-save-top" data-save-config-btn="true" onclick="saveConfig()">Save all changes</button>
                     <button id="btn-clone-top" onclick="cloneConfig()" style="display:none;">Clone Config</button>
                     <button id="btn-delete-top" class="btn-danger" onclick="deleteConfig()" style="display:none;">Delete Config</button>
-                    <button id="download-config-btn" class="save-meta-icon-button" type="button" onclick="downloadConfigFile()" title="Download video-intelligence.json" aria-label="Download video-intelligence.json">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M5 20h14v-2H5v2zm7-18c-.55 0-1 .45-1 1v8.59l-2.3-2.29-1.4 1.41L12 16l4.7-5.29-1.4-1.41-2.3 2.29V3c0-.55-.45-1-1-1z"></path>
-                        </svg>
-                    </button>
                 </div>
                 <div class="section-help" style="margin-top:6px; margin-bottom:0;">
                     Choose which incoming streams VIF should analyze. <strong>Application</strong> must match exactly. <strong>Stream Name</strong> can be an exact name or a regex pattern — e.g. application <code>live</code> and stream name <code>traffic.*</code> matches <code>rtmp://…/live/traffic_cam1</code>.
@@ -1117,7 +1069,7 @@
             <div class="form-group" id="cfg-inference-fps-group">
                 <label title="Frames per second sent to the VIF service for analysis. Lower values reduce load but may miss short events.">Inference FPS</label>
                 <input type="number" id="cfg-inference-fps" value="" placeholder="30" min="-1" max="120" step="1">
-                <div class="field-help">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</div>
+                <div class="field-help">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate. <strong>VLM:</strong> each request carries Duration × FPS images and the VLM endpoint allows at most 8 per prompt, so Duration × FPS must not exceed 8 (and <code>-1</code> is not supported).</div>
             </div>
             <div class="form-group">
                 <label title="Height of video frames sent for inference. Source uses the original stream height, Model uses the model's native input size, Custom lets you specify a pixel height.">Inference Video Height</label>
@@ -1139,13 +1091,13 @@
                     <option value="scene">Scene</option>
                     <option value="vlm">VLM</option>
                 </select>
-                <div class="field-help">Object detection tracks boxes like person/car. Scene detection classifies the whole frame or clip. VLM sends clips to a Vision Language Model endpoint.</div>
+                <div class="field-help">Object detection tracks boxes like person/car. Scene detection classifies the whole frame or clip.<span id="vlm-detector-help"> VLM sends clips to a Vision Language Model endpoint.</span></div>
             </div>
 
             <div class="form-group" id="cfg-duration-group">
                 <label>Duration (seconds)</label>
                 <input type="number" id="cfg-duration" value="" placeholder="2" min="0" max="5" step="0.1">
-                    <div class="field-help">Scene-only clip duration sent to the VIF service for each analysis request.</div>
+                    <div class="field-help">Clip duration sent to the VIF service for each analysis request (scene and VLM). <strong>VLM:</strong> one request per window carrying Duration × Inference FPS images, which must not exceed 8.</div>
             </div>
 
             <div class="form-group" id="cfg-auto-frame-throttle-group">
@@ -1260,6 +1212,85 @@
                         <div class="field-help">How many consistent frames are needed before a new track becomes visible.</div>
                     </div>
                 </div>
+
+                <!-- Tiling (only shown when the ?tiling=true query param is present) -->
+                <div class="form-group" id="tiling-enable-group" style="display:none;">
+                    <label>Enable Tiling</label>
+                    <label class="switch">
+                        <input type="checkbox" id="cfg-tiling-enabled" onchange="toggleTiling()">
+                        <span class="slider-switch"></span>
+                    </label>
+                    <div class="field-help">Cuts each frame into a grid and analyzes every piece separately, so small or far-away objects are much easier to spot. The trade-off is more processing power. <strong>Recommended:</strong> leave off unless you notice small or distant objects being missed.</div>
+                </div>
+
+                <!-- Tiling Properties -->
+                <div id="tiling-section" class="byte-track-fields" style="display:none;">
+
+                    <div class="form-section-title">Tiling Properties</div>
+                    <div class="section-help">
+                        Choose the tiling algorithm and tune the grid.
+                    </div>
+
+                    <div class="form-group">
+                        <label>Algorithm</label>
+                        <select id="cfg-tiling-mode" onchange="toggleTilingMode()">
+                            <option value="fixed" selected>Fixed</option>
+                            <option value="gated">Gated</option>
+                        </select>
+                        <div class="field-help"><strong>Fixed</strong>: uses one grid on every frame — the simplest and lightest option. <strong>Gated</strong>: uses two grids (a coarse one for big objects and a fine one for small objects) plus a full-frame look on every frame, for the best chance of catching both. It is the slowest, heaviest option, so choose it only when your scene mixes very large and very small objects.</div>
+                    </div>
+
+                    <!-- Gated-only: coarse grid -->
+                    <div id="tiling-gated-fields">
+                        <div class="form-group">
+                            <label>Min Slice Rows</label>
+                            <input type="number" id="cfg-tiling-min-rows" value="" placeholder="3" min="1" max="16" step="1">
+                            <div class="field-help">(Gated only) How many top-to-bottom slices the coarse, big-object grid uses. <strong>Higher</strong> = more, smaller pieces (catches more, costs more processing); <strong>lower</strong> = fewer, bigger pieces (faster). Must be &le; Max Slice Rows; set it equal to Max to use a single grid. <strong>Recommended:</strong> 3.</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Min Slice Cols</label>
+                            <input type="number" id="cfg-tiling-min-cols" value="" placeholder="2" min="1" max="16" step="1">
+                            <div class="field-help">(Gated only) Same as Min Slice Rows, but left-to-right. <strong>Higher</strong> = more, narrower pieces (more detail, more processing); <strong>lower</strong> = fewer, wider pieces (faster). Must be &le; Max Slice Cols. <strong>Recommended:</strong> 2.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label id="lbl-tiling-max-rows">Max Slice Rows</label>
+                        <input type="number" id="cfg-tiling-max-rows" value="" placeholder="6" min="1" max="16" step="1">
+                        <div class="field-help">How many top-to-bottom slices the grid uses (the fine, small-object grid in Gated mode). <strong>Higher</strong> = more, smaller pieces → better at small or distant objects but slower and more costly; <strong>lower</strong> = fewer, bigger pieces → faster but may miss small objects. <strong>Recommended:</strong> 6.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label id="lbl-tiling-max-cols">Max Slice Cols</label>
+                        <input type="number" id="cfg-tiling-max-cols" value="" placeholder="4" min="1" max="16" step="1">
+                        <div class="field-help">Same as Slice Rows, but left-to-right. <strong>Higher</strong> = more, narrower pieces (more detail, slower); <strong>lower</strong> = fewer, wider pieces (faster). <strong>Recommended:</strong> 4.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Tile Coverage Cutoff %</label>
+                        <input type="number" id="cfg-tiling-coverage-cutoff" value="" placeholder="100" min="0" max="100" step="1">
+                        <div class="field-help">Filters out false detections that fill almost an entire piece (usually mistakes). <strong>Higher</strong> (toward 100) = more lenient, keeps more large detections but lets more false ones through; <strong>lower</strong> = stricter, removes more false detections but may drop real objects that genuinely fill a piece. 100 turns the filter off. <strong>Recommended:</strong> 100 (off); only lower it with Full Frame Detection on, so genuinely large objects are still caught by the full-frame pass.</div>
+                    </div>
+
+                    <!-- Fixed-only: full-frame pass toggle -->
+                    <div id="tiling-fixed-fields">
+                        <div class="form-group">
+                            <label>Full Frame Detection</label>
+                            <label class="switch">
+                                <input type="checkbox" id="cfg-tiling-full-frame" onchange="toggleFullFrameDetection()">
+                                <span class="slider-switch"></span>
+                            </label>
+                            <div class="field-help">Also analyzes the whole frame in one pass, on top of the grid pieces. This catches objects too big to fit inside a single piece (which the grid alone tends to miss or split into several wrong boxes). Costs a little extra processing per frame. <strong>Recommended:</strong> on when your scene also contains large objects.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="tiling-cluster-children-group">
+                        <label>Cluster Suppression Min Children</label>
+                        <input type="number" id="cfg-tiling-cluster-children" value="" placeholder="0" min="0" max="100" step="1">
+                        <div class="field-help">Removes a large box when it actually contains at least this many smaller detections inside it (usually a mistake where one big box wraps a group of small objects). <strong>Lower</strong> (but above 0) = removes these more aggressively; <strong>higher</strong> = only removes the most obvious cases. 0 turns it off. <strong>Recommended:</strong> 0 (off); set to 3 if you see big boxes wrongly swallowing groups of small objects.</div>
+                    </div>
+                </div>
             </div>
 
             <!-- Scene Analysis Section -->
@@ -1296,7 +1327,11 @@
                     Configure Vision Language Model (VLM) analysis using an external AI endpoint.
                 </div>
 
-                <div class="form-group">
+                <!-- Model Name is intentionally hidden for now (VI-522): only the bundled
+                     Qwen model has been validated. The input stays in the DOM, prefilled
+                     from config, so save/validation keep working; remove display:none to
+                     expose it again. -->
+                <div class="form-group" id="cfg-vlm-model-name-group" style="display:none;">
                     <label>Model Name</label>
                     <input type="text" id="cfg-vlm-model-name" placeholder="e.g. gpt-4o">
                     <div class="field-help">The name of the VLM model to use for analysis.</div>
@@ -1506,6 +1541,27 @@
     // Main stream/object/scene defaults are loaded from /v1/server/plugin/vif/config into defaultConfig.
     // Listener property defaults and validation rules below are UI-owned. See STREAM-CONFIG-DEFAULTS.md.
     var defaultConfig = {};
+    // Built-in VLM fallbacks matching the vLLM sidecar bundled with the Video Intelligence
+    // framework (docker compose --profile vlm). Used to prefill the VLM fields only when
+    // neither the stream's vlm_analysis block nor the global defaults provide a value, so
+    // configs without a global vlm_analysis block (e.g. predating VLM support) still work
+    // out of the box. Keep in sync with the global vlm_analysis defaults in
+    // docker/conf.modules/vif/Default.json.
+    var VLM_FALLBACK_DEFAULTS = {
+        model_name: 'Qwen/Qwen3-VL-4B-Instruct-FP8',
+        endpoint_url: 'http://vlm.docker:8000/v1'
+    };
+    // A VLM request carries duration × inference_fps images in one prompt, and the vLLM
+    // sidecar bundled with the Video Intelligence framework rejects prompts with more than
+    // 8 images (its --limit-mm-per-prompt serving setting). Saving a VLM stream that exceeds
+    // this is blocked, since every analysis window would be rejected by the endpoint.
+    // Keep in sync with the sidecar's serving settings.
+    var VLM_MAX_IMAGES_PER_REQUEST = 8;
+    // Suggested inference_fps for new VLM streams. The global inference_fps default
+    // (-1 = match source) would push a 25-30fps stream far past VLM_MAX_IMAGES_PER_REQUEST.
+    // 2 fps over the default 2s window = 4 images per request, matching the bundled example
+    // config in docker/conf.modules/vif/Default.json.
+    var VLM_SUGGESTED_INFERENCE_FPS = 2;
     var isDirty = false;
     var isSaving = false;
     var wasSaved = false;
@@ -1525,6 +1581,12 @@
         'cfg-bt-max-lost-frames': { min: 0, max: 60, integer: true, label: 'Max Lost Track Frames' },
         'cfg-bt-min-overlap': { min: 0, max: 100, decimals: 1, label: 'Min Consecutive Overlap' },
         'cfg-bt-min-frames': { min: 0, max: 60, integer: true, label: 'Min Consecutive Frames' },
+        'cfg-tiling-min-rows': { min: 1, max: 16, integer: true, label: 'Min Slice Rows' },
+        'cfg-tiling-min-cols': { min: 1, max: 16, integer: true, label: 'Min Slice Cols' },
+        'cfg-tiling-max-rows': { min: 1, max: 16, integer: true, label: 'Max Slice Rows' },
+        'cfg-tiling-max-cols': { min: 1, max: 16, integer: true, label: 'Max Slice Cols' },
+        'cfg-tiling-coverage-cutoff': { min: 0, max: 100, decimals: 1, label: 'Tile Coverage Cutoff %' },
+        'cfg-tiling-cluster-children': { min: 0, max: 100, integer: true, label: 'Cluster Suppression Min Children' },
         'cfg-scene-sensitivity': { min: 0, max: 10, decimals: 1, label: 'Scene Sensitivity' },
         'cfg-scene-confidence-threshold': { min: 0, max: 100, decimals: 1, label: 'Scene Confidence Threshold %' },
         'cfg-log-max-messages': { min: 0, max: 1000, integer: true, label: 'Log Max Messages' },
@@ -1836,6 +1898,53 @@
         markDirty();
     }
 
+    function toggleTiling() {
+        // Tiling is feature-gated behind the ?tiling=true query param (like vlm). When it
+        // is not present, keep both the toggle and the properties section hidden — even if a
+        // loaded config has tiling enabled (the stored config is preserved, just not shown).
+        const uiEnabled = new URLSearchParams(window.location.search).get('tiling') === 'true';
+        const enabled = uiEnabled && document.getElementById('cfg-tiling-enabled').checked;
+        document.getElementById('tiling-section').style.display = enabled ? 'block' : 'none';
+        if (enabled && !document.getElementById('cfg-tiling-max-rows').value) {
+            ['cfg-tiling-min-rows', 'cfg-tiling-min-cols', 'cfg-tiling-max-rows',
+             'cfg-tiling-max-cols', 'cfg-tiling-coverage-cutoff', 'cfg-tiling-cluster-children']
+                .forEach(function(id) {
+                    const el = document.getElementById(id);
+                    if (!el.value) el.value = el.placeholder || '';
+                });
+        }
+        toggleTilingMode();
+        markDirty();
+    }
+
+    function toggleTilingMode() {
+        const mode = document.getElementById('cfg-tiling-mode').value;
+        document.getElementById('tiling-gated-fields').style.display = mode === 'gated' ? 'block' : 'none';
+        // The full-frame toggle only applies to Fixed mode. In Gated the full-frame
+        // probe always runs, so the toggle is hidden there.
+        document.getElementById('tiling-fixed-fields').style.display = mode === 'gated' ? 'none' : 'block';
+        // In Fixed mode there is a single grid, so "Max" is misleading — drop the prefix.
+        document.getElementById('lbl-tiling-max-rows').textContent = mode === 'gated' ? 'Max Slice Rows' : 'Slice Rows';
+        document.getElementById('lbl-tiling-max-cols').textContent = mode === 'gated' ? 'Max Slice Cols' : 'Slice Cols';
+        updateClusterChildrenVisibility();
+        markDirty();
+    }
+
+    function toggleFullFrameDetection() {
+        updateClusterChildrenVisibility();
+        markDirty();
+    }
+
+    // Cluster suppression only does something when there is a full-frame pass that
+    // can produce the over-large "parent" box: that is always the case in Gated
+    // (the probe), but in Fixed only when Full Frame Detection is enabled.
+    function updateClusterChildrenVisibility() {
+        const mode = document.getElementById('cfg-tiling-mode').value;
+        const fullFrame = document.getElementById('cfg-tiling-full-frame').checked;
+        const show = mode === 'gated' || fullFrame;
+        document.getElementById('tiling-cluster-children-group').style.display = show ? 'block' : 'none';
+    }
+
     function getSelectedStream() {
         const select = document.getElementById('cfg-stream-select');
         const val = select.value;
@@ -1883,6 +1992,27 @@
             : String(fallbackValue);
         input.value = resolvedValue;
         input.placeholder = resolvedValue;
+        // Remember what was suggested so a later suggestion may replace an untouched value
+        // without ever overwriting one the user typed.
+        input.dataset.suggested = resolvedValue;
+    }
+
+    // Keep the suggested Inference FPS in step with the detector type while creating a new
+    // stream. VLM gets VLM_SUGGESTED_INFERENCE_FPS instead of the global default (-1 = match
+    // source), which would exceed the endpoint's images-per-prompt cap; switching away
+    // restores the global-derived suggestion. Only replaces an untouched suggestion.
+    function applyDetectorTypeInferenceFpsSuggestion(detectorType) {
+        if (!isNewStream()) return;
+        const input = document.getElementById('cfg-inference-fps');
+        if (input.value !== input.dataset.suggested) return;
+        if (detectorType === 'vlm') {
+            applyDefaultFieldValue(input, VLM_SUGGESTED_INFERENCE_FPS, VLM_SUGGESTED_INFERENCE_FPS);
+        } else {
+            const globalDefault = Number.isFinite(defaultConfig && defaultConfig.inference_fps)
+                ? defaultConfig.inference_fps
+                : null;
+            applyDefaultFieldValue(input, globalDefault, '-1');
+        }
     }
 
     // New stream default field values derive from defaultConfig where possible.
@@ -1917,6 +2047,11 @@
             && defaultConfig.object_analysis
             && defaultConfig.object_analysis.byte_track_properties
             ? defaultConfig.object_analysis.byte_track_properties
+            : null;
+        const tilingDefaults = defaultConfig
+            && defaultConfig.object_analysis
+            && defaultConfig.object_analysis.tiling_properties
+            ? defaultConfig.object_analysis.tiling_properties
             : null;
         const sceneDurationInput = document.getElementById('cfg-duration');
         const sceneSensitivityInput = document.getElementById('cfg-scene-sensitivity');
@@ -1967,6 +2102,36 @@
                 ? byteTrackDefaults.track_creation_minimum_consecutive_frames
                 : null,
             '3'
+        );
+        applyDefaultFieldValue(
+            document.getElementById('cfg-tiling-min-rows'),
+            tilingDefaults && Number.isFinite(tilingDefaults.min_slice_rows) ? tilingDefaults.min_slice_rows : null,
+            '3'
+        );
+        applyDefaultFieldValue(
+            document.getElementById('cfg-tiling-min-cols'),
+            tilingDefaults && Number.isFinite(tilingDefaults.min_slice_cols) ? tilingDefaults.min_slice_cols : null,
+            '2'
+        );
+        applyDefaultFieldValue(
+            document.getElementById('cfg-tiling-max-rows'),
+            tilingDefaults && Number.isFinite(tilingDefaults.max_slice_rows) ? tilingDefaults.max_slice_rows : null,
+            '6'
+        );
+        applyDefaultFieldValue(
+            document.getElementById('cfg-tiling-max-cols'),
+            tilingDefaults && Number.isFinite(tilingDefaults.max_slice_cols) ? tilingDefaults.max_slice_cols : null,
+            '4'
+        );
+        applyDefaultFieldValue(
+            document.getElementById('cfg-tiling-coverage-cutoff'),
+            tilingDefaults && Number.isFinite(tilingDefaults.tile_coverage_cutoff) ? Math.round(tilingDefaults.tile_coverage_cutoff * 100) : null,
+            '100'
+        );
+        applyDefaultFieldValue(
+            document.getElementById('cfg-tiling-cluster-children'),
+            tilingDefaults && Number.isFinite(tilingDefaults.cluster_suppression_min_children) ? tilingDefaults.cluster_suppression_min_children : null,
+            '0'
         );
         applyDefaultFieldValue(sceneDurationInput, sceneDurationDefault, '2');
         applyDefaultFieldValue(sceneSensitivityInput, sceneSensitivityDefault, '5');
@@ -2325,53 +2490,6 @@
         }
     }
 
-    function toDownloadableConfig(config) {
-        const downloadConfig = JSON.parse(JSON.stringify(config || {}));
-        delete downloadConfig.available_event_listeners;
-        delete downloadConfig.available_models;
-        if (downloadConfig.vi_service_api_key) {
-            downloadConfig.vi_service_api_key = '${VIS_API_KEY}';
-        }
-        return downloadConfig;
-    }
-
-    function getDownloadTimestamp() {
-        const now = new Date();
-        const pad = function(value) { return String(value).padStart(2, '0'); };
-        return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    }
-
-    async function downloadConfigFile() {
-        try {
-            const response = await fetch(`${serverUrl}/v1/server/plugin/vif/config`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Basic ${encodedCredentials}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const config = await response.json();
-            const json = JSON.stringify(toDownloadableConfig(config), null, 4);
-            const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `video-intelligence-${getDownloadTimestamp()}.json`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
-            showStatus('Downloaded video-intelligence.json', false);
-        } catch (error) {
-            console.error('Error downloading video-intelligence.json:', error);
-            showStatus(`Error downloading video-intelligence.json: ${error.message}`, true);
-        }
-    }
 
     function isNewStream() {
         return document.getElementById('cfg-stream-select').value === '__new__';
@@ -2529,6 +2647,36 @@
                     track_creation_minimum_consecutive_frames: readNumericInputValue('cfg-bt-min-frames', true)
                 };
             }
+
+            const tilingEnabled = document.getElementById('cfg-tiling-enabled').checked;
+            if (tilingEnabled) {
+                const tilingMode = document.getElementById('cfg-tiling-mode').value || 'fixed';
+                config.object_analysis.tiling_mode = tilingMode;
+                const tilingProperties = {
+                    max_slice_rows: readNumericInputValue('cfg-tiling-max-rows', true),
+                    max_slice_cols: readNumericInputValue('cfg-tiling-max-cols', true),
+                    tile_coverage_cutoff: readNumericInputValue('cfg-tiling-coverage-cutoff', false) / 100
+                };
+                if (tilingMode === 'gated') {
+                    tilingProperties.min_slice_rows = readNumericInputValue('cfg-tiling-min-rows', true);
+                    tilingProperties.min_slice_cols = readNumericInputValue('cfg-tiling-min-cols', true);
+                    // Gated always has the full-frame probe, so cluster suppression always applies.
+                    tilingProperties.cluster_suppression_min_children = readNumericInputValue('cfg-tiling-cluster-children', true);
+                } else {
+                    // Fixed mode: the full-frame pass is opt-in, and cluster suppression
+                    // is only meaningful (and only sent) when that pass is enabled.
+                    const fullFrame = document.getElementById('cfg-tiling-full-frame').checked;
+                    tilingProperties.full_frame_detection = fullFrame;
+                    if (fullFrame) {
+                        tilingProperties.cluster_suppression_min_children = readNumericInputValue('cfg-tiling-cluster-children', true);
+                    }
+                }
+                config.object_analysis.tiling_properties = tilingProperties;
+            } else {
+                // Tiling off — a single full-frame pass. tiling_mode 'none' is the
+                // master switch; tiling_properties is omitted.
+                config.object_analysis.tiling_mode = 'none';
+            }
         }
 
         if (detectorType === 'scene') {
@@ -2656,6 +2804,44 @@
                     errors.push('Min Consecutive Frames must be a whole number between 0 and 60.');
                 }
             }
+            const mode = oa.tiling_mode || 'none';
+            if (mode !== 'none') {
+                const tp = oa.tiling_properties || {};
+                const isGridValue = function(value) {
+                    return Number.isFinite(value) && Number.isInteger(value) && value >= 1 && value <= 16;
+                };
+                if (mode !== 'fixed' && mode !== 'gated') {
+                    errors.push('Tiling algorithm must be Fixed or Gated.');
+                }
+                if (!isGridValue(tp.max_slice_rows)) {
+                    errors.push('Max Slice Rows must be a whole number between 1 and 16.');
+                }
+                if (!isGridValue(tp.max_slice_cols)) {
+                    errors.push('Max Slice Cols must be a whole number between 1 and 16.');
+                }
+                if (mode === 'gated') {
+                    if (!isGridValue(tp.min_slice_rows)) {
+                        errors.push('Min Slice Rows must be a whole number between 1 and 16.');
+                    }
+                    if (!isGridValue(tp.min_slice_cols)) {
+                        errors.push('Min Slice Cols must be a whole number between 1 and 16.');
+                    }
+                    if (isGridValue(tp.min_slice_rows) && isGridValue(tp.max_slice_rows) && tp.min_slice_rows > tp.max_slice_rows) {
+                        errors.push('Min Slice Rows must be less than or equal to Max Slice Rows.');
+                    }
+                    if (isGridValue(tp.min_slice_cols) && isGridValue(tp.max_slice_cols) && tp.min_slice_cols > tp.max_slice_cols) {
+                        errors.push('Min Slice Cols must be less than or equal to Max Slice Cols.');
+                    }
+                }
+                if (!Number.isFinite(tp.tile_coverage_cutoff) || tp.tile_coverage_cutoff < 0 || tp.tile_coverage_cutoff > 1) {
+                    errors.push('Tile Coverage Cutoff must be between 0 and 100.');
+                }
+                // Only present (and only meaningful) for gated, or fixed with full-frame detection on.
+                if (tp.cluster_suppression_min_children !== undefined &&
+                    (!Number.isFinite(tp.cluster_suppression_min_children) || tp.cluster_suppression_min_children < 0 || !Number.isInteger(tp.cluster_suppression_min_children))) {
+                    errors.push('Cluster Suppression Min Children must be a whole number of 0 or more.');
+                }
+            }
         }
 
         if (config.detector_type === 'scene') {
@@ -2673,9 +2859,19 @@
 
         if (config.detector_type === 'vlm') {
             const va = config.vlm_analysis || {};
-            if (!va.model_name) errors.push('VLM model name is required.');
+            // The model name input is hidden in the UI, so point at the json default instead.
+            if (!va.model_name) errors.push('VLM model name is required. Set a global vlm_analysis.model_name default in Default.json.');
             if (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > 5) {
                 errors.push('Duration must be between 0 and 5 for VLM detection.');
+            }
+            // Each VLM analysis window is one request carrying duration × fps images, and the
+            // endpoint caps images per prompt. -1 (match source) is unbounded, so it's out too.
+            if (config.inference_fps === -1) {
+                errors.push('Inference FPS -1 (match stream frame rate) is not supported for VLM detection. Use a fixed rate with Duration × Inference FPS of at most ' + VLM_MAX_IMAGES_PER_REQUEST + '.');
+            } else if (Number.isFinite(config.inference_fps) && Number.isFinite(config.duration)
+                    && config.inference_fps * config.duration > VLM_MAX_IMAGES_PER_REQUEST) {
+                const imagesPerRequest = Math.round(config.inference_fps * config.duration * 100) / 100;
+                errors.push('Duration × Inference FPS must not exceed ' + VLM_MAX_IMAGES_PER_REQUEST + ' for VLM detection (' + config.inference_fps + ' fps × ' + config.duration + 's = ' + imagesPerRequest + ' images per request; the VLM endpoint allows ' + VLM_MAX_IMAGES_PER_REQUEST + ' per prompt).');
             }
         }
 
@@ -2775,6 +2971,17 @@
         document.getElementById('cfg-bt-max-lost-frames').value = '';
         document.getElementById('cfg-bt-min-overlap').value = '';
         document.getElementById('cfg-bt-min-frames').value = '';
+
+        // Tiling
+        document.getElementById('cfg-tiling-enabled').checked = false;
+        document.getElementById('cfg-tiling-mode').value = 'fixed';
+        document.getElementById('cfg-tiling-min-rows').value = '';
+        document.getElementById('cfg-tiling-min-cols').value = '';
+        document.getElementById('cfg-tiling-max-rows').value = '';
+        document.getElementById('cfg-tiling-max-cols').value = '';
+        document.getElementById('cfg-tiling-coverage-cutoff').value = '';
+        document.getElementById('cfg-tiling-full-frame').checked = false;
+        document.getElementById('cfg-tiling-cluster-children').value = '';
 
         // Scene analysis
         document.getElementById('cfg-scene-class-names').value = '';
@@ -2895,6 +3102,40 @@
                     document.getElementById('cfg-bt-min-frames').value = bt.track_creation_minimum_consecutive_frames;
                 }
             }
+            // tiling_mode is the single switch now ('none' | 'fixed' | 'gated'); the
+            // Enable Tiling toggle is on whenever the mode is not 'none'.
+            const tilingMode = oa.tiling_mode || 'none';
+            let tilingOn = tilingMode !== 'none';
+            // Legacy configs carried a separate tiling_enabled flag — honor it if present.
+            if (oa.tiling_enabled !== undefined) {
+                tilingOn = !!oa.tiling_enabled;
+            }
+            document.getElementById('cfg-tiling-enabled').checked = tilingOn;
+            if (tilingMode === 'fixed' || tilingMode === 'gated') {
+                document.getElementById('cfg-tiling-mode').value = tilingMode;
+            }
+            if (oa.tiling_properties) {
+                const tp = oa.tiling_properties;
+                if (tp.min_slice_rows !== undefined) {
+                    document.getElementById('cfg-tiling-min-rows').value = tp.min_slice_rows;
+                }
+                if (tp.min_slice_cols !== undefined) {
+                    document.getElementById('cfg-tiling-min-cols').value = tp.min_slice_cols;
+                }
+                if (tp.max_slice_rows !== undefined) {
+                    document.getElementById('cfg-tiling-max-rows').value = tp.max_slice_rows;
+                }
+                if (tp.max_slice_cols !== undefined) {
+                    document.getElementById('cfg-tiling-max-cols').value = tp.max_slice_cols;
+                }
+                if (tp.tile_coverage_cutoff !== undefined) {
+                    document.getElementById('cfg-tiling-coverage-cutoff').value = Math.round(tp.tile_coverage_cutoff * 100);
+                }
+                document.getElementById('cfg-tiling-full-frame').checked = !!tp.full_frame_detection;
+                if (tp.cluster_suppression_min_children !== undefined) {
+                    document.getElementById('cfg-tiling-cluster-children').value = tp.cluster_suppression_min_children;
+                }
+            }
         }
 
         if (config.scene_analysis || isNewStream()) {
@@ -2910,8 +3151,20 @@
             }
         }
 
-        if (config.vlm_analysis || isNewStream()) {
-            const va = config.vlm_analysis || {};
+        // VLM fields show the effective config: the stream's vlm_analysis layered over
+        // the global vlm_analysis defaults, layered over the built-in sidecar fallbacks
+        // (VLM_FALLBACK_DEFAULTS); explicit nulls never shadow a lower layer. This
+        // mirrors the backend inheritance (VlmConfigMessage.setDefaults) and keeps the
+        // required fields populated even when the json has no vlm_analysis at all.
+        // Saving writes the effective values into the stream's own vlm_analysis block;
+        // the global defaults are never edited here.
+        {
+            const va = Object.assign({}, VLM_FALLBACK_DEFAULTS);
+            for (const layer of [defaultConfig && defaultConfig.vlm_analysis, config.vlm_analysis]) {
+                for (const [key, value] of Object.entries(layer || {})) {
+                    if (value !== null && value !== undefined) va[key] = value;
+                }
+            }
             if (va.model_name) {
                 document.getElementById('cfg-vlm-model-name').value = va.model_name;
             }
@@ -2943,6 +3196,7 @@
 
         toggleByteTrack();
         toggleCheckpointPath();
+        toggleTiling();
         toggleDetectorSection();
         suppressDirtyTracking = false;
         markClean(false);
@@ -3992,6 +4246,7 @@
             }
         }
 
+        applyDetectorTypeInferenceFpsSuggestion(nextDetectorType);
         toggleDetectorSection();
         markDirty();
     });
@@ -4190,10 +4445,15 @@
     var vlmEnabled = new URLSearchParams(window.location.search).get('vlm') === 'true';
     if (!vlmEnabled) vlmOptionEl.style.display = 'none';
 
+    var tilingEnableGroupEl = document.getElementById('tiling-enable-group');
+    var tilingUiEnabled = new URLSearchParams(window.location.search).get('tiling') === 'true';
+    if (tilingUiEnabled) tilingEnableGroupEl.style.display = '';
+
     initializeStaticFieldRules();
     initializeStaticFieldTooltips();
     toggleByteTrack();
     toggleCheckpointPath();
+    toggleTiling();
     toggleDetectorSection();
     updateListenerTip('', '');
     markClean();
