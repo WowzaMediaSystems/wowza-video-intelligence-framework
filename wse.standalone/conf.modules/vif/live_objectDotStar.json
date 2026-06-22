@@ -1,0 +1,53 @@
+{
+	"active":true,
+	"app_name": "live",         //application to watch
+	"stream_name": "object.*",  //regex pattern to match incoming streams to
+	"vif_event_listeners": {
+		"Id3Tags": {
+			// "class_name": "com.wowza.wms.plugin.videointelligence.event.Id3Event",
+			"class_name": "Id3Event",
+			"methods": ["rollup"],
+			"suppress_empty_detections": true //if true, will not send rollup events if there are no detections in the holdback window
+		},
+		"Webhooks": {
+			"class_name": "WebhookEvent2",
+			"methods": ["disabled"]
+		},
+		"LogFiles": {
+			"class_name": "LogFileEvent",
+			"methods": ["batch"]
+		},
+		"Overlays": {
+			"class_name": "OverlayEvent",
+			"methods": ["immediate"],
+			"confidence_threshold": 0.3,
+			"properties": {
+				"debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",  //show a string that can include current time such as "'Cur time:' HH:mm:ss MM-dd-yyyy" as a video overlay
+				"show_stats": true, //show performance stats as a video overlay
+				"overlay_thread_drawing": false, //draw overlays in a thread to be safe
+				"replace_video": true, //replaces the existing video with captured
+				"fade_step": 20 //how many frames it takes to fade objects out once they are no longer tracked
+			}
+		}
+	},
+	"rollup_batch_interval": 2,
+	"grayscaled": false,
+	"log_timing": 0,
+	"save_images": false,
+	"frame_buffer": 10,
+	"inference_fps": 12,
+
+	"detector_type":"object",
+	"object_analysis": {
+		"tracking_method": "byte-track",
+		"byte_track_properties": {
+			"track_creation_minimum_confidence": 0.5,
+			"max_lost_track_frames_before_track_removal": 30,
+			"minimum_consecutive_track_overlap": 0.2,
+			"track_creation_minimum_consecutive_frames": 3
+		},
+		"confidence_threshold": 0.3,
+		"class_names": ["airplane", "apple", "backpack", "banana", "baseball bat", "knife", "laptop", "scissors", "person", "car", "surfboard", "motorcycle", "truck", "traffic light", "bus", "skateboard", "tv", "cell phone", "chair", "elephant", "stop sign"],
+		"model_name": "medium"
+	}
+}

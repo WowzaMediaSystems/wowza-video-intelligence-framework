@@ -1,0 +1,111 @@
+{
+    "original_version" : "1.0.0",
+    "current_version": "1.0.0",
+    //defaults for each stream defined below in the streams[]
+    "active":false, //if we should do vi on the stream
+    "vi_service_url":"${VIS_PROTOCOL}://${VIS_HOST}:${VIS_PORT}/ws/stream/",  //where the vif service is hosted
+    "vi_service_api_key":"${VIS_API_KEY}",  //api key used to connect to vif service
+    //"model_idle_timeout_seconds": 60, //how long a model should stay loaded with no streams before it is unloaded, default is 60 seconds
+    "ignore_untracked_objects": false, //ignore untracked objects when tracking_method is set
+
+    "vif_event_listeners": {
+        //list of listeners to recieve VIF events, such as overlays, id3 tags, customer modules.
+    },
+
+    "rollup_batch_interval": 2,  //how long to hold detections for batch and rollup events
+    //"auto_frame_throttle": false, //opt-in (default off, all modes): reduce inference_fps when inference falls behind. object detection: its latency lever; scene/vlm: a pre-step before catch_up_to_live skips. Renamed from auto_scene_frame_throttle (still accepted on read).
+    "catch_up_to_live": true, //scene/vlm only: when inference stays slower than real-time, skip the stale backlog to the live edge instead of trailing by the whole buffer depth. Temporary slowdowns are still absorbed by the buffer. (Object bounds latency via auto_frame_throttle instead — it can't skip without breaking tracking.) Detections carry behind_live_ms; scene/vlm carry caught_up/skipped_frames/skipped_ms on the first detection after a skip.
+    //"catch_up_max_behind_seconds": 2, //scene/vlm: how far (seconds) detections may fall behind live before catch-up skips; unset = 2s, bounding latency near (inference_time + 2s); lower for tighter latency, raise to tolerate more lag. object: not used (object latency is bounded by the inference_fps throttle; the slow-inference warning fires at a fixed ~1s single-frame round-trip).
+
+    "grayscaled": false, //converts images to grayscale to improve performance
+    "duration": 2, //how many seconds to send (scene/vlm only)
+    "use_transcoder": true, //whether to use transcoder to capture frames
+    "frame_grab_interval": 1, //if not using transcoder, how often to capture frames in seconds
+    "inference_fps": -1, //target fps for inference, -1 matches source fps
+    "inference_video_height": 0, //-1 matches source video height, 0 matches model, values > 0 resize video to that height
+    "frame_buffer": 10, //buffer to hold frames to process
+
+    // how many parallel instances to create for each model type.
+    // default values are tuned for a NVIDIA T4 GPU, if your GPU
+    // has more CUDA cores it could benefit from higher values.
+    // Monitor the GPU usage % and increase these values if you notice
+    // less than 50% GPU usage at full load.
+    "concurrent_executions": {
+        "scene_detection": {
+            "default": 1
+        },
+        "object_detection": {
+            "default": 10
+        }
+    },
+    //debugging options
+    "save_images": false,   //save images from transcoder to /tmp/vi/<stream_name>
+    "log_timing": 0,        //how long to write logging details to /tmp/vi/<stream_name>
+    "log_max_messages": 20, //maximum number of log messages to write in wse access log for vi/ws/wss messages. -1 is all, 0 is disabled
+
+    "motion_analysis": {},
+    "object_analysis": {
+        // default to to object tracking, the only other valid option is "byte-track"
+        "tracking_method": "none",
+        // if tracking_method is not null, use these properties for ByteTrack
+        "byte_track_properties": {
+            // minimum confidence score for a single-frame detection to turn into a new tracked object
+            "track_creation_minimum_confidence": 0.5,
+            // how many frames can a tracked object without active detections remain tracked before it's removed
+            "max_lost_track_frames_before_track_removal": 30,
+            // value between 0.0 and 1.0, determining the percentage (0.2 corresponds to 20%) of overlap that
+            // consecutive detections require in order to be considered the same tracked object
+            "minimum_consecutive_track_overlap": 0.2,
+            // how many consecutive frames the same object has to be tracked internally before it becomes
+            // a visible tracked object
+            "track_creation_minimum_consecutive_frames": 3
+        },
+        // minimum confidence for a detection to be considered by the tracking algorithm. Usually this number is lower
+        // than track_creation_minimum_confidence, as it can be used to sustain existing tracked object with lower
+        // confidence scores compared to the score required for a new detection track to start
+        "confidence_threshold": 0.3,
+        // For custom trained models, the path to the .pt or pth files containing its weights. Absolute path or relative path
+        // relative to the VIF Service execution context
+        "checkpoint_path": null,
+        // model variant for RF-DETR. When checkpoint_path is specified, it completely overrides model_name; model_name is ignored.
+        "model_name": "medium",  //options are: nano, small, medium, large
+        // tiling strategy and master switch in one. "none" (default) bypasses tiling: the detector runs once per batch on the
+        // full frame and tiling_properties is ignored. Tiling improves recall on small objects at the cost of more inference.
+        // "fixed" runs a single max_slice_rows x max_slice_cols grid on every frame plus an optional full-frame pass.
+        // "gated" runs probe + min grid + max grid on every frame and merges all detections cross-level.
+        "tiling_mode": "none",
+        // tiling tuning parameters, only consulted when tiling_mode is not "none"
+        "tiling_properties": {
+            // coarse grid (rows x cols) used by gated mode after the full-frame probe. range 1-16.
+            // set equal to max_slice_* to skip the fine pass. ignored when tiling_mode is "fixed".
+            "min_slice_rows": 3,
+            "min_slice_cols": 2,
+            // fine grid (rows x cols). for "fixed" mode this is THE grid; for "gated" it is the fine pass. range 1-16, must be >= min_slice_*.
+            "max_slice_rows": 6,
+            "max_slice_cols": 4,
+            // drop a tile-pass detection whose bbox area exceeds this fraction of the tile area (targets tile-sized hallucinations).
+            // value between 0.0 and 1.0, set to 1.0 to disable. recommended only with full_frame_detection: true. default 1.0 (disabled).
+            "tile_coverage_cutoff": 1.0,
+            // "fixed" mode only: when true, also run a full-frame detection pass alongside the grid to catch objects too
+            // large to fit a single tile. "gated" mode always runs a full-frame probe, so this is ignored there.
+            // cluster_suppression_min_children only takes effect in fixed mode when this is true. default false.
+            "full_frame_detection": false,
+            // drop a detection when at least this many smaller same-frame detections are fully contained inside it
+            // (targets cluster hallucinations). set to 0 (default) to disable; typical enabled value is 3.
+            // in "fixed" mode this requires full_frame_detection: true to have any effect.
+            "cluster_suppression_min_children": 0
+        }
+    },
+    "scene_analysis": {
+      "confidence_threshold":0.3,
+      "sensitivity":5
+    },
+    "vlm_analysis" : {
+        // defaults below match the vLLM sidecar bundled with the Video Intelligence
+        // framework (docker compose --profile vlm), so VLM streams work out of the box.
+        // Point endpoint_url at any OpenAI-compatible endpoint to use another provider.
+        "model_name": "Qwen/Qwen3-VL-4B-Instruct-FP8",
+        "endpoint_url": "http://vlm.docker:8000/v1"
+        //"api_key": "your-api-key" //only needed for authenticated endpoints; the bundled sidecar needs none
+    }
+}

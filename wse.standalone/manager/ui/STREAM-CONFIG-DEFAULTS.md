@@ -6,7 +6,7 @@ This page is a quick reference for how defaults are handled by the VIF Stream Co
 
 These values are loaded from the VIF config API (`/v1/server/plugin/vif/config`), stored in `defaultConfig`, and applied when `+ New Stream Config...` is selected.
 
-Changes to the top-level defaults in [video-intelligence.json](/docker/conf/video-intelligence.json) should flow through to new stream configs for:
+Changes to the top-level defaults in [Default.json](/docker/conf.modules/vif/Default.json) should flow through to new stream configs for:
 
 - `active`
 - `grayscaled`
@@ -23,6 +23,8 @@ Changes to the top-level defaults in [video-intelligence.json](/docker/conf/vide
 - `object_analysis.model_name`
 - `object_analysis.tracking_method`
 - `object_analysis.byte_track_properties.*`
+- `object_analysis.tiling_mode`
+- `object_analysis.tiling_properties.*`
 - `scene_analysis.confidence_threshold`
 - `scene_analysis.sensitivity`
 
@@ -34,7 +36,7 @@ The relevant UI logic lives in:
 
 ## UI-Owned Defaults
 
-These defaults are still hardcoded in [stream-config.html](/docker/manager/ui/stream-config.html) and do not automatically follow `video-intelligence.json`.
+These defaults are still hardcoded in [stream-config.html](/docker/manager/ui/stream-config.html) and do not automatically follow json files.
 
 ### New Stream Defaults
 
@@ -78,9 +80,9 @@ Numeric and text validation is UI-owned under `FIELD_RULES` and listener propert
 - listener confidence range
 - `ObjectTracking` CSS color validation
 
-## When Updating `video-intelligence.json`
+## When Updating `Default.json`
 
-If you update top-level detector defaults in [video-intelligence.json](/docker/conf/video-intelligence.json):
+If you update top-level detector defaults in [Default.json](/docker/conf.modules/vif/Default.json):
 
 - new stream configs should mostly follow automatically
 - check the UI once to confirm the default field values and fallback behavior still look right
@@ -96,7 +98,7 @@ If you update any of the following, you will likely also need a manual UI change
 
 ## Recommended Update Workflow
 
-1. Update [video-intelligence.json](/docker/conf/video-intelligence.json).
+1. Update [Default.json](/docker/conf.modules/vif/Default.json).
 2. Check whether the change is top-level detector config or UI-owned listener behavior.
 3. If it affects listener defaults or validation, update [stream-config.html](/docker/manager/ui/stream-config.html) too.
 4. Open `+ New Stream Config...` and verify the default field values, fallbacks, and toggles match expectations.

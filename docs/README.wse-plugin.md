@@ -6,16 +6,16 @@ This module provides an integration with the video intelligence service to perfo
 
 	* wse-plugin-metadata-injection-x.y.z.jar
 	* wse-plugin-overlays-x.y.z.jar
-	* wse-plugin-thumbnail-api-x.y.z.jar
 	* wse-plugin-video-intelligence-x.y.z.jar
 * copy the following 3rd party jars to the WSE lib directory
+	* classgraph-4.8.184.jar
 	* commons-text-1.15.0.jar
-	* javax-websocket-client-impl-9.4.58.v20250814.jar
-	* javax.websocket-api-1.0.jar
-	* jetty-client-9.4.58.v20250814.jar
-	* websocket-api-9.4.58.v20250814.jar
-	* websocket-client-9.4.58.v20250814.jar
-	* websocket-common-9.4.58.v20250814.jar
+	* jakarta.websocket-api-2.1.1.jar
+	* jakarta.websocket-client-api-2.1.1.jar
+	* jetty-ee10-websocket-jakarta-client-12.1.9.jar
+	* jetty-ee10-websocket-jakarta-common-12.1.9.jar
+	* jetty-websocket-core-client-12.1.9.jar
+	* jetty-websocket-core-common-12.1.9.jar
 
 * add server listeners to Server.xml
 ```xml
@@ -109,8 +109,8 @@ This module provides an integration with the video intelligence service to perfo
 Overlays will be added to any stream ending with -vi
 
 ## Configuration
-configuration for the module is stored in `conf/video-intelligence.json`.
-The top level configuration contains the default settings then per steam configurations is in the `streams` array of configurations
+Configuration files for the module are stored in `conf.modules/vif/`
+The top level/defaults are in the `Default.json` file, individual streams are stored in their own file with `<applicationName>_<streamName>.json`
 
 | Key                  | Default                                           | Purpose                                                                      |
 | -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -131,9 +131,12 @@ The top level configuration contains the default settings then per steam configu
 | catch_up_max_behind_seconds | null (=2s) | **Scene/VLM:** how far behind live (seconds) detections may fall before catch-up skips to live. **Object:** not used — object latency is bounded by the `inference_fps` throttle toward the sustainable rate, and the slow-inference warning fires at a fixed ~1s single-frame round-trip. For **Scene/VLM**, unset derives to the buffer's design headroom (~2s), bounding latency near `inference_time + 2s`; lower for tighter latency, raise to tolerate more lag. |
 | auto_frame_throttle | false | Opt-in frame-rate throttle (default **off**, all modes): reduce `inference_fps` when inference falls behind. **Object detection:** its latency lever — keeps the analyzed frame near live and contiguous for the tracker. **Scene/VLM:** a pre-step that throttles before `catch_up_to_live` resorts to skipping, for fewer coverage gaps. Renamed from `auto_scene_frame_throttle` (still accepted on read). |
 | use_transcoder| true | use transcoder to grab frames |
-| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true |
+| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true. **VLM:** each analysis window is one request carrying `duration × inference_fps` images, and the VLM endpoint caps images per prompt (the bundled vLLM sidecar allows 8) — keep `duration × inference_fps` at 8 or below (e.g. 2 fps × 2s, the example config's values). `-1` resolves to the source frame rate and will exceed the cap, so it is not supported for VLM; the Stream Manager UI enforces this. |
 | inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
+
+#### VLM free-form analysis
+When a VLM analysis window has no `class_names` (a free-form prompt) — or VIS returns output that can't be parsed as structured results — event listeners receive a single detection with `class_name` set to `description` and the full analysis text in `reasoning`, instead of an empty detections list. Avoid configuring a real VLM class named `description`, as it would be indistinguishable from this synthetic class.
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
@@ -239,4 +242,4 @@ View the stream, see id3 tags and overlays
 View the status of WSE and the streams being processed [View the page](http://localhost:8088/vif/vif-status.html)
 
 ## Docker compose
-Provided is a `docker-compose.yaml` that will start WSE with a pre configured `Server.xml` and `live` application along with a sample `video-intelligence.json`
+Provided is a `docker-compose.yaml` that will start WSE with a pre configured `Server.xml` and `live` application along with a sample json files
