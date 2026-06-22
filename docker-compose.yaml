@@ -30,6 +30,7 @@ services:
         #to persist the configurations between starts of Wowza Streaming Engine, uncomment the lines below:
         volumes:
              - ./wse/conf:/usr/local/WowzaStreamingEngine/conf
+             - ./wse/conf.modules:/usr/local/WowzaStreamingEngine/conf.modules
              - ./wse/content:/usr/local/WowzaStreamingEngine/content
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
