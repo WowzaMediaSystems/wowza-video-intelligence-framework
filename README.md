@@ -48,7 +48,8 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 |- docker-compose.yaml                 # WSE + Manager + VIS containers
 |- .env.example                        # Environment variables template
 |- wse.standalone
-|  |- conf/                            # WSE + VIF plugin configuration (including video-intelligence.json)
+|  |- conf/                            # WSE configuration
+|  |- conf.modules/                    # VIF plugin configuration
 |  |- lib/                             # Plugin JARs mounted into WSE
 |  |- manager/                         # Manager UI extension assets
 |  |- transcoder/                      # Transcoder templates used by VIF workflows
@@ -65,13 +66,14 @@ Local directories such as `logs/`, `tmp/`, `vis/`, and `wse/` are gitignored. In
 
 - `.env` - license key, admin credentials, player/API keys
 - VIF stream/default configuration - use the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page in WSE Manager, or the WSE REST API
-- `wse/conf/video-intelligence.json` - if local WSE volume mounts are enabled, advanced users can directly edit this file to configure video intelligence routing, service connection settings, and feature behavior
+- `wse/conf.modules/vif/` - if local WSE volume mounts are enabled, advanced users can directly edit files to configure video intelligence routing, service connection settings, and feature behavior
 
 ## Persistent Volume Mounts
 
 In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount are enabled by default. These map host folders into the containers:
 
 - `./wse/conf -> /usr/local/WowzaStreamingEngine/conf`
+- `./wse/conf.modules -> /usr/local/WowzaStreamingEngine/conf.modules`
 - `./wse/content -> /usr/local/WowzaStreamingEngine/content`
 - `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
 - `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
