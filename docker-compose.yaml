@@ -251,9 +251,10 @@ services:
     # model profile on first boot):
     #   docker login nvcr.io   # username: $oauthtoken   password: <NGC_API_KEY>
     #
-    # Streams opt in by setting `endpoint: "svd.docker:8001"` + `ssl_mode:
-    # "disabled"` in their synthetic config (the service also resolves as
-    # plain `svd`). For a hosted / bring-your-own endpoint instead, skip this
+    # Streams opt in by setting `endpoint: "svd.docker:8001"` in their
+    # synthetic config (the service also resolves as plain `svd`; transport
+    # security auto-detects to plaintext for this non-:443 endpoint). For a
+    # hosted / bring-your-own endpoint instead, skip this
     # profile and point `endpoint` at it (e.g. grpc.nvcf.nvidia.com:443 with
     # api_key + function_id).
     #

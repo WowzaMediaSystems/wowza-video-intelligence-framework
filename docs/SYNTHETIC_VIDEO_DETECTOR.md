@@ -127,8 +127,7 @@ sidecar:
 ```jsonc
 {
   "detector_type": "synthetic",
-  "endpoint": "svd.docker:8001",   // gRPC host:port — the sidecar
-  "ssl_mode": "disabled",          // in-network, no TLS needed
+  "endpoint": "svd.docker:8001",   // gRPC host:port — the sidecar (auto plaintext)
   "classification_threshold": 0.3, // > this probability ⇒ "synthetic"
   "duration": 2.0                  // window length in seconds
 }
@@ -149,8 +148,7 @@ config at it:
 ```jsonc
 {
   "detector_type": "synthetic",
-  "endpoint": "grpc.nvcf.nvidia.com:443", // example: NVCF hosted dev endpoint
-  "ssl_mode": "tls",
+  "endpoint": "grpc.nvcf.nvidia.com:443", // NVCF hosted dev endpoint (auto TLS on :443)
   "api_key": "<NGC / NVCF key>",          // sent as: authorization: Bearer <key>
   "function_id": "<SVD function id>",      // sent as: function-id metadata
   "classification_threshold": 0.3,
@@ -158,10 +156,13 @@ config at it:
 }
 ```
 
-- `ssl_mode`: `disabled` | `tls` | `mtls`. For `tls`/`mtls`, also set
-  `tls_ca_cert` (and `tls_client_cert` / `tls_client_key` for mTLS).
+- Transport security is auto-detected: a `:443` endpoint (NVCF, public-cert
+  cloud NIMs) uses TLS with the system trust store, and any other port (the
+  in-network sidecar) stays plaintext. Override with `use_tls` (`true`/`false`)
+  when the port heuristic is wrong; add `tls_ca_cert` for a private CA, and
+  `tls_client_cert` / `tls_client_key` for mutual TLS (both imply TLS).
 - `api_key` + `function_id` are only needed by endpoints that require them
-  (NVCF does; a bare self-hosted NIM with `ssl_mode: disabled` does not).
+  (NVCF does; a bare self-hosted NIM does not).
 - The NVCF Try API has a 500 MB per-request cap and is a dev convenience, not a
   production target.
 
