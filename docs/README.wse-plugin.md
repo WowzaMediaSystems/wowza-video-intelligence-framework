@@ -1,7 +1,8 @@
 # WSE Video Intelligence Module
 This module provides an integration with the video intelligence service to perform object and scene detection on a video feed.
 
-## Install
+## Install onto an existing Wowza Streaming Engine server (Must be version 4.11 or greater)
+### Lib folder and jar files
 * copy the following Wowza jars to the WSE lib directory
 
 	* wse-plugin-metadata-injection-x.y.z.jar
@@ -17,100 +18,130 @@ This module provides an integration with the video intelligence service to perfo
 	* jetty-websocket-core-client-12.1.9.jar
 	* jetty-websocket-core-common-12.1.9.jar
 
-* add server listeners to Server.xml
-```xml
-<ServerListener>
-	<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.module.overlays.OverlayServer</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.videointelligence.VifServer</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.thumbnailapi.ThumbnailServer</BaseClass>
-</ServerListener>
-```
+### Server.xml
+* add Server Listeners to Server.xml
+	```xml
+	<ServerListners>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
+		</ServerListener>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.plugin.overlays.OverlayServer</BaseClass>
+		</ServerListener>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.plugin.videointelligence.VifServer</BaseClass>
+		</ServerListener>
+	```
 
-* Server Properties
-```xml
-<Property>
-	<Name>OverlayServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
-<Property>
-	<Name>ThumbnailApiServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
-<Property>
-	<Name>VideoIntelligenceServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
- ```
+* add server Properties to Server.xml
+	```xml
+	<Properties>
+		<Property>
+			<Name>OverlayServer</Name>
+			<Value>authorized</Value>
+			<Type>String</Type>
+		</Property>
 
-* add to each Application.xml the following modules
-```xml
-<Module>
-	<Name>ModuleVideoIntelligence</Name>
-	<Description>VideoIntelligence</Description>
-	<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
-</Module>
-<Module>
-	<Name>ID3AndPDTInjectionModule</Name>
-	<Description>ID3AndPDTInjectionModule</Description>
-	<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
-</Module>
-<Module>
- 	<Name>OverlayModule</Name>
-	<Description>OverlayModule</Description>
-	<Class>com.wowza.wms.plugin.overlays.OverlayModule</Class>
-</Module>
-```
+		<Property>
+			<Name>VideoIntelligenceServer</Name>
+			<Value>authorized</Value>
+			<Type>String</Type>
+		</Property>
+	```
 
-* add to each Application.xml the following basic properties for ID3 metadata
-```xml
-<Property>
-	<Name>amfToID3ConversionEnabled</Name>
-	<Value>true</Value>
-</Property>
-<Property>
-	<Name>amfToID3ConversionAddToManifest</Name>
-	<Value>true</Value>
-</Property>
-<Property>
-	<Name>amfToID3ConversionVerboseMaximum</Name>
-	<Value>0</Value>
-</Property>
-```
+### Application.xml
+* add applicaton Modules to each Application.xml that VIF will run under.
+	```xml
+	<Modules>
+		<Module>
+			<Name>ModuleVideoIntelligence</Name>
+			<Description>VideoIntelligence</Description>
+			<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
+		</Module>
+		<Module>
+			<Name>ID3AndPDTInjectionModule</Name>
+			<Description>ID3AndPDTInjectionModule</Description>
+			<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
+		</Module>
+		<Module>
+			<Name>OverlayModule</Name>
+			<Description>OverlayModule</Description>
+			<Class>com.wowza.wms.plugin.overlays.OverlayModule</Class>
+		</Module>
+	```
 
-* add to each Application.xml the following HTTStreamer properties for ID3 metadata
-```xml
-<Property>
-	<Name>cupertinoEnableProgramDateTime</Name>
-	<Value>true</Value>
-	<Type>Boolean</Type>
-</Property>
-<Property>
-	<Name>cupertinoEnableId3ProgramDateTime</Name>
-	<Value>true</Value>
-	<Type>Boolean</Type>
-</Property>
-```
+* add application Properties to each Application.xml that VIF will run under.
+	```xml
+	<Properties>
+		<Property>
+			<Name>amfToID3ConversionEnabled</Name>
+			<Value>true</Value>
+		</Property>
+		<Property>
+			<Name>amfToID3ConversionAddToManifest</Name>
+			<Value>true</Value>
+		</Property>
+		<Property>
+			<Name>amfToID3ConversionVerboseMaximum</Name>
+			<Value>0</Value>
+		</Property>
+	```
 
-* Need a transcoder template, with one encode, with:
-	* `<Name>videoIntelligence</Name>`
-	* `<StreamName>mp4:${SourceStreamName}-vi</StreamName>`
-	* `<FitMode>match-source</FitMode>`
+* add HTTPStreamer Properties to each Application.xml that VIF will run under.
+	```xml
+	<HTTPStreamer>
+		<Properties>
+			<Property>
+				<Name>cupertinoEnableProgramDateTime</Name>
+				<Value>true</Value>
+				<Type>Boolean</Type>
+			</Property>
+			<Property>
+				<Name>cupertinoEnableId3ProgramDateTime</Name>
+				<Value>true</Value>
+				<Type>Boolean</Type>
+			</Property>
+	```
 
-Overlays will be added to any stream ending with -vi
+* enabled the transcoder for each Application.xml that VIF will run under and use `vif-gpu-eva.xml` as the fallback
+	```xml
+	<Transcoder>
+		<LiveStreamTranscoder>transcoder</LiveStreamTranscoder>
+		<Templates>${SourceStreamName}.xml,vif-gpu-eva.xml</Templates>
+	```
 
-## Configuration
+### WSEM
+* To enable VIF in WSEM/UI, need to copy to
+	```shell
+	mkdir -p /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	cp docker/manager/ui /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	```
+  or build a new `.war` file with wsem-war/build-war.sh and move it
+	```shell
+	rm -r /usr/local/WowzaStreamingEngine/manager/temp
+	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager
+	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
+	```
+* If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API
+	```xml
+	<RESTInterface>
+		<IPWhiteList>*</IPWhiteList>
+	```
+* If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
+
+### Misc
+* Overlays will be added to the stream ending with `-vi`
+
+* For Ubuntu/linux, you may need to install fonts for overlays to work correctly
+	```shell
+	apt-get install -y libfreetype6 fontconfig
+	```
+
+## VIF Configuration
 Configuration files for the module are stored in `conf.modules/vif/`
 The top level/defaults are in the `Default.json` file, individual streams are stored in their own file with `<applicationName>_<streamName>.json`
+
+Update the Defaul.json `vi_service_url` and `vi_service_api_key` to point to the VIS service
 
 | Key                  | Default                                           | Purpose                                                                      |
 | -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
