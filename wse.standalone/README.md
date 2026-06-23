@@ -25,7 +25,7 @@ The following folders contain examples of the changes required for the WSE XML f
 	sudo cp wse.standalone/WMSManager.war /usr/local/WowzaStreamingEngine/manager
 	sudo cp wse.standalone/WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
 	```
-> [!NOTE] 
+> [!NOTE]
 > Restart WSEM after copying files
 
 If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in `Server.xml` so you can access the VIF REST API

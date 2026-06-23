@@ -21,7 +21,7 @@ This module provides an integration with the video intelligence service to perfo
 ### Server.xml
 * add Server Listeners to Server.xml
 	```xml
-	<ServerListners>
+	<ServerListeners>
 		<ServerListener>
 			<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
 		</ServerListener>
@@ -50,7 +50,7 @@ This module provides an integration with the video intelligence service to perfo
 	```
 
 ### Application.xml
-* add applicaton Modules to each Application.xml that VIF will run under.
+* add application Modules to each Application.xml that VIF will run under.
 	```xml
 	<Modules>
 		<Module>
@@ -103,7 +103,7 @@ This module provides an integration with the video intelligence service to perfo
 			</Property>
 	```
 
-* enabled the transcoder for each Application.xml that VIF will run under and use `vif-gpu-eva.xml` as the fallback
+* enable the transcoder for each Application.xml that VIF will run under and use `vif-gpu-eva.xml` as the fallback
 	```xml
 	<Transcoder>
 		<LiveStreamTranscoder>transcoder</LiveStreamTranscoder>
@@ -114,7 +114,7 @@ This module provides an integration with the video intelligence service to perfo
 * To enable VIF in WSEM/UI, need to copy to
 	```shell
 	mkdir -p /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
-	cp docker/manager/ui /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	cp -r docker/manager/ui /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
 	```
   or build a new `.war` file with wsem-war/build-war.sh and move it
 	```shell
@@ -141,7 +141,7 @@ This module provides an integration with the video intelligence service to perfo
 Configuration files for the module are stored in `conf.modules/vif/`
 The top level/defaults are in the `Default.json` file, individual streams are stored in their own file with `<applicationName>_<streamName>.json`
 
-Update the Defaul.json `vi_service_url` and `vi_service_api_key` to point to the VIS service
+Update the Default.json `vi_service_url` and `vi_service_api_key` to point to the VIS service
 
 | Key                  | Default                                           | Purpose                                                                      |
 | -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
