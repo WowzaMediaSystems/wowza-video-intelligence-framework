@@ -334,7 +334,7 @@
                                 </div>
                             </td>
                             <td class="align-right">
-                                <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div> / <div title="Inference fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
+                                <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div><div title="Inference fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
                                 <div class="vif-row" id="${id}-gopContainer" style="${stream.use_transcoder ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
                                 <div class="vif-controls align-right" id="${id}-skipSliderContainer" style="${stream.use_transcoder ? '' : 'display:none;'}">
                                     Inference fps<input type="range" class="slider" id="${id}-skipSlider" min="1" max="${stream.frame_rate}" value="${stream.inference_fps}"><span id="${id}-skipValue">${stream.inference_fps}</span>
@@ -437,7 +437,8 @@
                         updateSkipFrameDisplay(id);
                     }
                     dfps = document.getElementById(id+"-dfps");
-                    dfps.textContent = `${stream.inference_fps}fps`;
+                    dfps.textContent = `/${stream.inference_fps}fps`;
+                    dfps.style.display = stream.use_transcoder ? '' : 'none';
                     equ = document.getElementById(id+"-equ");
                     equ.textContent = `${Number(1/stream.frame_rate*1000).toFixed(0)}ms`
 
@@ -595,7 +596,9 @@
                         frms_ttl = perf.video_frames_ttl;
                     }
                 }
+                const win = perf.frame_window || 'n';
                 frame_detect2.textContent = `${frms} | ${frms_ttl} | ${Number(v).toFixed(0)}%`;
+                frame_detect2.title = `Frames Detected (${win} seconds) | Frames Captured (${win} seconds) | Avg Frames Detected`;
                 frame_detect2.className = v < 25.0 ? 'text-alert' : v < 50 ? 'text-warn' : 'text-good';
             }
         }

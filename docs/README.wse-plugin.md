@@ -1,116 +1,147 @@
 # WSE Video Intelligence Module
 This module provides an integration with the video intelligence service to perform object and scene detection on a video feed.
 
-## Install
+## Install onto an existing Wowza Streaming Engine server (Must be version 4.11 or greater)
+### Lib folder and jar files
 * copy the following Wowza jars to the WSE lib directory
 
 	* wse-plugin-metadata-injection-x.y.z.jar
 	* wse-plugin-overlays-x.y.z.jar
-	* wse-plugin-thumbnail-api-x.y.z.jar
 	* wse-plugin-video-intelligence-x.y.z.jar
 * copy the following 3rd party jars to the WSE lib directory
+	* classgraph-4.8.184.jar
 	* commons-text-1.15.0.jar
-	* javax-websocket-client-impl-9.4.58.v20250814.jar
-	* javax.websocket-api-1.0.jar
-	* jetty-client-9.4.58.v20250814.jar
-	* websocket-api-9.4.58.v20250814.jar
-	* websocket-client-9.4.58.v20250814.jar
-	* websocket-common-9.4.58.v20250814.jar
+	* jakarta.websocket-api-2.1.1.jar
+	* jakarta.websocket-client-api-2.1.1.jar
+	* jetty-ee10-websocket-jakarta-client-12.1.9.jar
+	* jetty-ee10-websocket-jakarta-common-12.1.9.jar
+	* jetty-websocket-core-client-12.1.9.jar
+	* jetty-websocket-core-common-12.1.9.jar
 
-* add server listeners to Server.xml
-```xml
-<ServerListener>
-	<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.module.overlays.OverlayServer</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.videointelligence.VifServer</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.thumbnailapi.ThumbnailServer</BaseClass>
-</ServerListener>
-```
+### Server.xml
+* add Server Listeners to Server.xml
+	```xml
+	<ServerListeners>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
+		</ServerListener>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.plugin.overlays.OverlayServer</BaseClass>
+		</ServerListener>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.plugin.videointelligence.VifServer</BaseClass>
+		</ServerListener>
+	```
 
-* Server Properties
-```xml
-<Property>
-	<Name>OverlayServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
-<Property>
-	<Name>ThumbnailApiServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
-<Property>
-	<Name>VideoIntelligenceServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
- ```
+* add server Properties to Server.xml
+	```xml
+	<Properties>
+		<Property>
+			<Name>OverlayServer</Name>
+			<Value>authorized</Value>
+			<Type>String</Type>
+		</Property>
 
-* add to each Application.xml the following modules
-```xml
-<Module>
-	<Name>ModuleVideoIntelligence</Name>
-	<Description>VideoIntelligence</Description>
-	<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
-</Module>
-<Module>
-	<Name>ID3AndPDTInjectionModule</Name>
-	<Description>ID3AndPDTInjectionModule</Description>
-	<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
-</Module>
-<Module>
- 	<Name>OverlayModule</Name>
-	<Description>OverlayModule</Description>
-	<Class>com.wowza.wms.plugin.overlays.OverlayModule</Class>
-</Module>
-```
+		<Property>
+			<Name>VideoIntelligenceServer</Name>
+			<Value>authorized</Value>
+			<Type>String</Type>
+		</Property>
+	```
 
-* add to each Application.xml the following basic properties for ID3 metadata
-```xml
-<Property>
-	<Name>amfToID3ConversionEnabled</Name>
-	<Value>true</Value>
-</Property>
-<Property>
-	<Name>amfToID3ConversionAddToManifest</Name>
-	<Value>true</Value>
-</Property>
-<Property>
-	<Name>amfToID3ConversionVerboseMaximum</Name>
-	<Value>0</Value>
-</Property>
-```
+### Application.xml
+* add application Modules to each Application.xml that VIF will run under.
+	```xml
+	<Modules>
+		<Module>
+			<Name>ModuleVideoIntelligence</Name>
+			<Description>VideoIntelligence</Description>
+			<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
+		</Module>
+		<Module>
+			<Name>ID3AndPDTInjectionModule</Name>
+			<Description>ID3AndPDTInjectionModule</Description>
+			<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
+		</Module>
+		<Module>
+			<Name>OverlayModule</Name>
+			<Description>OverlayModule</Description>
+			<Class>com.wowza.wms.plugin.overlays.OverlayModule</Class>
+		</Module>
+	```
 
-* add to each Application.xml the following HTTStreamer properties for ID3 metadata
-```xml
-<Property>
-	<Name>cupertinoEnableProgramDateTime</Name>
-	<Value>true</Value>
-	<Type>Boolean</Type>
-</Property>
-<Property>
-	<Name>cupertinoEnableId3ProgramDateTime</Name>
-	<Value>true</Value>
-	<Type>Boolean</Type>
-</Property>
-```
+* add application Properties to each Application.xml that VIF will run under.
+	```xml
+	<Properties>
+		<Property>
+			<Name>amfToID3ConversionEnabled</Name>
+			<Value>true</Value>
+		</Property>
+		<Property>
+			<Name>amfToID3ConversionAddToManifest</Name>
+			<Value>true</Value>
+		</Property>
+		<Property>
+			<Name>amfToID3ConversionVerboseMaximum</Name>
+			<Value>0</Value>
+		</Property>
+	```
 
-* Need a transcoder template, with one encode, with:
-	* `<Name>videoIntelligence</Name>`
-	* `<StreamName>mp4:${SourceStreamName}-vi</StreamName>`
-	* `<FitMode>match-source</FitMode>`
+* add HTTPStreamer Properties to each Application.xml that VIF will run under.
+	```xml
+	<HTTPStreamer>
+		<Properties>
+			<Property>
+				<Name>cupertinoEnableProgramDateTime</Name>
+				<Value>true</Value>
+				<Type>Boolean</Type>
+			</Property>
+			<Property>
+				<Name>cupertinoEnableId3ProgramDateTime</Name>
+				<Value>true</Value>
+				<Type>Boolean</Type>
+			</Property>
+	```
 
-Overlays will be added to any stream ending with -vi
+* enable the transcoder for each Application.xml that VIF will run under and use `vif-gpu-eva.xml` as the fallback
+	```xml
+	<Transcoder>
+		<LiveStreamTranscoder>transcoder</LiveStreamTranscoder>
+		<Templates>${SourceStreamName}.xml,vif-gpu-eva.xml</Templates>
+	```
 
-## Configuration
-configuration for the module is stored in `conf/video-intelligence.json`.
-The top level configuration contains the default settings then per steam configurations is in the `streams` array of configurations
+### WSEM
+* To enable VIF in WSEM/UI, need to copy to
+	```shell
+	mkdir -p /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	cp -r docker/manager/ui /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	```
+  or build a new `.war` file with wsem-war/build-war.sh and move it
+	```shell
+	rm -r /usr/local/WowzaStreamingEngine/manager/temp
+	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager
+	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
+	```
+* If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API
+	```xml
+	<RESTInterface>
+		<IPWhiteList>*</IPWhiteList>
+	```
+* If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
+
+### Misc
+* Overlays will be added to the stream ending with `-vi`
+
+* For Ubuntu/linux, you may need to install fonts for overlays to work correctly
+	```shell
+	apt-get install -y libfreetype6 fontconfig
+	```
+
+## VIF Configuration
+Configuration files for the module are stored in `conf.modules/vif/`
+The top level/defaults are in the `Default.json` file, individual streams are stored in their own file with `<applicationName>_<streamName>.json`
+
+Update the Default.json `vi_service_url` and `vi_service_api_key` to point to the VIS service
 
 | Key                  | Default                                           | Purpose                                                                      |
 | -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -131,9 +162,12 @@ The top level configuration contains the default settings then per steam configu
 | catch_up_max_behind_seconds | null (=2s) | **Scene/VLM:** how far behind live (seconds) detections may fall before catch-up skips to live. **Object:** not used — object latency is bounded by the `inference_fps` throttle toward the sustainable rate, and the slow-inference warning fires at a fixed ~1s single-frame round-trip. For **Scene/VLM**, unset derives to the buffer's design headroom (~2s), bounding latency near `inference_time + 2s`; lower for tighter latency, raise to tolerate more lag. |
 | auto_frame_throttle | false | Opt-in frame-rate throttle (default **off**, all modes): reduce `inference_fps` when inference falls behind. **Object detection:** its latency lever — keeps the analyzed frame near live and contiguous for the tracker. **Scene/VLM:** a pre-step that throttles before `catch_up_to_live` resorts to skipping, for fewer coverage gaps. Renamed from `auto_scene_frame_throttle` (still accepted on read). |
 | use_transcoder| true | use transcoder to grab frames |
-| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true |
+| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true. **VLM:** each analysis window is one request carrying `duration × inference_fps` images, and the VLM endpoint caps images per prompt (the bundled vLLM sidecar allows 8) — keep `duration × inference_fps` at 8 or below (e.g. 2 fps × 2s, the example config's values). `-1` resolves to the source frame rate and will exceed the cap, so it is not supported for VLM; the Stream Manager UI enforces this. |
 | inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
+
+#### VLM free-form analysis
+When a VLM analysis window has no `class_names` (a free-form prompt) — or VIS returns output that can't be parsed as structured results — event listeners receive a single detection with `class_name` set to `description` and the full analysis text in `reasoning`, instead of an empty detections list. Avoid configuring a real VLM class named `description`, as it would be indistinguishable from this synthetic class.
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
@@ -239,4 +273,4 @@ View the stream, see id3 tags and overlays
 View the status of WSE and the streams being processed [View the page](http://localhost:8088/vif/vif-status.html)
 
 ## Docker compose
-Provided is a `docker-compose.yaml` that will start WSE with a pre configured `Server.xml` and `live` application along with a sample `video-intelligence.json`
+Provided is a `docker-compose.yaml` that will start WSE with a pre configured `Server.xml` and `live` application along with a sample json files
