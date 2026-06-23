@@ -200,6 +200,10 @@ Each window produces one `synthetic_analysis` result:
 | `total_clips` | number of clips the NIM scored in the window |
 | `per_clip_scores[]` | `{frame_index, frame_id, logit, probability}` per clip |
 
+A **clip** here is the SVD NIM's internal per-window scored unit (≈ one per frame) —
+**not** the H.264 window VIC sends. `total_clips` is simply how many such units the
+NIM returned for the window; `per_clip_scores[]` is one row per clip (opt-in).
+
 `verdict: "unknown"` (with zeroed probability/logit) is emitted when the
 endpoint is unreachable, so a slow or down NIM **degrades** the stream instead
 of stalling it — the same fire-and-forget posture as the VLM sidecar.
