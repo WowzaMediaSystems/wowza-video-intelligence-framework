@@ -17,7 +17,7 @@ The following folders contain examples of the changes required for the WSE XML f
 	sudo cp -r wse.standalone/transcoder /usr/local/WowzaStreamingEngine/
 	```
 
-2. Apply the required changes to `Server.xml` and `Application.xml`. See [`docs/README.wse-plugin.md`](../docs/README.wse-plugin.md) Install section for the full XML snippets (ServerListeners, Server Properties, Application Modules, Application Properties, and Transcoder Templates).
+2. Apply the required changes to `Server.xml` and `Application.xml`. See [`Server.xml`](../docs/README.wse-plugin.md#serverxml) and [`Application.xml`](../docs/README.wse-plugin.md#applicationxml) for the full XML snippets (ServerListeners, Server Properties, Application Modules, Application Properties, and Transcoder Templates).
 
 3. Copy `WMSManager.war` to the `manager` and `manager/lib` directory of your WSE install. This replaces the WSE Manager UI with the VIF-enabled version.
 	```shell
@@ -25,6 +25,8 @@ The following folders contain examples of the changes required for the WSE XML f
 	sudo cp wse.standalone/WMSManager.war /usr/local/WowzaStreamingEngine/manager
 	sudo cp wse.standalone/WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
 	```
+> [!NOTE] 
+> Restart WSEM after copying files
 
 If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in `Server.xml` so you can access the VIF REST API
 ```xml
@@ -38,3 +40,6 @@ For Ubuntu/linux, you may need to install fonts for overlays to work correctly
 ```shell
 apt-get install -y libfreetype6 fontconfig
 ```
+
+> [!NOTE] 
+> Restart WSE after installing fonts
