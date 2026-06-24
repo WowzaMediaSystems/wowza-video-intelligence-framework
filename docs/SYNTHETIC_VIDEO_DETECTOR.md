@@ -81,7 +81,10 @@ and verdicts start flowing. Three things are worth knowing:
 
 - **Your video quality is untouched.** The detector analyzes a copy of your
   source video; it does **not** re-encode your stream, so the bitrate, resolution,
-  and image quality your viewers receive are exactly what you published.
+  and image quality your viewers receive are exactly what you published. (The one
+  exception is opting into the verdict overlay, which adds a *separate* transcoded
+  rendition and leaves your source rendition untouched — see
+  [Overlays](#overlays-require-transcoding).)
 - **A verdict trails real time by about one window.** A window has to be fully
   captured and analyzed before a verdict can exist, so each result lands roughly
   one `duration` behind live. Shorter windows shrink that lag but never remove
@@ -193,6 +196,7 @@ to override. Set them from the Manager UI or your stream configuration.
 | `request_timeout_seconds` | `60.0` | Per-window request timeout |
 | `max_concurrent_requests` | `16` | Cap on in-flight requests to this endpoint |
 | `include_per_clip_scores` | `false` | Attach the full frame-level score breakdown to each result (forensic drill-down; verbose) |
+| `use_transcoder` | `false` | Synthetic relays without transcoding by default, so the verdict **overlay is unavailable** (log / ID3 / webhook listeners still deliver it). Set `true` to transcode an overlay rendition with the verdict burned in — see [Overlays](#overlays-require-transcoding) |
 
 ---
 
@@ -209,8 +213,22 @@ Each window produces one result:
 | `per_clip_scores[]` | the full frame-level score breakdown — included only when `include_per_clip_scores` is `true` |
 
 The verdict appears wherever your event listeners deliver results: the log file,
-ID3 timed-metadata tags embedded in the stream, webhooks, and as a text overlay
-burned into the overlay video rendition.
+ID3 timed-metadata tags embedded in the stream, webhooks, and — when transcoding
+is enabled (see below) — as a text overlay burned into a separate overlay video
+rendition.
+
+### Overlays require transcoding
+
+> **The verdict overlay is off by default.** Burning the verdict into the picture
+> — the overlay rendition you play back over HLS, and the overlay on the stream
+> thumbnail — requires re-encoding, which the default synthetic configuration does
+> **not** do: it relays the source without transcoding. So out of the box the
+> log / ID3 / webhook listeners carry the verdict, but the **overlay does not
+> appear on playback or the thumbnail** (the thumbnail shows the source video with
+> no overlay). To turn it on, set `use_transcoder: true` on the stream. The engine
+> then produces a separate overlay rendition with the verdict burned in — your
+> source rendition stays untouched — at the cost of transcoding that one extra
+> rendition.
 
 `verdict: "unknown"` (with a zeroed probability) is emitted when the endpoint is
 unreachable, so a slow or down detector **degrades gracefully** — your stream
