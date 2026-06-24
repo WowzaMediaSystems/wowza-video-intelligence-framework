@@ -76,8 +76,8 @@ tail -f wse/logs/wowzastreamingengine_vi.log
 
 ## What to expect
 
-You don't have to manage any of the moving parts — point a stream at an endpoint
-and verdicts start flowing. Three things are worth knowing as a user:
+You don't have to manage any of the underlying infrastructure. Point a stream at an endpoint
+and verdicts start flowing. Three things are worth knowing:
 
 - **Your video quality is untouched.** The detector analyzes a copy of your
   source video; it does **not** re-encode your stream, so the bitrate, resolution,
@@ -85,19 +85,19 @@ and verdicts start flowing. Three things are worth knowing as a user:
 - **A verdict trails real time by about one window.** A window has to be fully
   captured and analyzed before a verdict can exist, so each result lands roughly
   one `duration` behind live. Shorter windows shrink that lag but never remove
-  it — this is inherent to the feature, not a fault.
+  it. You can further shorten the window by transcoding your source upstream to a
+  smaller GOP size.
 - **The GPU requirement is on the detector, not on your engine.** Only the
-  machine hosting the SVD model needs the supported GPU hardware below — nothing
-  else in your Wowza deployment takes on an extra GPU requirement for this
-  feature.
+  machine hosting the SVD model needs the supported GPU hardware below — you can
+  run the rest of the Wowza VIF stack on a different machine if needed.
 
-### H.264-only
+### H.264 requirement
 
-The detector requires an **H.264** source. Non-H.264 streams (HEVC/AV1/VP9) are
-**out of scope**: a non-H.264 source surfaces a clear error on the stream rather
-than being silently transcoded. If your source is another codec, normalize it to
-H.264 **upstream** (a separate Wowza source/transcode application) and feed the
-H.264 result into the Video Intelligence application.
+The detector requires an **H.264** source. A non-H.264 source surfaces a clear
+error on the stream rather than being silently transcoded. If your source is
+another codec, normalize it to H.264 **upstream** (a separate Wowza
+source/transcode application) and feed the H.264 result into the Video
+Intelligence application.
 
 ### A note on window length
 
@@ -106,7 +106,9 @@ A window opens on a keyframe and closes at the first keyframe at or after
 If your encoder's keyframe interval (GOP) is longer than `duration`, your
 windows — and therefore your verdict cadence — will be as long as the GOP. For
 the cadence you configure to hold, set `duration` to at least your source
-keyframe interval.
+keyframe interval. As mentioned above, if you require more frequent detection
+than your source stream GOP allows you can transcode your source upstream - on
+a different Wowza Streaming Engine application - targeting a smaller GOP size.
 
 ---
 
@@ -125,22 +127,6 @@ training GPUs that ship without NVENC/NVDEC**:
 
 > This is a property of the **detector host's** GPU. Nothing else in your Wowza
 > deployment adds an encode/decode GPU requirement for this feature.
-
-### Manifest profiles (per GPU architecture)
-
-The sidecar auto-selects the right model profile for the detected GPU. To pin it
-(useful for air-gapped pre-seeding), set `SVD_NIM_MANIFEST_PROFILE` in `.env`:
-
-| Architecture | Compute cap | Manifest profile id |
-| --- | --- | --- |
-| Blackwell | 12.0 | `3ce493f31eb1718ca928ae45a6995fc585f7571065106db509e7fce4b6f6d3aa` |
-| Ada (L4/L40/RTX 4090) | 8.9 | `6abf19cf36a0d5498b77c466780ac80c8224e641457f4f33a7df694810e2d746` |
-| Ampere (A10/A16/A40) | 8.6 | `15d466e43b11fa523e0662603f09bce6e5c7fc92fba33ea5c6122b98ec546bd8` |
-| Turing (T4) | 7.5 | `ae4879839cd92b9ca86791d2455b3ce72261f485f00a89e2056e11c3e69d4bc3` |
-
-(Confirm the current ids against the model's own
-[release notes](https://docs.nvidia.com/nim/maxine/synthetic-video-detector) —
-they can change per model version.)
 
 ---
 
@@ -253,8 +239,24 @@ and no license phone-home while streaming. The only network step is the
    start with `--profile svd`. With the cache present, the detector serves the
    cached model with **no download and no outbound connection**.
 
-Pin `SVD_NIM_MANIFEST_PROFILE` to the target GPU's profile id (table above) so
+Pin `SVD_NIM_MANIFEST_PROFILE` to the target GPU's profile id (table below) so
 the pre-seed matches the air-gapped hardware exactly.
+
+### Manifest profiles (per GPU architecture)
+
+The sidecar auto-selects the right model profile for the detected GPU. To pin it
+(useful for air-gapped pre-seeding), set `SVD_NIM_MANIFEST_PROFILE` in `.env`:
+
+| Architecture | Compute cap | Manifest profile id |
+| --- | --- | --- |
+| Blackwell | 12.0 | `3ce493f31eb1718ca928ae45a6995fc585f7571065106db509e7fce4b6f6d3aa` |
+| Ada (L4/L40/RTX 4090) | 8.9 | `6abf19cf36a0d5498b77c466780ac80c8224e641457f4f33a7df694810e2d746` |
+| Ampere (A10/A16/A40) | 8.6 | `15d466e43b11fa523e0662603f09bce6e5c7fc92fba33ea5c6122b98ec546bd8` |
+| Turing (T4) | 7.5 | `ae4879839cd92b9ca86791d2455b3ce72261f485f00a89e2056e11c3e69d4bc3` |
+
+(Confirm the current ids against the model's own
+[release notes](https://docs.nvidia.com/nim/maxine/synthetic-video-detector) —
+they can change per model version.)
 
 ---
 
