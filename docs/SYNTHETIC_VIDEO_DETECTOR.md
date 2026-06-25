@@ -88,8 +88,9 @@ and verdicts start flowing. Three things are worth knowing:
 - **A verdict trails real time by about one window.** A window has to be fully
   captured and analyzed before a verdict can exist, so each result lands roughly
   one `duration` behind live. Shorter windows shrink that lag but never remove
-  it. You can further shorten the window by transcoding your source upstream to a
-  smaller GOP size.
+  it. You can shorten the window by giving the source a smaller GOP — ideally set
+  at the source encoder, but transcoding is an alternative as well (see
+  [Transcoding and detection accuracy](#transcoding-and-detection-accuracy)).
 - **The GPU requirement is on the detector, not on your engine.** Only the
   machine hosting the SVD model needs the supported GPU hardware below — you can
   run the rest of the Wowza VIF stack on a different machine if needed.
@@ -98,9 +99,11 @@ and verdicts start flowing. Three things are worth knowing:
 
 The detector requires an **H.264** source. A non-H.264 source surfaces a clear
 error on the stream rather than being silently transcoded. If your source is
-another codec, normalize it to H.264 **upstream** (a separate Wowza
-source/transcode application) and feed the H.264 result into the Video
-Intelligence application.
+another codec, convert it to H.264 in a separate application and feed the result
+into the Video Intelligence application — see
+[Feeding the detector a normalized stream](#feeding-the-detector-a-normalized-stream-separate-application),
+and mind the encoding rule in
+[Transcoding and detection accuracy](#transcoding-and-detection-accuracy).
 
 ### A note on window length
 
@@ -109,9 +112,73 @@ A window opens on a keyframe and closes at the first keyframe at or after
 If your encoder's keyframe interval (GOP) is longer than `duration`, your
 windows — and therefore your verdict cadence — will be as long as the GOP. For
 the cadence you configure to hold, set `duration` to at least your source
-keyframe interval. As mentioned above, if you require more frequent detection
-than your source stream GOP allows you can transcode your source upstream - on
-a different Wowza Streaming Engine application - targeting a smaller GOP size.
+keyframe interval. If you need a shorter cadence than your source GOP allows, the
+clean fix is a smaller keyframe interval on the source encoder (then stream-copy
+downstream); re-encoding purely to shrink the GOP risks accuracy unless done
+carefully — see [Transcoding and detection accuracy](#transcoding-and-detection-accuracy).
+
+### Transcoding and detection accuracy
+
+By default the detector analyzes an untouched copy of your source, so its accuracy
+is simply whatever your source encoder produced. When you need to normalize the
+stream for the detector — convert a non-H.264 source to H.264, or shorten the GOP
+for a faster verdict cadence — the **Wowza Streaming Engine Transcoder is the
+right tool and your first choice**; you just configure the encode so the re-encode
+keeps the signal.
+
+The detector keys on subtle, high-frequency artifacts of AI generation, and a
+re-encode loses them in exactly one way: by **not spending enough bits**. The
+Transcoder's default rate control is *average* bitrate, which under-spends on
+low-motion footage (a talking head, a locked-off camera) and quantizes the
+artifacts away — so a genuinely synthetic clip can read `"real"`. Configure the
+encode to avoid that:
+
+- **Use constant bitrate (CBR), not the default average/variable bitrate.** This
+  is the single most important setting — CBR forces the encoder to actually spend
+  the bits, which is what keeps the artifacts intact.
+- **Set a high bitrate, and scale it to how far you shrink the GOP.** A shorter
+  GOP packs in more keyframes (I-frames), and I-frames cost far more bits — so the
+  smaller the new GOP is relative to the source, the higher the bitrate you need
+  to hold detail. Start around **1.5–2× your source bitrate** and go higher for
+  aggressive GOP reductions. (Lossless preserves the score exactly, if you can
+  spare the bandwidth.)
+- **Upscale low-resolution sources.** Low-res footage carries little
+  high-frequency detail for the model to weigh; upscaling to a higher resolution
+  in the same transcode can improve accuracy on low-res inputs — worth trying and
+  validating.
+
+If you only need a shorter GOP and you control the source encoder, you can also
+skip the re-encode entirely: set the keyframe interval there and stream-copy
+downstream (no re-encode, no accuracy cost). Either way, **validate against
+representative known-synthetic samples** — the right bitrate depends on your
+content and on how much you change the GOP.
+
+Illustrative, from one known-synthetic clip (0.37 on its pristine source, GOP
+shortened to 2 s):
+
+| Transcode rate control | Verdict |
+| --- | --- |
+| CBR at a high bitrate (~1.5–2× source), or lossless | **~0.34–0.39 / 0.37** — preserved |
+| average bitrate (the default — under-spends on easy content) | **~0.20 → "real"** |
+
+### Feeding the detector a normalized stream (separate application)
+
+The detector only analyzes the **ingested source** of its application; it ignores
+any rendition that the *same* application's transcoder produces. So to run it on a
+normalized (H.264 / shorter-GOP) stream, route that stream into a **separate**
+Video Intelligence application, where it arrives as a fresh ingest and is analyzed
+normally:
+
+- **App A** ingests your source and uses the **Engine Transcoder** to produce the
+  normalized H.264 rendition, then pushes it to App B (a Stream Target on App A or
+  a MediaCaster on App B).
+- **App B** is your Video Intelligence application; a synthetic config whose
+  `stream_name` matches the pushed stream taps it.
+
+Its main use is the non-H.264 case from [H.264 requirement](#h264-requirement):
+convert HEVC/AV1/VP9 → H.264 in App A, analyze in App B. Accuracy depends on how
+App A's transcoder is configured — apply the CBR + high-bitrate rule above; the
+routing itself does not affect the verdict.
 
 ### If the detector can't keep up
 
