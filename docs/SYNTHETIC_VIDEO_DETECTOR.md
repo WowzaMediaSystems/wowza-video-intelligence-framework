@@ -113,6 +113,31 @@ keyframe interval. As mentioned above, if you require more frequent detection
 than your source stream GOP allows you can transcode your source upstream - on
 a different Wowza Streaming Engine application - targeting a smaller GOP size.
 
+### If the detector can't keep up
+
+A verdict can't exist until its window has been fully captured and analyzed, so
+if your endpoint is slower than the window length — a heavily loaded GPU, a
+distant hosted endpoint, or many streams sharing one detector — verdicts can't
+be produced as fast as windows are captured.
+
+When that happens the framework keeps verdicts close to live rather than letting
+a backlog build: it always analyzes the **most recent** completed window and
+**skips the windows that elapsed while it was waiting** for the previous verdict.
+It never queues windows up. The consequences are:
+
+- **Latency stays bounded.** Verdicts keep landing roughly one window behind
+  live (plus the detector's processing time); they don't fall progressively
+  further and further behind, and nothing piles up in memory.
+- **Coverage has gaps.** The skipped windows are never analyzed — you get a
+  verdict on a recent slice of the stream, not on every consecutive window.
+
+If gap-free coverage matters more than staying close to live, give the detector
+enough headroom to finish each window within the window length: a faster or
+dedicated GPU, fewer streams per endpoint, or a longer `duration`. Separately,
+`request_timeout_seconds` (default 60s) is a backstop for a single window that
+hangs — if one request exceeds it, that window is abandoned and reported as
+`"unknown"` rather than blocking the stream indefinitely.
+
 ---
 
 ## GPU support matrix
