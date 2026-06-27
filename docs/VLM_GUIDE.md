@@ -158,7 +158,7 @@ The standalone analyzer makes **one VLM call per analysis window** and works in 
 
 - **Detect** — set `class_names` (open vocabulary), no custom prompts. Returns a per-class verdict with reasoning (`{class_name, reasoning}`), surfacing only the classes actually present. Optionally attach `class_hints` to disambiguate a class.
 - **Describe** — set nothing (no classes, no prompts). Returns a free-text description of each window using the built-in descriptive prompt.
-- **Custom** — write your own `system_prompt` / `user_prompt`, optionally with `class_names` (+ hints) and a custom `response_schema`. Your prompts and schema are used verbatim.
+- **Custom** — write your own `system_prompt` / `user_prompt`; output follows your prompt and stays **free-form by default**. Optionally add `class_names` (+ hints) to feed `{class_list}`, and a `response_schema` for structured output. Your prompts and schema are used verbatim. (Setting a custom `user_prompt` is what tells the analyzer you are driving the request, so it no longer imposes the per-class schema — see `response_schema` below.)
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -169,7 +169,7 @@ The standalone analyzer makes **one VLM call per analysis window** and works in 
 | `class_hints` | none | Optional map of *class → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). **Render-only**: each hint is inlined next to its class in the prompt's `{class_list}` (as `- fire: …`); it never changes the result shape and costs only a few prompt tokens. Keys must be members of `class_names` (case-insensitive) |
 | `system_prompt` | built-in | Custom mode: overrides the built-in system prompt. Supports the placeholders below |
 | `user_prompt` | built-in | Custom mode: your instruction to the model. Supports the placeholders below |
-| `response_schema` | auto | JSON Schema for structured output. With `class_names` set and no custom schema, a per-class results schema is applied automatically; a custom schema is passed to the endpoint **verbatim** (unfiltered) and its output is flattened onto the result |
+| `response_schema` | auto | JSON Schema for structured output. The per-class results schema is applied automatically **only in Detect** — `class_names` set and no custom `user_prompt`. Once you supply your own `user_prompt`, output stays free-form unless you also set `response_schema` (so a custom prompt is never overridden by forced class output). A schema you provide is passed to the endpoint **verbatim** (unfiltered) and its output is flattened onto the result |
 | `temperature` | `0.1` | Sampling temperature (0.0–2.0) |
 | `max_tokens` | `512` | Response budget per request |
 | `request_timeout_seconds` | `60.0` | Per-request HTTP timeout, including queue wait at the endpoint |
