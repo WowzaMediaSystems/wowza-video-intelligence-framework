@@ -122,10 +122,10 @@ This module provides an integration with the video intelligence service to perfo
 	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager
 	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
 	```
-* If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API
+* If connecting to a remote instance (not localhost), add the specific client IP(s) to the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API. Use a comma-separated list of exact IPs (per-octet wildcards like `192.168.1.*` are supported); avoid `*`, which allows every source IP.
 	```xml
 	<RESTInterface>
-		<IPWhiteList>*</IPWhiteList>
+		<IPWhiteList>127.0.0.1,203.0.113.10</IPWhiteList>
 	```
 * If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
 

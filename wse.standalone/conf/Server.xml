@@ -22,7 +22,7 @@
 				<CipherSuites></CipherSuites>
 				<Protocols></Protocols>
 			</SSLConfig>
-			<IPWhiteList>*</IPWhiteList>
+			<IPWhiteList>127.0.0.1</IPWhiteList>
 			<IPBlackList></IPBlackList>
 			<EnableXMLFile>false</EnableXMLFile>
 			<DocumentationServerEnable>false</DocumentationServerEnable>

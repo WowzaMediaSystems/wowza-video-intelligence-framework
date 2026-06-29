@@ -16,7 +16,13 @@ services:
             - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
-            - IPWHITELIST=*
+            # Source IPs allowed to reach the WSE REST control interface (8087).
+            # Default covers loopback + the pinned Docker bridge subnet (see the
+            # `networks:` block at the bottom of this file) so Manager->WSE and
+            # host access work out of the box. Widen deliberately via IPWHITELIST
+            # in .env -- do NOT set it back to `*` on a host with the control
+            # ports published to 0.0.0.0.
+            - IPWHITELIST=${IPWHITELIST:-127.0.0.1,172.20.*.*}
             - LOG_LEVEL=INFO #DEBUG INFO WARN ERROR
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change
             - VIS_API_KEY=${VIS_API_KEY}
@@ -37,8 +43,12 @@ services:
             - 443:443                   #SSL
             - 554:554                   #RTSP
             - 1935:1935                 #RTMP
-            - 8087:8087                 #REST API
-            - 8089:8089                 #REST API Documenation
+            # Control plane: bound to localhost so it is not wide-open on the
+            # host/LAN by default. To administer WSE from another machine,
+            # change to 0.0.0.0 (or "<host-ip>:8087:8087"), tighten IPWHITELIST
+            # in .env to the operator IP(s), and lock down with a host firewall.
+            - 127.0.0.1:8087:8087       #REST API
+            - 127.0.0.1:8089:8089       #REST API Documenation
             - 6970-6999:6970-6999/udp   #WEBRTC
             - 10000:10000/udp           #SRT
         env_file:
@@ -61,8 +71,10 @@ services:
             # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
             # - JKS_PASSWORD=tbd
         ports:
-            - 8088:8080
-            - 8443:8443
+            # Manager UI: bound to localhost by default (see the WSE control
+            # plane note above). Widen the same way to administer remotely.
+            - 127.0.0.1:8088:8080
+            - 127.0.0.1:8443:8443
         env_file:
             - .env
         extra_hosts:
@@ -85,6 +97,10 @@ services:
         # - INFERENCE_THREADS_PER_GPU=32
         # Optional: Enable API key authentication
           - VIS_API_KEY=${VIS_API_KEY}
+        # Refuse to start without a non-empty VIS_API_KEY (fail closed). Set
+        # SECURE_MODE=false in .env only for air-gapped/internal-only
+        # deployments that consciously opt out of authentication.
+          - SECURE_MODE=${SECURE_MODE:-true}
         # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
         # - TRT_MODELS=object-detection-medium
         # - TRT_MODELS=object-detection-nano,my-custom-model.pth
@@ -101,17 +117,33 @@ services:
         # in .env to override (default /logs); the ./vis/logs bind mount
         # below follows it.
           - LOG_PATH=${LOG_DIR:-/logs}
+        # The image runs as the non-root `vis` user (uid/gid 1001). The bind
+        # mounts below keep HOST ownership, so before the first `docker compose
+        # up` give that user write access to them:
+        #   mkdir -p ./vis/models ./vis/logs && sudo chown -R 1001:1001 ./vis
+        # Without this the container hits EACCES on these dirs. Note LOG_PATH
+        # (=/logs) lives OUTSIDE /build, so the in-image `chown /build` does not
+        # cover it -- its writability comes solely from the ./vis/logs mount
+        # below, which the chown above covers.
         volumes:
         # Mount models directory for checkpoints
           - ./vis/models:/build/models
         # Optional: Mount SSL certificates for HTTPS/WSS
         # - ./certs:/certs:ro
-        # Optional: Mount for RT-DETR v2 model cache (for offline usage)
-        # - ~/.cache/huggingface:/root/.cache/huggingface:ro
+        # Optional: Mount for RT-DETR v2 model cache (for offline usage).
+        # HOME=/build for the vis user, so HF caches under /build/.cache.
+        # - ~/.cache/huggingface:/build/.cache/huggingface:ro
         # Mount log directory (target follows LOG_DIR from .env)
           - ./vis/logs:${LOG_DIR:-/logs}
-        ports:
-          - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
+        # The service is only reachable on the internal compose network by
+        # default. Engine reaches it by hostname
+        # (VIS_HOST=video-intelligence-service.docker) on the bridge, so the
+        # same-host stack works without publishing the port. To reach VIS from
+        # other machines (e.g. Engine running on a different host), publish the
+        # port by uncommenting below -- and set a non-empty VIS_API_KEY in .env
+        # (keep SECURE_MODE=true) so the endpoint requires authentication:
+        # ports:
+        #   - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
         env_file:
             - .env
         extra_hosts:
@@ -221,3 +253,14 @@ services:
                 - driver: nvidia
                   capabilities: [gpu, compute, utility]
                   count: all
+
+# Pin the compose default network to a known subnet so the IPWHITELIST default
+# (127.0.0.1,172.20.*.*) deterministically covers Manager->WSE and NATed host
+# access over the bridge. If `docker compose up` reports an address-pool
+# overlap on this host, change BOTH this subnet and the IPWHITELIST default in
+# the wse service (and IPWHITELIST in .env if set).
+networks:
+    default:
+        ipam:
+            config:
+                - subnet: 172.20.0.0/16
