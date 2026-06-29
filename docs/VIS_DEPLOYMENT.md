@@ -152,7 +152,11 @@ VIS and Wowza Streaming Engine communicate over WebSocket and can run on the sam
    VIS_PORT=5001
    ```
 
-   Use `wss` in VIS_PROTOCOL if SSL is enabled on VIS.
+   > ⚠️ **If VIS runs on a separate host from Engine, you MUST use `wss`.**
+   > Plaintext `ws://` is only safe in the same-host default, where traffic
+   > stays on the internal Docker bridge. Over the network it exposes frames and
+   > the API key. See [SSL/TLS](#ssltls) for the bundled reverse-proxy path that
+   > gives you `wss` with a real CA cert and no Engine-side truststore changes.
 
 2. Set the same `VIS_API_KEY` value in the `.env` used by both services.
 
@@ -186,7 +190,43 @@ openssl req -x509 -newkey rsa:4096 -nodes \
   -days 365 -subj "/CN=localhost"
 ```
 
-For production, use certificates from a CA (e.g., Let's Encrypt) or handle TLS at a reverse proxy in front of VIS.
+For production, use certificates from a CA (e.g., Let's Encrypt) or handle TLS at a reverse proxy in front of VIS (recommended — see below).
+
+### Remote VIS — TLS via the bundled reverse proxy (recommended)
+
+When VIS runs on a **separate host** from Engine, the connection **must** be
+encrypted. The simplest path needs no changes to VIS or to Engine's truststore:
+the framework ships an opt-in nginx reverse proxy (the `tls-proxy` profile) that
+terminates TLS with a real CA cert and forwards to VIS over the internal bridge.
+VIS's own port stays unpublished; only the TLS port is exposed.
+
+1. On the VIS host, place a CA-issued certificate and key (issued for that
+   host's public DNS name) at:
+
+   ```
+   ./certs/server-cert.pem
+   ./certs/server-key.pem
+   ```
+
+2. Start VIS together with the proxy:
+
+   ```bash
+   docker compose --profile vi-service --profile tls-proxy up -d
+   ```
+
+   The proxy listens on `5443` (override with `VIS_TLS_PORT` in `.env`).
+
+3. On the **Engine** host, set in its `.env`:
+
+   ```
+   VIS_PROTOCOL=wss
+   VIS_HOST=<vis-host-public-name>   # must match the certificate
+   VIS_PORT=5443                     # = VIS_TLS_PORT
+   ```
+
+Because the proxy presents a real CA certificate, Engine validates it with no
+truststore surgery. Self-signed certs would re-introduce that friction — use a
+real CA (e.g. Let's Encrypt) for the proxy.
 
 ## Managing the Service
 
