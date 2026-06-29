@@ -80,6 +80,23 @@ services:
         extra_hosts:
           - "host.docker.internal:host-gateway"
 
+    # One-shot init: the VIS image runs as the non-root `vis` user (uid/gid
+    # 1001), but the ./vis bind mounts below keep host ownership (Docker creates
+    # missing bind targets as root), so VIS would hit EACCES writing models/logs.
+    # This runs as root, hands those dirs to 1001, and exits; the VIS service
+    # waits for it to complete. No host-side chown needed. It reuses the VIS
+    # image (no extra pull) and needs no GPU.
+    vis-init:
+        image: wowza/wowza-video-intelligence-service:latest-gpu
+        pull_policy: always
+        profiles: ["", "vi-service", "default", "vlm"]
+        user: "0:0"
+        restart: "no"
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}"]
+        volumes:
+          - ./vis/models:/build/models
+          - ./vis/logs:${LOG_DIR:-/logs}
+
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
         image: wowza/wowza-video-intelligence-service:latest-gpu
@@ -87,6 +104,9 @@ services:
         #platform: linux/arm64
         profiles: ["", "vi-service", "default", "vlm"]
         restart: unless-stopped
+        depends_on:
+          vis-init:
+            condition: service_completed_successfully
         environment:
         # Core service configuration
           - VIS_PORT=${VIS_PORT:-5001}
@@ -118,13 +138,10 @@ services:
         # below follows it.
           - LOG_PATH=${LOG_DIR:-/logs}
         # The image runs as the non-root `vis` user (uid/gid 1001). The bind
-        # mounts below keep HOST ownership, so before the first `docker compose
-        # up` give that user write access to them:
-        #   mkdir -p ./vis/models ./vis/logs && sudo chown -R 1001:1001 ./vis
-        # Without this the container hits EACCES on these dirs. Note LOG_PATH
-        # (=/logs) lives OUTSIDE /build, so the in-image `chown /build` does not
-        # cover it -- its writability comes solely from the ./vis/logs mount
-        # below, which the chown above covers.
+        # mounts below keep HOST ownership, but the `vis-init` service above
+        # chowns them to 1001 before this service starts, so no host-side
+        # action is needed. (LOG_PATH=/logs lives OUTSIDE /build, so the
+        # in-image `chown /build` does not cover it -- vis-init does.)
         volumes:
         # Mount models directory for checkpoints
           - ./vis/models:/build/models

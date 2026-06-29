@@ -22,21 +22,13 @@ For compute requirements, see the [Compute Requirements](../README.md#compute-re
    # Edit .env and set VIS_API_KEY to a shared secret
    ```
 
-2. Create the bind-mount directories and give them to the non-root `vis` user
-   (uid/gid `1001`) the image runs as, so it can write models and logs:
-
-   ```bash
-   mkdir -p vis/models vis/logs
-   sudo chown -R 1001:1001 vis
-   ```
-
-3. Start the service:
+2. Start the service:
 
    ```bash
    docker compose --profile vi-service up
    ```
 
-4. Verify it is running:
+3. Verify it is running:
 
    ```bash
    curl -s http://localhost:5001/health
@@ -75,21 +67,15 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
 
-> **Non-root user — mount ownership (required before first start).** The VIS
-> image runs as the non-root `vis` user (uid/gid **1001**). Bind mounts keep
-> their host ownership, so the container hits `EACCES` on host directories it
-> cannot write. Before the first `docker compose up`, create the mount dirs and
-> hand them to that user:
->
-> ```bash
-> mkdir -p vis/models vis/logs
-> sudo chown -R 1001:1001 vis
-> ```
->
-> `LOG_PATH` (`/logs`) lives **outside** `/build`, so the in-image `chown /build`
-> does not cover it — its writability comes solely from the `./vis/logs` mount,
-> which the `chown` above covers. The TensorRT engine cache and downloaded
-> checkpoints land under `./vis/models`, also covered.
+> **Non-root user — mount ownership (handled automatically).** The VIS image
+> runs as the non-root `vis` user (uid/gid **1001**). Bind mounts keep their
+> host ownership, so a non-root container would otherwise hit `EACCES` writing
+> models and logs. The compose stack includes a one-shot `vis-init` service that
+> runs as root, `chown`s `./vis/models` and `./vis/logs` to `1001:1001`, and
+> exits before the VIS service starts — so **no manual `chown` is required**.
+> `LOG_PATH` (`/logs`) lives outside `/build`; `vis-init` covers it too. If you
+> run VIS without compose (e.g. plain `docker run`), reproduce this once with
+> `sudo chown -R 1001:1001 vis`.
 
 ## Air-Gapped Deployments
 
