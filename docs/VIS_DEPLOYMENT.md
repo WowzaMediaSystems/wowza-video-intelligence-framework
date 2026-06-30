@@ -67,15 +67,13 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
 
-> **Non-root user — mount ownership (handled automatically).** The VIS image
-> runs as the non-root `vis` user (uid/gid **1001**). Bind mounts keep their
-> host ownership, so a non-root container would otherwise hit `EACCES` writing
-> models and logs. The compose stack includes a one-shot `vis-init` service that
-> runs as root, `chown`s `./vis/models` and `./vis/logs` to `1001:1001`, and
-> exits before the VIS service starts — so **no manual `chown` is required**.
-> `LOG_PATH` (`/logs`) lives outside `/build`; `vis-init` covers it too. If you
-> run VIS without compose (e.g. plain `docker run`), reproduce this once with
-> `sudo chown -R 1001:1001 vis`.
+> **Non-root user — mount ownership (handled automatically).** The service runs
+> as a non-root `vis` user (uid/gid **1001**). Bind mounts keep their host
+> ownership, so a non-root process would otherwise hit `EACCES` writing models
+> and logs. The image entrypoint handles this: it starts as root, `chown`s the
+> mounted paths (`./vis/models` and `./vis/logs`, including `/logs`, which lives
+> outside `/build`) to `1001:1001`, then drops privileges to `vis` before
+> launching the service — so **no manual `chown` is required**.
 
 ## Air-Gapped Deployments
 
