@@ -270,12 +270,15 @@ Use this profile only when you intentionally want the VIS container by itself (f
 
 ## Running on NVIDIA Jetson (Optional)
 
-On NVIDIA Jetson devices (L4T / JetPack, arm64), the desktop GPU images do not
-apply. The repository ships a small overlay, `docker-compose.jetson.yaml`, that
-merges on top of the base compose file and swaps only the image tags that differ
-on Jetson.
+NVIDIA Jetson Orin devices (Orin Nano and AGX Orin) are supported with Jetpack 7.2.  The repository ships with a small overlay, `docker-compose.jetson.yaml`, that merges on top of the base compose file and swaps the image tags that differ.
 
-Apply it in either of two ways:
+> [!NOTE]
+> For the Jetson Orin Nano, you need 8GB and will need to initialize the vi-service.  Run the vi-service by itself to build the initial models.  This can take between 15-20 minutes the first time.
+> ```
+> docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml --profile vi-service up
+> ```
+
+There are two ways to run with Jetson support:
 
 ```bash
 docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml up
