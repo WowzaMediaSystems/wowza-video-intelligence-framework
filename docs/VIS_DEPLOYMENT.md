@@ -194,9 +194,9 @@ For production, use certificates from a CA (e.g., Let's Encrypt) or handle TLS a
 
 When VIS runs on a **separate host** from Engine, the connection **must** be
 encrypted. The simplest path needs no changes to VIS or to Engine's truststore:
-the framework ships an opt-in nginx reverse proxy (the `tls-proxy` profile) that
-terminates TLS with a real CA cert and forwards to VIS over the internal bridge.
-VIS's own port stays unpublished; only the TLS port is exposed.
+the framework ships an opt-in nginx reverse proxy (the `docker-compose.tls-proxy.yaml`
+overlay) that terminates TLS with a real CA cert and forwards to VIS over the
+internal bridge. VIS's own port stays unpublished; only the TLS port is exposed.
 
 1. On the VIS host, place a CA-issued certificate and key (issued for that
    host's public DNS name) at:
@@ -206,10 +206,11 @@ VIS's own port stays unpublished; only the TLS port is exposed.
    ./certs/server-key.pem
    ```
 
-2. Start VIS together with the proxy:
+2. Start VIS with the TLS proxy overlay merged in via `-f`:
 
    ```bash
-   docker compose --profile vi-service --profile tls-proxy up -d
+   docker compose -f docker-compose.yaml -f docker-compose.tls-proxy.yaml \
+     --profile vi-service up -d
    ```
 
    The proxy listens on `5443` (override with `VIS_TLS_PORT` in `.env`).

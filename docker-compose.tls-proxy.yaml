@@ -1,0 +1,41 @@
+# TLS-terminating reverse proxy for VIS — opt-in compose overlay.
+#
+# VIS speaks plaintext and is only reachable on the internal bridge. When VIS
+# runs on a SEPARATE host from Engine, that hop crosses the network and MUST be
+# encrypted (Gate A2). This nginx proxy terminates TLS with a real CA cert you
+# provide and forwards to VIS on the bridge, so Engine dials
+# wss://<this-host>:${VIS_TLS_PORT:-5443} with no client truststore changes.
+# VIS's own port stays unpublished -- only this TLS port is exposed.
+#
+# This file is an OVERLAY: merge it onto the main compose file with -f. Bringing
+# it in is the opt-in (no profile needed), e.g.:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.tls-proxy.yaml \
+#                  --profile vi-service up
+#
+# Setup:
+#   1. Place a real CA cert + key at ./certs/server-cert.pem and
+#      ./certs/server-key.pem (issued for this host's public name).
+#   2. On the Engine host, set in its .env: VIS_PROTOCOL=wss,
+#      VIS_HOST=<this-host>, VIS_PORT=${VIS_TLS_PORT:-5443}.
+#
+# Tune the published port with VIS_TLS_PORT in .env (default 5443). The proxy
+# joins the main file's default network, so it resolves VIS on the bridge.
+services:
+    vis-tls-proxy:
+        image: nginx:stable-alpine
+        pull_policy: always
+        restart: unless-stopped
+        volumes:
+          - ./vis-tls-proxy.conf:/etc/nginx/nginx.conf:ro
+          - ./certs:/certs:ro
+        ports:
+          - "${VIS_TLS_PORT:-5443}:5443"
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        healthcheck:
+          test: ["CMD", "sh", "-c", "nc -z localhost 5443"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 5s

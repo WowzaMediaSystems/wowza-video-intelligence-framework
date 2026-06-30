@@ -153,42 +153,6 @@ services:
           start_period: 10s
         runtime: nvidia
 
-    # ── TLS-terminating reverse proxy for VIS (opt-in) ─────────────────────
-    # VIS speaks plaintext and is only reachable on the internal bridge. When
-    # VIS runs on a SEPARATE host from Engine, that hop crosses the network and
-    # MUST be encrypted (Gate A2). This nginx proxy terminates TLS with a real
-    # CA cert you provide and forwards to VIS on the bridge, so Engine dials
-    # wss://<this-host>:${VIS_TLS_PORT:-5443} with no client truststore changes.
-    #
-    # Opt-in via the `tls-proxy` profile, ALONGSIDE the VIS profile, e.g.:
-    #   docker compose --profile vi-service --profile tls-proxy up
-    #
-    # Setup:
-    #   1. Place a real CA cert + key at ./certs/server-cert.pem and
-    #      ./certs/server-key.pem (issued for this host's public name).
-    #   2. On the Engine host, set in its .env: VIS_PROTOCOL=wss,
-    #      VIS_HOST=<this-host>, VIS_PORT=${VIS_TLS_PORT:-5443}.
-    # Tune the published port with VIS_TLS_PORT in .env (default 5443). VIS's
-    # own port stays unpublished -- only this TLS port is exposed.
-    vis-tls-proxy:
-        image: nginx:stable-alpine
-        pull_policy: always
-        profiles: ["tls-proxy"]
-        restart: unless-stopped
-        volumes:
-          - ./vis-tls-proxy.conf:/etc/nginx/nginx.conf:ro
-          - ./certs:/certs:ro
-        ports:
-          - "${VIS_TLS_PORT:-5443}:5443"
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        healthcheck:
-          test: ["CMD", "sh", "-c", "nc -z localhost 5443"]
-          interval: 30s
-          timeout: 10s
-          retries: 3
-          start_period: 5s
-
     # ── VLM sidecar (opt-in) ───────────────────────────────────────────────
     # OpenAI-compatible vLLM server backing the standalone `detector_type=vlm`
     # analyzer and the `vlm_verification` overlay on scene/object detectors.
