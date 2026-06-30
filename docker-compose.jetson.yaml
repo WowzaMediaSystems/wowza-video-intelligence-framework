@@ -1,0 +1,13 @@
+# Overlay for NVIDIA Jetson (L4T / JetPack, arm64).
+#
+# Merges on top of docker-compose.yaml and swaps only what differs on Jetson.
+# Right now that is just the VIS image tag; add `wse`/`manager` overrides here
+# if/when Jetson image tags exist for them too.
+#
+# Apply it either way:
+#   docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml up
+# or set COMPOSE_FILE in .env so a bare `docker compose up` picks it up
+# automatically (see .env.example).
+services:
+    video-intelligence-service-gpu:
+        image: wowza/wowza-video-intelligence-service:latest-jetson

@@ -40,6 +40,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
+- [Running on NVIDIA Jetson (Optional)](#running-on-nvidia-jetson-optional)
 
 ## Repository Layout
 
@@ -267,3 +268,23 @@ Use this profile only when you intentionally want the VIS container by itself (f
 > [!TIP]
 > `docker compose down` may be required between version changes.
 
+## Running on NVIDIA Jetson (Optional)
+
+On NVIDIA Jetson devices (L4T / JetPack, arm64), the desktop GPU images do not
+apply. The repository ships a small overlay, `docker-compose.jetson.yaml`, that
+merges on top of the base compose file and swaps only the image tags that differ
+on Jetson.
+
+Apply it in either of two ways:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml up
+```
+
+Or set `COMPOSE_FILE` once in your `.env` so a bare `docker compose up` (and
+`down`, `logs`, etc.) picks up the overlay automatically:
+
+```bash
+# in .env
+COMPOSE_FILE=docker-compose.yaml:docker-compose.jetson.yaml
+```
