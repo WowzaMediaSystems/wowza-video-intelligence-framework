@@ -10,4 +10,4 @@
 # automatically (see .env.example).
 services:
     video-intelligence-service-gpu:
-        image: wowza/wowza-video-intelligence-service:latest-jetson
+        image: wowza/wowza-video-intelligence-service:latest-jetpack7
