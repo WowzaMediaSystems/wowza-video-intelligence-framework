@@ -302,6 +302,20 @@
             overflow-wrap: anywhere;
         }
 
+        /* Radio/checkbox OPTION labels are inline controls, not field labels — opt
+           them out of the fixed-width, uppercase, right-aligned styling that
+           .form-group label:not(.switch) applies. Equal specificity, so this must
+           stay AFTER that rule to win. */
+        .form-group label.inline-control-label {
+            flex: 0 0 auto;
+            max-width: none;
+            text-transform: none;
+            text-align: left;
+            letter-spacing: normal;
+            font-size: 0.9em;
+            line-height: normal;
+        }
+
         .form-group input[type="text"],
         .form-group input[type="number"],
         .form-group select,
@@ -315,6 +329,38 @@
             flex: 1;
             min-width: 0;
             max-width: 300px;
+        }
+
+        /* VLM Custom-mode text areas hold long prompts / schemas — let them fill the
+           column rather than the 300px field cap, with a touch more inner padding. */
+        #cfg-vlm-system-prompt,
+        #cfg-vlm-user-prompt,
+        #cfg-vlm-response-schema {
+            max-width: none;
+            padding: 8px 12px;
+            /* Auto-grow (vlm-autogrow.js) fits the height to the content as the
+               operator types, up to this ceiling; past it the textarea scrolls.
+               min-height (per field below) holds the initial multi-row size so an
+               empty field never collapses to a single line. */
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        #cfg-vlm-system-prompt      { min-height: 66px; }
+        #cfg-vlm-user-prompt        { min-height: 82px; }
+        #cfg-vlm-response-schema    { min-height: 98px; }
+
+        /* The Output Schema kind selector + Custom sub-editor live inside the
+           input-column wrapper (a flex:1 div beside the label), so their controls
+           flow normally — no label-column offset needed. The Raw textarea just
+           fills the wrapper width. */
+        #cfg-vlm-response-schema {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        /* A little breathing room above the schema sub-panel help text. */
+        #vlm-schema-fields > .field-help,
+        #vlm-schema-raw > .field-help {
+            margin-top: 8px;
         }
 
         .form-group input[type="text"]::placeholder,
@@ -1090,14 +1136,15 @@
                     <option value="object" selected>Object</option>
                     <option value="scene">Scene</option>
                     <option value="vlm">VLM</option>
+                    <option value="synthetic">Synthetic</option>
                 </select>
-                <div class="field-help">Object detection tracks boxes like person/car. Scene detection classifies the whole frame or clip.<span id="vlm-detector-help"> VLM sends clips to a Vision Language Model endpoint.</span></div>
+                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated / deepfake content (a Real-vs-Fake verdict).</span></div>
             </div>
 
             <div class="form-group" id="cfg-duration-group">
                 <label>Duration (seconds)</label>
                 <input type="number" id="cfg-duration" value="" placeholder="2" min="0" max="5" step="0.1">
-                    <div class="field-help">Clip duration sent to the VIF service for each analysis request (scene and VLM). <strong>VLM:</strong> one request per window carrying Duration × Inference FPS images, which must not exceed 8.</div>
+                    <div class="field-help"><span id="duration-help-scene">Length of each analysis window (seconds) sent to the VIF service.</span><span id="duration-help-vlm" style="display:none">Length of each analysis window (seconds). VLM sends one request per window carrying Duration × Inference-FPS images, which must not exceed 8.</span><span id="duration-help-synthetic" style="display:none">Target length of each analysis window (seconds). Windows snap to the next keyframe — set Duration ≥ your source's GOP.</span></div>
             </div>
 
             <div class="form-group" id="cfg-auto-frame-throttle-group">
@@ -1350,35 +1397,189 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Class Names</label>
-                    <textarea id="cfg-vlm-class-names" rows="3" placeholder="comma-separated, e.g. person walking, car, dog"></textarea>
-                    <div class="field-help">Comma-separated target phrases or labels for the model to classify against.</div>
-                </div>
-
-                <div class="form-group">
                     <label>Request Timeout (seconds)</label>
                     <input type="number" id="cfg-vlm-request-timeout" value="" placeholder="30" min="0" step="0.1">
                     <div class="field-help">Timeout in seconds for each VLM API request.</div>
                 </div>
 
-                <!-- <div class="form-group">
-                    <label>Temperature</label>
-                    <input type="number" id="cfg-vlm-temperature" value="" placeholder="0.0" min="0" max="2" step="0.01">
-                    <div class="field-help">Controls randomness in model output. Lower values are more deterministic.</div>
+                <!-- Analysis mode (VI-599): one VLM call per window in every mode;
+                     the selector governs which fields show and which keys are sent. -->
+                <div class="form-group">
+                    <label>Analysis Mode</label>
+                    <div id="cfg-vlm-mode" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
+                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="detect" onchange="toggleVlmMode()"> Detect</label>
+                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="describe" onchange="toggleVlmMode()"> Describe</label>
+                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="custom" onchange="toggleVlmMode()"> Custom</label>
+                    </div>
+                    <div class="field-help">
+                        <strong>Detect</strong>: list what to look for &rarr; a per-item verdict.
+                        <strong>Describe</strong>: a written description, no fixed list.
+                        <strong>Custom</strong>: your own prompts and (optionally) output schema.
+                    </div>
+                </div>
+
+                <!-- Detect mode: per-class repeater (class + optional hint) -->
+                <div id="vlm-mode-detect" class="vlm-mode-panel">
+                    <!-- align-items:flex-start so the "Classes & Hints" label stays
+                         pinned beside the first row instead of drifting down (the
+                         form-group's default align-items:center re-centers it as the
+                         row list grows taller). -->
+                    <div class="form-group" style="align-items:flex-start;">
+                        <label>Classes &amp; Hints</label>
+                        <!-- Rows + button share one block wrapper (flex:1) so the button always
+                             sits directly below the last row instead of being vertically centered
+                             beside the list by the form-group's align-items:center. -->
+                        <div style="flex:1; min-width:0;">
+                            <div id="cfg-vlm-detect-classes"></div>
+                            <button type="button" class="btn-secondary" onclick="addVlmClassRow('cfg-vlm-detect-classes')" style="margin-top:6px;">+ Add class</button>
+                        </div>
+                        <div class="field-help">One row per class to look for. Each class may carry an optional hint that disambiguates it (e.g. <em>open flame, not red lighting</em>); leave the hint empty to send the class without one. Hints cost only a few prompt tokens.</div>
+                    </div>
+                </div>
+
+                <!-- Describe mode: no class/prompt fields -->
+                <div id="vlm-mode-describe" class="vlm-mode-panel" style="display:none;">
+                    <!-- Indent to the input column so this lines up with the field/help
+                         text in the other modes instead of sitting flush-left. -->
+                    <div class="section-help" style="margin-left: calc(var(--form-label-width) + 10px);">The model returns a written description of each window. No class list or prompt configuration &mdash; uses the built-in descriptive prompt.</div>
+                </div>
+
+                <!-- Custom mode: operator prompts + optional classes (+ schema, VI-600) -->
+                <div id="vlm-mode-custom" class="vlm-mode-panel" style="display:none;">
+                    <!-- Prompting guide (VI-615): opens a modal; content rendered by vlm-prompt-guide.js
+                         from the live defaultConfig.vlm_defaults. -->
+                    <div class="form-group" style="display:block;">
+                        <button type="button" class="btn-secondary" onclick="openVlmPromptGuide()" style="font-weight:600; margin-left:calc(var(--form-label-width) + 10px);">Prompting guide &amp; defaults</button>
+                    </div>
+                    <div id="vlm-guide-modal" class="overlay-backdrop" onclick="if(event.target===this)closeVlmPromptGuide()">
+                        <div class="overlay-card" style="width:min(880px,100%); max-height:85vh; overflow-y:auto;">
+                            <button type="button" class="btn-secondary overlay-close" onclick="closeVlmPromptGuide()" title="Close">&times;</button>
+                            <h3 style="margin:0 28px 8px 0;">VLM prompting guide</h3>
+                            <div id="vlm-prompt-guide"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>System Prompt</label>
+                        <textarea id="cfg-vlm-system-prompt" rows="3" placeholder="Leave empty to use the built-in default." oninput="updateVlmCustomLint()"></textarea>
+                        <div class="field-help">Optional. Overrides the built-in system prompt. Supports the placeholders listed under the user prompt.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>User Prompt <span style="color:#c0392b;">*</span></label>
+                        <textarea id="cfg-vlm-user-prompt" rows="4" placeholder="Required in Custom mode &mdash; your instruction to the model." oninput="updateVlmCustomLint()"></textarea>
+                        <div class="field-help">Required in Custom mode. Placeholders (substituted in both prompts): <code>{class_list}</code> (the classes below, when set), <code>{frame_count}</code> (images in the window), <code>{duration_seconds}</code> (window length in seconds).</div>
+                    </div>
+                    <!-- Same per-class repeater as Detect mode (class + optional hint),
+                         align-items:flex-start so the label stays pinned beside the
+                         first row. The classes feed {class_list} in the operator's
+                         prompts; a hint is inlined as `- class: hint`. -->
+                    <div class="form-group" style="align-items:flex-start;">
+                        <label>Classes (optional)</label>
+                        <div style="flex:1; min-width:0;">
+                            <div id="cfg-vlm-custom-classes"></div>
+                            <button type="button" class="btn-secondary" onclick="addVlmClassRow('cfg-vlm-custom-classes')" style="margin-top:6px;">+ Add class</button>
+                        </div>
+                        <div class="field-help">Optional. One row per class, each with an optional hint. Injected wherever <code>{class_list}</code> appears in your prompts (a class with a hint renders as <code>- class: hint</code>). Leave empty for prompts that don't reference a class list.</div>
+                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#c0392b;">Classes are set but neither prompt contains <code>{class_list}</code>, so the classes won't be injected into the prompt.</div>
+                    </div>
+                    <!-- align-items:flex-start so the label pins to the top of the
+                         kind selector / sub-editor stack. -->
+                    <div class="form-group" style="align-items:flex-start;">
+                        <label>Output Schema</label>
+                        <div style="flex:1; min-width:0;">
+                            <!-- Output kind: Free-form (default) leaves output free; Per-class
+                                 verdicts posts the built-in detection schema (relayed live from
+                                 VIS at /vlm/defaults) so VIS enforces the {class_name, reasoning}
+                                 contract; Custom reveals the Fields/Raw builder. -->
+                            <div id="cfg-vlm-schema-kind" style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:2px 0;">
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="freeform" onchange="switchVlmSchemaKind('freeform')" checked> Free-form</label>
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="default" onchange="switchVlmSchemaKind('default')"> Per-class verdicts</label>
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="custom" onchange="switchVlmSchemaKind('custom')"> Custom schema</label>
+                            </div>
+                            <div id="vlm-schema-kind-help" class="field-help" style="margin-left:0; margin-top:4px;"></div>
+                            <!-- Custom schema editor (shown only for the Custom kind). -->
+                            <div id="vlm-schema-custom" style="display:none; margin-top:8px;">
+                                <div id="cfg-vlm-schema-mode" style="display:flex; gap:16px; align-items:center; margin:4px 0;">
+                                    <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-mode" value="fields" onchange="switchVlmSchemaMode('fields')" checked> Fields</label>
+                                    <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-mode" value="raw" onchange="switchVlmSchemaMode('raw')"> Raw JSON</label>
+                                </div>
+                                <!-- Fields builder: one row per output property; generates a JSON Schema. -->
+                                <div id="vlm-schema-fields">
+                                    <div id="cfg-vlm-schema-rows"></div>
+                                    <button type="button" class="btn-secondary" onclick="addVlmSchemaField()" style="margin-top:6px;">+ Add field</button>
+                                    <div class="field-help" style="margin-left:0;">Each row becomes a field the model must return. Pick a type (including <code>enum</code>, and <code>object</code>/<code>object[]</code> for nesting), add an optional description, and tick <em>required</em>. The JSON Schema is built for you; switch to <strong>Raw JSON</strong> only for advanced features (numeric/string constraints, <code>$ref</code>, <code>oneOf</code>). Write your prompt to ask for exactly these fields. See the <strong>Prompting guide</strong> above.</div>
+                                </div>
+                                <!-- Raw JSON escape hatch: an arbitrary JSON Schema, validated client-side. -->
+                                <div id="vlm-schema-raw" style="display:none;">
+                                    <textarea id="cfg-vlm-response-schema" rows="5" placeholder='JSON Schema for structured output, e.g.&#10;{"type":"object","properties":{"reading":{"type":"number"}},"required":["reading"]}' oninput="validateVlmSchema()" style="font-family:monospace;"></textarea>
+                                    <div class="field-help" style="margin-left:0;">A JSON Schema, passed to the model verbatim. Validated as JSON here; the endpoint may still reject schemas its guided decoding can't honor.</div>
+                                </div>
+                            </div>
+                            <div id="vlm-schema-error" class="field-help" style="margin-left:0; display:none; color:#c0392b;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced disclosure (all modes): temperature / max tokens -->
+                <div class="form-group">
+                    <label onclick="toggleVlmAdvanced()" style="cursor:pointer; user-select:none;"><span id="cfg-vlm-advanced-caret">&#9656;</span> Advanced</label>
+                </div>
+                <div id="cfg-vlm-advanced" style="display:none;">
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <input type="number" id="cfg-vlm-temperature" value="" placeholder="0.0" min="0" max="2" step="0.01">
+                        <div class="field-help">Controls randomness in model output. Lower values are more deterministic.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens</label>
+                        <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" step="1">
+                        <div class="field-help">Maximum number of tokens in the VLM response.</div>
+                    </div>
+                </div>
+
+                <!-- Max Concurrent Requests is JSON-only (set it in Default.json's
+                     vlm_analysis); intentionally not exposed in the UI. -->
+            </div>
+
+            <!-- Synthetic Analysis Section -->
+            <div class="form-section" id="synthetic-analysis-section" style="display:none;">
+                <div class="form-section-title">Synthetic (Deepfake) Detection</div>
+                <div class="section-help">
+                    Relay each source H.264 window to the NVIDIA Synthetic Video Detector NIM (over gRPC) for a per-window Real-vs-Fake verdict. Opt-in / bring-your-own endpoint; H.264-only; no re-encode.
                 </div>
 
                 <div class="form-group">
-                    <label>Max Tokens</label>
-                    <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" step="1">
-                    <div class="field-help">Maximum number of tokens in the VLM response.</div>
+                    <label>Endpoint</label>
+                    <input type="text" id="cfg-synthetic-endpoint" placeholder="svd.docker:8001">
+                    <div class="field-help">SVD NIM as a gRPC <code>host:port</code> (not an http URL). Local sidecar: <code>svd.docker:8001</code>; NVCF hosted dev: <code>grpc.nvcf.nvidia.com:443</code>.</div>
                 </div>
 
+                <div class="form-group">
+                    <label>Transport Security (TLS)</label>
+                    <select id="cfg-synthetic-use-tls">
+                        <option value="">Auto-detect (recommended)</option>
+                        <option value="true">Force TLS</option>
+                        <option value="false">Force plaintext</option>
+                    </select>
+                    <div class="field-help">Auto-detect picks TLS for a <code>:443</code> endpoint (e.g. NVCF) and plaintext otherwise (in-network sidecar) &mdash; override only when the port heuristic is wrong. TLS uses the system trust store; for a private CA or mutual TLS, set the <code>tls_*</code> cert paths in the stream config JSON.</div>
+                </div>
 
                 <div class="form-group">
-                    <label>Max Concurrent Requests</label>
-                    <input type="number" id="cfg-vlm-max-concurrent-requests" value="" placeholder="4" min="1" step="1">
-                    <div class="field-help">Maximum number of simultaneous VLM API requests.</div>
-                </div> -->
+                    <label>API Key</label>
+                    <input type="password" id="cfg-synthetic-api-key" placeholder="">
+                    <div class="field-help">Bearer token for the endpoint. Required by NVCF; leave blank for an unauthenticated self-hosted NIM.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Function ID</label>
+                    <input type="text" id="cfg-synthetic-function-id" placeholder="">
+                    <div class="field-help">NVCF function id (sent as <code>function-id</code> metadata). Required for the NVCF hosted endpoint; leave blank otherwise.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Classification Threshold</label>
+                    <input type="number" id="cfg-synthetic-classification-threshold" value="" placeholder="0.3" min="0" max="1" step="0.05">
+                    <div class="field-help">Probability above which a window is classified <code>synthetic</code> (0.0&ndash;1.0). NIM reference default 0.3 (conservative); 0.5 balanced.</div>
+                </div>
             </div>
 
             </div><!-- end collapsible-body (Video Processing) -->
@@ -1448,6 +1649,7 @@
                 <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()" style="flex-shrink:0; margin-left:12px;">Create New Listener</button>
             </div>
             <div id="evt-active-summary" class="event-listener-summary" aria-live="polite"></div>
+            <div id="evt-synthetic-overlay-warning" class="inline-warning" style="display:none;"></div>
             <div class="form-group" id="cfg-rollup-batch-interval-group">
                 <label title="This time window controls how long detections are buffered before batch or rollup listeners fire.">Rollup/Batch Time</label>
                 <input type="number" id="cfg-rollup-batch-interval" value="" placeholder="2" min="0" max="30" step="0.1">
@@ -1536,6 +1738,21 @@
     serverUrl = serverUrl.replace(/\/+$/, '');
     var credentials = `${username}:${password}`;
     var encodedCredentials = btoa(credentials);
+
+    // VI-614: the VLM Custom-mode helpers (recursive schema builder + prompting guide)
+    // live in their own modules to keep this file lean. Load them the same way listener
+    // modules are loaded — a <script> injected into <head> — guarded so re-opening the
+    // Stream Configs view doesn't inject them twice. Their functions are only called on
+    // user interaction (long after this async load), so there is no init-time race.
+    (function loadVlmModules() {
+        ['vlm-schema-builder', 'vlm-prompt-guide', 'vlm-autogrow'].forEach(function(name) {
+            if (document.querySelector('script[data-vif-module="' + name + '"]')) return;
+            var moduleScript = document.createElement('script');
+            moduleScript.src = 'wse-plugins/server/vif/' + name + '.js';
+            moduleScript.setAttribute('data-vif-module', name);
+            document.head.appendChild(moduleScript);
+        });
+    })();
 
     var streamsList = [];
     // Main stream/object/scene defaults are loaded from /v1/server/plugin/vif/config into defaultConfig.
@@ -2015,6 +2232,19 @@
         }
     }
 
+    // Synthetic relays the source without transcoding by default; every other detector defaults
+    // to transcoding. Mirror the inference-fps suggestion: only adjust on a new stream, and only
+    // while the user hasn't manually toggled the checkbox away from the last suggested value.
+    function applyDetectorTypeTranscoderSuggestion(detectorType) {
+        if (!isNewStream()) return;
+        const cb = document.getElementById('cfg-use-transcoder');
+        if (cb.dataset.suggested !== undefined && String(cb.checked) !== cb.dataset.suggested) return;
+        const suggested = detectorType !== 'synthetic';
+        cb.checked = suggested;
+        cb.dataset.suggested = String(suggested);
+        updateSyntheticOverlayWarning();
+    }
+
     // New stream default field values derive from defaultConfig where possible.
     function applySuggestedDefaultsForNewStream() {
         const inferenceFpsInput = document.getElementById('cfg-inference-fps');
@@ -2308,9 +2538,34 @@
         return match ? match.label : method;
     }
 
+    // Synthetic relays the source without transcoding by default, so there is no rendition for
+    // OverlayEvent to burn the verdict into — overlays silently won't appear on playback or the
+    // thumbnail. Warn when overlays + synthetic + no transcoder, pointing at the Use Transcoder
+    // toggle that fixes it (at the cost of a transcode purely for the overlay rendition).
+    function updateSyntheticOverlayWarning() {
+        const el = document.getElementById('evt-synthetic-overlay-warning');
+        if (!el) return;
+        const detectorType = document.getElementById('cfg-detector-type').value;
+        const useTranscoder = document.getElementById('cfg-use-transcoder').checked;
+        const hasOverlay = Object.keys(eventListenersData || {}).some(function(name) {
+            return resolveClassName((eventListenersData[name] || {}).class_name || '') === 'OverlayEvent';
+        });
+        if (detectorType === 'synthetic' && hasOverlay && !useTranscoder) {
+            el.innerHTML = 'This Overlay listener won’t appear for synthetic detection: synthetic relays the ' +
+                'source without transcoding, so there is no rendition to burn the verdict into (playback and the ' +
+                'thumbnail show the source with no overlay). Enable <strong>Use Transcoder</strong> above to render a ' +
+                'separate overlay rendition with the verdict — your source rendition stays untouched, at the cost ' +
+                'of transcoding that one rendition.';
+            el.style.display = 'block';
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
     function updateActiveListenerSummary() {
         const summary = document.getElementById('evt-active-summary');
         if (!summary) return;
+        updateSyntheticOverlayWarning();
 
         const listenerNames = Object.keys(eventListenersData || {});
         if (listenerNames.length === 0) {
@@ -2567,6 +2822,126 @@
         }
     }
 
+    // ── VLM analysis mode (VI-599) ────────────────────────────────────────
+    // Detect / Describe / Custom is a UI construct; VIS infers behavior from
+    // which fields are set. The selector governs which fields show and which
+    // keys buildConfigJson emits, so the active mode's keys are the ONLY
+    // class/prompt keys sent (mode-bleed guard).
+
+    function getVlmMode() {
+        const checked = document.querySelector('#cfg-vlm-mode input[name="vlm-mode"]:checked');
+        return checked ? checked.value : 'detect';
+    }
+
+    function toggleVlmMode() {
+        const mode = getVlmMode();
+        document.getElementById('vlm-mode-detect').style.display = mode === 'detect' ? 'block' : 'none';
+        document.getElementById('vlm-mode-describe').style.display = mode === 'describe' ? 'block' : 'none';
+        document.getElementById('vlm-mode-custom').style.display = mode === 'custom' ? 'block' : 'none';
+        if (mode === 'custom') updateVlmCustomLint();
+        // Re-fit the now-visible Custom-mode textareas to any prefilled content — a
+        // programmatic value set (loadConfig) fires no 'input' event. Safe in any
+        // mode: vlmAutoGrowAll skips textareas that are still hidden.
+        if (window.vlmAutoGrowAll) window.vlmAutoGrowAll();
+        markDirty();
+    }
+
+    function setVlmMode(mode) {
+        const radios = document.querySelectorAll('#cfg-vlm-mode input[name="vlm-mode"]');
+        radios.forEach(function(r) { r.checked = (r.value === mode); });
+        toggleVlmMode();
+    }
+
+    // Per-class repeater: one row of [class][optional hint][remove]. Shared by
+    // Detect mode and Custom mode (containerId selects which list). The hint is
+    // sent as class_hints[class] and VIS inlines it next to the class in the
+    // {class_list} prompt expansion (as `- class: hint`) — render-only, never in
+    // the result. updateVlmCustomLint() re-runs so the "no {class_list}" warning
+    // tracks class edits (harmless no-op in Detect mode).
+    function addVlmClassRow(containerId, name, hint) {
+        const container = document.getElementById(containerId);
+        const row = document.createElement('div');
+        row.className = 'vlm-class-row';
+        row.style.cssText = 'display:flex; gap:8px; margin-bottom:6px; align-items:center;';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'vlm-class-name';
+        nameInput.placeholder = 'class (e.g. fire)';
+        nameInput.value = name || '';
+        nameInput.style.flex = '1';
+        nameInput.addEventListener('input', function() { markDirty(); updateVlmCustomLint(); });
+        const hintInput = document.createElement('input');
+        hintInput.type = 'text';
+        hintInput.className = 'vlm-class-hint';
+        hintInput.placeholder = 'optional hint (e.g. open flame, not red glow)';
+        hintInput.value = hint || '';
+        hintInput.style.flex = '2';
+        hintInput.addEventListener('input', markDirty);
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn-danger';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove class';
+        removeBtn.onclick = function() { row.remove(); markDirty(); updateVlmCustomLint(); };
+        row.appendChild(nameInput);
+        row.appendChild(hintInput);
+        row.appendChild(removeBtn);
+        container.appendChild(row);
+        markDirty();
+        updateVlmCustomLint();
+    }
+
+    // Read a repeater's rows -> {classNames:[...], classHints:{name:hint}}.
+    // A row with a blank class name is skipped; a blank hint sends the class
+    // without one. Used for both the Detect and Custom class lists.
+    function collectVlmClasses(containerId) {
+        const rows = document.querySelectorAll('#' + containerId + ' .vlm-class-row');
+        const classNames = [];
+        const classHints = {};
+        rows.forEach(function(row) {
+            const name = row.querySelector('.vlm-class-name').value.trim();
+            if (!name) return;
+            classNames.push(name);
+            const hint = row.querySelector('.vlm-class-hint').value.trim();
+            if (hint) classHints[name] = hint;
+        });
+        return { classNames: classNames, classHints: classHints };
+    }
+
+    // Populate a repeater (Detect or Custom) from a config's class_names +
+    // class_hints. Hints are matched to classes case-insensitively (VIS keys them
+    // that way). Inverse of collectVlmClasses().
+    function populateVlmClassRows(containerId, classNames, classHints) {
+        const hints = classHints || {};
+        const lowerHints = {};
+        for (const k of Object.keys(hints)) {
+            lowerHints[k.toLowerCase()] = hints[k];
+        }
+        for (const cn of (classNames || [])) {
+            addVlmClassRow(containerId, cn, lowerHints[cn.toLowerCase()] || '');
+        }
+    }
+
+    function toggleVlmAdvanced() {
+        const adv = document.getElementById('cfg-vlm-advanced');
+        const caret = document.getElementById('cfg-vlm-advanced-caret');
+        const show = adv.style.display === 'none';
+        adv.style.display = show ? 'block' : 'none';
+        caret.innerHTML = show ? '&#9662;' : '&#9656;';
+    }
+
+    // Custom-mode lint (VI-602): warn (non-blocking) when classes are set but
+    // neither prompt references {class_list}, so the classes won't be injected.
+    function updateVlmCustomLint() {
+        const warn = document.getElementById('vlm-custom-classlist-warning');
+        if (!warn) return;
+        const hasClasses = collectVlmClasses('cfg-vlm-custom-classes').classNames.length > 0;
+        const sys = document.getElementById('cfg-vlm-system-prompt').value;
+        const usr = document.getElementById('cfg-vlm-user-prompt').value;
+        const hasPlaceholder = sys.indexOf('{class_list}') !== -1 || usr.indexOf('{class_list}') !== -1;
+        warn.style.display = (hasClasses && !hasPlaceholder) ? 'block' : 'none';
+    }
+
     function buildConfigJson() {
         let appName, streamName;
         if (isNewStream()) {
@@ -2693,20 +3068,67 @@
         }
 
         if (detectorType === 'vlm') {
-            const vlmClassNames = document.getElementById('cfg-vlm-class-names').value
-                .split(',')
-                .map(s => s.trim())
-                .filter(s => s.length > 0);
-
-            config.vlm_analysis = {
+            // Shared connection + advanced fields (every mode). Class/prompt keys
+            // are added per active mode below and ONLY for that mode, so VIS's
+            // field-presence mode inference stays unambiguous (mode-bleed guard).
+            const vlm = {
                 model_name: document.getElementById('cfg-vlm-model-name').value || null,
                 endpoint_url: document.getElementById('cfg-vlm-endpoint-url').value || null,
                 api_key: document.getElementById('cfg-vlm-api-key').value || null,
-                class_names: vlmClassNames,
                 request_timeout_seconds: readNumericInputValue('cfg-vlm-request-timeout', false),
-                // temperature: readNumericInputValue('cfg-vlm-temperature', false),
-                // max_tokens: readNumericInputValue('cfg-vlm-max-tokens', true),
-                // max_concurrent_requests: readNumericInputValue('cfg-vlm-max-concurrent-requests', true),
+                temperature: readNumericInputValue('cfg-vlm-temperature', false),
+                max_tokens: readNumericInputValue('cfg-vlm-max-tokens', true),
+                // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
+            };
+            const vlmMode = getVlmMode();
+            if (vlmMode === 'detect') {
+                // Per-class repeater -> class_names (+ class_hints for rows with a note).
+                const detect = collectVlmClasses('cfg-vlm-detect-classes');
+                vlm.class_names = detect.classNames;
+                if (Object.keys(detect.classHints).length > 0) {
+                    vlm.class_hints = detect.classHints;
+                }
+            } else if (vlmMode === 'custom') {
+                // Operator prompts win; classes optional (feed {class_list}).
+                // Prompts: send absent (null), never empty-string — VIS rejects ""
+                // and inherits the built-in default only on field-absence.
+                vlm.system_prompt = document.getElementById('cfg-vlm-system-prompt').value.trim() || null;
+                vlm.user_prompt = document.getElementById('cfg-vlm-user-prompt').value.trim() || null;
+                // Same per-class repeater as Detect: class_names (+ class_hints).
+                const customCls = collectVlmClasses('cfg-vlm-custom-classes');
+                if (customCls.classNames.length > 0) {
+                    vlm.class_names = customCls.classNames;
+                    if (Object.keys(customCls.classHints).length > 0) {
+                        vlm.class_hints = customCls.classHints;
+                    }
+                }
+                // Output schema by kind (VI-600 / VI-614): Free-form -> omit (VIS
+                // leaves output free once a custom user_prompt is set); Per-class
+                // verdicts -> the live default class schema; Custom -> the built
+                // Fields / parsed Raw schema. null => omit the key.
+                const responseSchema = window.vlmOutputSchemaForSave
+                    ? window.vlmOutputSchemaForSave()
+                    : collectVlmSchema();
+                if (responseSchema) {
+                    vlm.response_schema = responseSchema;
+                }
+            }
+            // Describe mode: no class/prompt keys — VIS uses the descriptive default.
+            config.vlm_analysis = vlm;
+        }
+
+        if (detectorType === 'synthetic') {
+            // Field names mirror the VIS WSSyntheticConfigMessage contract; blank => null
+            // so the global synthetic_analysis defaults (video-intelligence.json) apply.
+            const useTlsRaw = document.getElementById('cfg-synthetic-use-tls').value;
+            const thresholdRaw = document.getElementById('cfg-synthetic-classification-threshold').value.trim();
+            config.synthetic_analysis = {
+                endpoint: document.getElementById('cfg-synthetic-endpoint').value.trim() || null,
+                // '' => auto-detect (null); 'true'/'false' => explicit override.
+                use_tls: useTlsRaw === '' ? null : useTlsRaw === 'true',
+                api_key: document.getElementById('cfg-synthetic-api-key').value || null,
+                function_id: document.getElementById('cfg-synthetic-function-id').value.trim() || null,
+                classification_threshold: thresholdRaw === '' ? null : parseFloat(thresholdRaw),
             };
         }
 
@@ -2873,6 +3295,39 @@
                 const imagesPerRequest = Math.round(config.inference_fps * config.duration * 100) / 100;
                 errors.push('Duration × Inference FPS must not exceed ' + VLM_MAX_IMAGES_PER_REQUEST + ' for VLM detection (' + config.inference_fps + ' fps × ' + config.duration + 's = ' + imagesPerRequest + ' images per request; the VLM endpoint allows ' + VLM_MAX_IMAGES_PER_REQUEST + ' per prompt).');
             }
+            // Custom mode (operator prompt keys present) requires a non-empty user prompt.
+            const inVlmCustomMode = ('user_prompt' in va) || ('system_prompt' in va) || ('response_schema' in va);
+            if (inVlmCustomMode && !(va.user_prompt && String(va.user_prompt).trim())) {
+                errors.push('User Prompt is required for VLM Custom mode.');
+            }
+            // Output Schema: only Raw JSON can be invalid (the Fields builder always
+            // emits valid JSON). One shared validator also refreshes the inline error.
+            if (inVlmCustomMode) {
+                const schemaError = validateVlmSchema();
+                if (schemaError) {
+                    errors.push('VLM Output Schema is not valid JSON: ' + schemaError);
+                }
+            }
+        }
+
+        if (config.detector_type === 'synthetic') {
+            const sy = config.synthetic_analysis || {};
+            // Effective endpoint (the field shows stream value layered over the json default),
+            // so an empty endpoint here means neither the stream nor the global default set one.
+            if (!sy.endpoint) {
+                errors.push('Synthetic endpoint is required (gRPC host:port). Set it here or as a global synthetic_analysis.endpoint default in video-intelligence.json.');
+            } else if (/^https?:\/\//i.test(sy.endpoint)) {
+                errors.push('Synthetic endpoint must be a gRPC host:port (e.g. svd.docker:8001), not an http(s) URL.');
+            }
+            if (sy.classification_threshold !== null && sy.classification_threshold !== undefined
+                && (!Number.isFinite(sy.classification_threshold) || sy.classification_threshold < 0 || sy.classification_threshold > 1)) {
+                errors.push('Synthetic classification threshold must be between 0.0 and 1.0.');
+            }
+            if (!Number.isFinite(config.duration) || config.duration <= 0) {
+                errors.push('Duration (window length, seconds) must be greater than 0 for synthetic detection.');
+            } else if (config.duration > 30) {
+                errors.push('Duration (window length, seconds) must be between 0 and 30 for synthetic detection.');
+            }
         }
 
         const listeners = config.vif_event_listeners || {};
@@ -2992,11 +3447,19 @@
         document.getElementById('cfg-vlm-model-name').value = '';
         document.getElementById('cfg-vlm-endpoint-url').value = '';
         document.getElementById('cfg-vlm-api-key').value = '';
-        document.getElementById('cfg-vlm-class-names').value = '';
+        document.getElementById('cfg-vlm-detect-classes').innerHTML = '';
+        document.getElementById('cfg-vlm-custom-classes').innerHTML = '';
+        document.getElementById('cfg-vlm-system-prompt').value = '';
+        document.getElementById('cfg-vlm-user-prompt').value = '';
+        resetVlmSchemaBuilder();
         document.getElementById('cfg-vlm-request-timeout').value = '';
-        // document.getElementById('cfg-vlm-temperature').value = '';
-        // document.getElementById('cfg-vlm-max-tokens').value = '';
-        // document.getElementById('cfg-vlm-max-concurrent-requests').value = '';
+        document.getElementById('cfg-vlm-temperature').value = '';
+        document.getElementById('cfg-vlm-max-tokens').value = '';
+        document.getElementById('cfg-vlm-advanced').style.display = 'none';
+        document.getElementById('cfg-vlm-advanced-caret').innerHTML = '&#9656;';
+        document.getElementById('vlm-custom-classlist-warning').style.display = 'none';
+        setVlmMode('detect');
+        // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
         suppressDirtyTracking = false;
     }
 
@@ -3028,6 +3491,9 @@
             document.getElementById('cfg-use-transcoder').checked = true;
             document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
         }
+        // Baseline for applyDetectorTypeTranscoderSuggestion: a manual toggle later makes
+        // checked !== dataset.suggested, which tells the suggestion to back off.
+        document.getElementById('cfg-use-transcoder').dataset.suggested = String(document.getElementById('cfg-use-transcoder').checked);
         if (config.frame_grab_interval !== undefined) {
             document.getElementById('cfg-frame-grab').value = config.frame_grab_interval;
         }
@@ -3174,21 +3640,78 @@
             if (va.api_key) {
                 document.getElementById('cfg-vlm-api-key').value = va.api_key;
             }
-            if (va.class_names) {
-                document.getElementById('cfg-vlm-class-names').value = va.class_names.join(', ');
-            }
             if (va.request_timeout_seconds !== undefined) {
                 document.getElementById('cfg-vlm-request-timeout').value = va.request_timeout_seconds;
             }
-            // if (va.temperature !== undefined) {
-            //     document.getElementById('cfg-vlm-temperature').value = va.temperature;
-            // }
-            // if (va.max_tokens !== undefined) {
-            //     document.getElementById('cfg-vlm-max-tokens').value = va.max_tokens;
-            // }
-            // if (va.max_concurrent_requests !== undefined) {
-            //     document.getElementById('cfg-vlm-max-concurrent-requests').value = va.max_concurrent_requests;
-            // }
+            if (va.temperature !== undefined) {
+                document.getElementById('cfg-vlm-temperature').value = va.temperature;
+            }
+            if (va.max_tokens !== undefined) {
+                document.getElementById('cfg-vlm-max-tokens').value = va.max_tokens;
+            }
+            // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
+
+            // Infer the mode from which fields are present (mirrors VIS's
+            // field-presence inference): operator prompts / schema -> Custom;
+            // else a class list -> Detect; else Describe.
+            const hasPrompt = !!(va.system_prompt || va.user_prompt || va.response_schema);
+            const hasClasses = Array.isArray(va.class_names) && va.class_names.length > 0;
+            let vlmMode = 'describe';
+            if (hasPrompt) {
+                vlmMode = 'custom';
+            } else if (hasClasses) {
+                vlmMode = 'detect';
+            }
+            if (vlmMode === 'custom') {
+                if (va.system_prompt) {
+                    document.getElementById('cfg-vlm-system-prompt').value = va.system_prompt;
+                }
+                if (va.user_prompt) {
+                    document.getElementById('cfg-vlm-user-prompt').value = va.user_prompt;
+                }
+                if (hasClasses) {
+                    populateVlmClassRows('cfg-vlm-custom-classes', va.class_names, va.class_hints);
+                }
+                // Pick the Output Schema kind from the loaded schema: absent -> Free-form,
+                // the live default class schema -> Per-class verdicts, anything else ->
+                // Custom (loaded into the Fields/Raw editor).
+                if (window.applyVlmOutputSchema) {
+                    window.applyVlmOutputSchema(va.response_schema);
+                } else if (va.response_schema) {
+                    loadVlmSchema(va.response_schema);
+                }
+            } else if (vlmMode === 'detect') {
+                populateVlmClassRows('cfg-vlm-detect-classes', va.class_names, va.class_hints);
+            }
+            setVlmMode(vlmMode);
+        }
+
+        // Synthetic fields show the effective config: the stream's synthetic_analysis
+        // layered over the global synthetic_analysis defaults (explicit nulls don't
+        // shadow a lower layer). Saving writes the effective values into the stream's
+        // own synthetic_analysis block; the global defaults are never edited here.
+        {
+            const sy = {};
+            for (const layer of [defaultConfig && defaultConfig.synthetic_analysis, config.synthetic_analysis]) {
+                for (const [key, value] of Object.entries(layer || {})) {
+                    if (value !== null && value !== undefined) sy[key] = value;
+                }
+            }
+            if (sy.endpoint) {
+                document.getElementById('cfg-synthetic-endpoint').value = sy.endpoint;
+            }
+            if (typeof sy.use_tls === 'boolean') {
+                document.getElementById('cfg-synthetic-use-tls').value = String(sy.use_tls);
+            }
+            if (sy.api_key) {
+                document.getElementById('cfg-synthetic-api-key').value = sy.api_key;
+            }
+            if (sy.function_id) {
+                document.getElementById('cfg-synthetic-function-id').value = sy.function_id;
+            }
+            if (sy.classification_threshold !== undefined) {
+                document.getElementById('cfg-synthetic-classification-threshold').value = sy.classification_threshold;
+            }
         }
 
         // Event listeners
@@ -3595,6 +4118,16 @@
         return select ? String(select.value || '').trim().toLowerCase() : '';
     }
 
+    // Shows the per-detector inline help span `${prefix}-${detectorType}` and hides the
+    // siblings. Keeps each field's help text detector-specific instead of one paragraph
+    // that lists every detector. Missing spans (e.g. no object Duration help) are skipped.
+    function showDetectorHelp(prefix, detectorType, types) {
+        types.forEach(function(t) {
+            const el = document.getElementById(prefix + '-' + t);
+            if (el) el.style.display = (t === detectorType) ? 'inline' : 'none';
+        });
+    }
+
     function getAllowedEventMethodValues(className, detectorType) {
         const shortName = resolveClassName(className || '');
         const normalizedDetectorType = String(detectorType || getCurrentDetectorType() || '').trim().toLowerCase();
@@ -3603,7 +4136,7 @@
             return option.value;
         });
 
-        const detectorSpecificMethods = (normalizedDetectorType === 'scene' || normalizedDetectorType === 'vlm')
+        const detectorSpecificMethods = (normalizedDetectorType === 'scene' || normalizedDetectorType === 'vlm' || normalizedDetectorType === 'synthetic')
             ? metadata.scene_methods
             : normalizedDetectorType === 'object'
                 ? metadata.object_methods
@@ -4214,18 +4747,36 @@
         document.getElementById('object-analysis-section').style.display = detectorType === 'object' ? 'block' : 'none';
         document.getElementById('scene-analysis-section').style.display = detectorType === 'scene' ? 'block' : 'none';
         document.getElementById('vlm-analysis-section').style.display = detectorType === 'vlm' ? 'block' : 'none';
+        // Keep the VLM mode panels in sync with the selected mode whenever the
+        // section becomes visible.
+        if (detectorType === 'vlm') toggleVlmMode();
+        document.getElementById('synthetic-analysis-section').style.display = detectorType === 'synthetic' ? 'block' : 'none';
+        // Detector Type help is per-detector (the field sits in the shared top section).
+        showDetectorHelp('detector-help', detectorType, ['object', 'scene', 'vlm', 'synthetic']);
         document.getElementById('cfg-rollup-batch-interval-group').style.display = 'flex';
-        document.getElementById('cfg-duration-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
+        // Synthetic windows are keyframe-aligned by duration, like scene/VLM clips.
+        document.getElementById('cfg-duration-group').style.display = (detectorType === 'scene' || detectorType === 'vlm' || detectorType === 'synthetic') ? 'flex' : 'none';
+        // Duration cap is detector-aware: a synthetic window is keyframe-aligned and
+        // often needs to exceed the source GOP, so allow up to 30s; scene/VLM stay
+        // capped at 5 (VLM's Duration x Inference-FPS <= 8 still applies on top).
+        var isSynthetic = (detectorType === 'synthetic');
+        FIELD_RULES['cfg-duration'].max = isSynthetic ? 30 : 5;
+        applyNumericRuleToInput(document.getElementById('cfg-duration'), FIELD_RULES['cfg-duration']);
+        // Duration help is per-detector (scene/vlm/synthetic; object hides the whole group).
+        showDetectorHelp('duration-help', detectorType, ['scene', 'vlm', 'synthetic']);
         document.getElementById('cfg-auto-frame-throttle-group').style.display = (detectorType === 'object' || detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
         document.getElementById('cfg-catch-up-to-live-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
         document.getElementById('cfg-catch-up-max-behind-group').style.display = (detectorType === 'scene' || detectorType === 'vlm') ? 'flex' : 'none';
-        document.getElementById('cfg-inference-fps-group').style.display = useTranscoder ? 'flex' : 'none';
-        document.getElementById('cfg-frame-grab-group').style.display = useTranscoder ? 'none' : 'flex';
+        // Synthetic taps the source H.264 directly (no transcode, no JPEG sampling or
+        // keyframe thumbnailing), so the inference-FPS and frame-grab controls don't apply.
+        document.getElementById('cfg-inference-fps-group').style.display = (useTranscoder && detectorType !== 'synthetic') ? 'flex' : 'none';
+        document.getElementById('cfg-frame-grab-group').style.display = (!useTranscoder && detectorType !== 'synthetic') ? 'flex' : 'none';
         if (activeListenerName && eventListenersData[activeListenerName]) {
             const current = eventListenersData[activeListenerName];
             updateEventMethodOptions(current.class_name, current.methods);
             updatePropertiesVisibility();
         }
+        updateSyntheticOverlayWarning();
         detectorTypeSelect.dataset.previousValue = detectorType;
     }
 
@@ -4247,6 +4798,7 @@
         }
 
         applyDetectorTypeInferenceFpsSuggestion(nextDetectorType);
+        applyDetectorTypeTranscoderSuggestion(nextDetectorType);
         toggleDetectorSection();
         markDirty();
     });
@@ -4444,6 +4996,10 @@
     var vlmOptionEl = document.querySelector('#cfg-detector-type option[value="vlm"]');
     var vlmEnabled = new URLSearchParams(window.location.search).get('vlm') === 'true';
     if (!vlmEnabled) vlmOptionEl.style.display = 'none';
+
+    var syntheticOptionEl = document.querySelector('#cfg-detector-type option[value="synthetic"]');
+    var syntheticEnabled = new URLSearchParams(window.location.search).get('synthetic') === 'true';
+    if (!syntheticEnabled) syntheticOptionEl.style.display = 'none';
 
     var tilingEnableGroupEl = document.getElementById('tiling-enable-group');
     var tilingUiEnabled = new URLSearchParams(window.location.search).get('tiling') === 'true';

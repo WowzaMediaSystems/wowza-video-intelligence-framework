@@ -43,6 +43,17 @@ These defaults are still hardcoded in [stream-config.html](/docker/manager/ui/st
 - `Application` default value/fallback: `live`
 - `Detector Type` default: `object`
 
+### VLM Analysis Mode (UI)
+
+The VLM section (shown for `Detector Type = vlm`, behind `?vlm=true`) is mode-driven — **Detect / Describe / Custom**. The mode is a UI construct: the VI service infers behavior from which `vlm_analysis` keys are set, so `buildConfigJson()` serializes **only the active mode's** class/prompt keys (the mode-bleed guard).
+
+- **Mode default**: `Detect`. `populateForm()` infers the mode from a loaded config — operator prompts or `response_schema` → Custom; else a class list → Detect; else Describe.
+- **Detect**: a per-class repeater (one row per class + optional hint) → serializes `class_names` (+ `class_hints` for rows with a hint).
+- **Describe**: no class/prompt fields → none serialized.
+- **Custom**: `system_prompt` / `user_prompt` (required) / an optional **per-class repeater** (the same one Detect uses — one row per class + optional hint → `class_names` (+ `class_hints`), feeding `{class_list}` in your prompts) / an **Output Schema**. Output Schema is a 3-way **kind** selector: **Free-form** (default — no schema sent; paired with the VIS rule that no longer auto-imposes the class schema once a custom `user_prompt` is set, output stays free even when classes are listed), **Per-class verdicts** (posts the built-in class schema sourced **live** from `defaultConfig.vlm_defaults.detect.response_schema` — relayed by VIS at `GET /vlm/defaults`, never mirrored — so VIS enforces `{class_name, reasoning}`), and **Custom schema** (reveals the `vlm-schema-builder.js` editor). The Custom editor has two losslessly-converting sub-modes: a guided **Fields** builder (types *string / number / integer / boolean / string[] / enum* and *object / object[]* with recursive nesting; generates `response_schema` for you) and a **Raw JSON** editor (constraints, `$ref`, `oneOf`, non-string enums). On load, `applyVlmOutputSchema()` picks the kind (the live default schema → Per-class verdicts; anything else → Custom), and `loadVlmSchema()` decomposes it into Fields when representable, else Raw JSON — so no schema is ever dropped.
+- Shared connection fields (Endpoint, API Key, Request Timeout; hidden Model Name) sit above the selector. `Temperature` / `Max Tokens` live under an **Advanced** disclosure. `max_concurrent_requests` is JSON-only (set it in `Default.json`).
+- UI-owned validation: Custom mode requires a non-empty `user_prompt`; the **Raw JSON** schema (Custom kind only) must be valid JSON (the Fields builder always emits valid JSON); a non-blocking lint warns when classes are set but neither prompt references `{class_list}`.
+
 ### Event Listener Defaults
 
 - new listener `methods`: `disabled`

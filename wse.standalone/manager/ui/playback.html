@@ -531,6 +531,18 @@
       white-space: normal;
     }
 
+    .detection-data {
+      font-size: 0.9em;
+      color: #222;
+      margin: 2px 0 4px 0;
+      word-break: break-word;
+    }
+
+    .detection-data-key {
+      font-weight: 700;
+      color: #555;
+    }
+
     .hidden { display: none; }
 
 /*    .navbar-logo { height: 44px; width: 44px; float: left; }
@@ -770,10 +782,15 @@
     // PDT anchor state
     var pdtAnchorIso = null;
     var pdtAnchorMediaTime = null;
+    var recentEventGuids = [];
 
     var urlParams = new URLSearchParams(window.location.search);
-    var srcParam = urlParams.get('src') || vifPlaybackUrl;
-    var minScoreParam = urlParams.get('minScore');
+	var hashUrl = decodeURIComponent(window.location.hash.slice(1));
+	var hashParamsStr = hashUrl.split('?')[1];
+	var hashParams = new URLSearchParams(hashParamsStr);
+
+	var srcParam = urlParams.get('src') || hashParams.get('src');
+    var minScoreParam = urlParams.get('minScore') || hashParams.get('minScore');
 
     if (srcParam) elements.playerUrl.value = srcParam;
 
@@ -955,22 +972,34 @@
       try {
         const parsed = typeof data === 'string' ? JSON.parse(data) : data;
 
+        // Normalize a raw detection (object / scene / VLM) to the renderer's shape.
+        // confidence may be a rolled-up object ({avg}), a plain number, or absent:
+        // VLM windows carry no confidence (the server omits the null key), so the
+        // .avg access must be guarded or it throws and the whole event is dropped.
+        // A custom-schema VLM window carries only its structured `data` object (no
+        // meaningful class_name); surface that via `data` so it renders its fields
+        // instead of a generic placeholder label.
+        const normalize = (det) => {
+          let confidence = null;
+          if (det.confidence && typeof det.confidence.avg === 'number') confidence = det.confidence.avg;
+          else if (typeof det.confidence === 'number') confidence = det.confidence;
+          return {
+            label: det.class_name ?? det.label ?? null,
+            confidence,
+            reasoning: det.reasoning || null,
+            data: (det.data && typeof det.data === 'object') ? det.data : null,
+          };
+        };
+
         let detections = [];
         if (parsed.vif_data && Array.isArray(parsed.vif_data)) {
           parsed.vif_data.forEach((viEntry) => {
             if (viEntry.detections && viEntry.detections.length > 0) {
-              viEntry.detections.forEach(det => {
-                const confidence =
-                  (typeof det.confidence.avg === 'number') ? det.confidence.avg :
-                  (typeof det.confidence === 'number') ? det.confidence :
-                  null;
-
-                detections.push({ label: det.class_name, confidence, reasoning: det.reasoning || null });
-              });
+              viEntry.detections.forEach(det => detections.push(normalize(det)));
             }
           });
         } else if (parsed.detections && Array.isArray(parsed.detections)) {
-          detections = parsed.detections;
+          detections = parsed.detections.map(normalize);
         } else {
           return;
         }
@@ -984,10 +1013,23 @@
 
         const isVlm = eventType === 'vlm-detection';
         const labels = detections.map(d => {
-          const confidenceClass = d.confidence !== null ? getConfidenceClass(d.confidence) : '';
-          const confidenceStr = d.confidence !== null ? ` (${Number(d.confidence).toFixed(2)})` : '';
+          // Custom-schema VLM output: render its structured fields directly — there
+          // is no class to badge and a placeholder label reads as a bogus detection.
+          if (d.data) {
+            const rows = Object.keys(d.data).map(k => {
+              const v = d.data[k];
+              const valStr = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
+              return `<div><span class="detection-data-key">${escapeHtml(k)}:</span> ${escapeHtml(valStr)}</div>`;
+            }).join('');
+            return `<div class="detection-data">${rows}</div>`;
+          }
+          // confidence is absent for VLM (use != null to catch both null and the
+          // omitted/undefined key, else Number(undefined) renders "(NaN)").
+          const confidenceClass = d.confidence != null ? getConfidenceClass(d.confidence) : '';
+          const confidenceStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
           const reasoningStr = isVlm && d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
-          return `<span class="detection-label ${confidenceClass}">${escapeHtml(d.label)}${confidenceStr}</span>${reasoningStr}`;
+          const labelStr = d.label != null ? escapeHtml(d.label) : '';
+          return `<span class="detection-label ${confidenceClass}">${labelStr}${confidenceStr}</span>${reasoningStr}`;
         }).join('');
 
         const content = `
@@ -1246,10 +1288,6 @@
           console.error('Error clearing video element:', e);
         }
       }
-
-      if (shouldClearPlaybackUrl && typeof window.vifPlaybackUrl !== 'undefined') {
-        window.vifPlaybackUrl = '';
-      }
     }
 
     window.__vifPlaybackDestroy = destroyPlaybackSession;
@@ -1323,8 +1361,17 @@
           updatePdtAnchorFromCue({ value: v, startTime: cue.startTime });
           console.log('[pdt] anchor set', { pdtAnchorIso, pdtAnchorMediaTime });
         } else {
-          console.log(`[player] ID3 event: ${eventType}`, eventData);
-        }
+			try {
+			const parsed = typeof eventData === 'string' ? JSON.parse(eventData) : eventData;
+			const guid = parsed && parsed.guid;
+			if (guid && recentEventGuids.includes(guid)) return;
+			if (guid) {
+				recentEventGuids.push(guid);
+				if (recentEventGuids.length > 25) recentEventGuids.shift();
+			}
+			} catch (e) { /* non-JSON data — no dedup */ }
+	        console.log(`[player] ID3 event: ${eventType}`, eventData);
+		}
 
         const timestamp = formatTimestampForDisplay(cue.startTime, video.currentTime);
         displayEvent(eventType, eventData, timestamp);

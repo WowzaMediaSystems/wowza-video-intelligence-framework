@@ -107,5 +107,29 @@
         "model_name": "Qwen/Qwen3-VL-4B-Instruct-FP8",
         "endpoint_url": "http://vlm.docker:8000/v1"
         //"api_key": "your-api-key" //only needed for authenticated endpoints; the bundled sidecar needs none
+        //
+        // Per-stream VLM config is mode-driven (Detect / Describe / Custom); the mode is
+        // inferred from which fields are set (see README "VLM Analysis Modes"):
+        //  - Detect (default): set "class_names" (+ optional render-only "class_hints"):
+        //      "class_names": ["fire", "smoke"],
+        //      "class_hints": { "fire": "visible open flame, not red lighting" }
+        //  - Describe: set neither class_names nor prompts -> free-form description.
+        //  - Custom: set "user_prompt" (required) + optional "system_prompt" /
+        //      "class_names" / "response_schema". Prompts support {class_list},
+        //      {frame_count} and {duration_seconds}:
+        //      "user_prompt": "Read the gauge in {frame_count} frame(s) and report the value.",
+        //      "response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
+    },
+    "synthetic_analysis" : {
+        // NVIDIA Maxine Synthetic Video Detector (SVD) NIM — opt-in, bring-your-own
+        // gRPC endpoint (host:port, NOT an http URL). No sidecar is bundled (the NIM
+        // is access-gated). Point endpoint at your self-hosted NIM (e.g. "svd.host:8001",
+        // which auto-detects plaintext) or the NVCF hosted dev endpoint shown below.
+        // Transport security is auto-detected from the endpoint port (:443 => TLS via the
+        // system trust store); set "use_tls": true|false only to override the heuristic.
+        "endpoint": "grpc.nvcf.nvidia.com:443",
+        //"api_key": "nvapi-...",           // NVCF: sent as Authorization: Bearer; self-hosted: usually none
+        //"function_id": "847b6e53-0133-452d-ab85-d7acf3ace723",  // NVCF SVD function id
+        "classification_threshold": 0.3     // verdict "synthetic" when synthetic_probability > threshold
     }
 }

@@ -8,7 +8,6 @@
         }
 
         jsonData = null;
-        vifPlaybackUrl = '';
         var credentials = `${username}:${password}`;
         var encodedCredentials = btoa(credentials);
         var lastStreamCount=0;
@@ -335,12 +334,13 @@
                             </td>
                             <td class="align-right">
                                 <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div><div title="Inference fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
-                                <div class="vif-row" id="${id}-gopContainer" style="${stream.use_transcoder ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
-                                <div class="vif-controls align-right" id="${id}-skipSliderContainer" style="${stream.use_transcoder ? '' : 'display:none;'}">
+                                <div class="vif-row" id="${id}-gopContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
+                                <div class="vif-controls align-right" id="${id}-skipSliderContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? '' : 'display:none;'}">
                                     Inference fps<input type="range" class="slider" id="${id}-skipSlider" min="1" max="${stream.frame_rate}" value="${stream.inference_fps}"><span id="${id}-skipValue">${stream.inference_fps}</span>
                                 </div>
                                 <div class="align-right" id="${id}-vihost" style="font-style:italic"></div>
                                 <div id="${id}-sts"></div>
+                                <div id="${id}-vlm-health"></div>
                             </td>
                             <td align="right"><div id="${id}-ping"></div></td>
                             <td align="right"><div id="${id}-ttl-proc"></div></td>
@@ -379,6 +379,10 @@
 
                     const perf = stream.performance;
                     const id = stream.app_name+"-"+stream.stream_name;
+                    // Synthetic taps every source packet — inference_fps does nothing, so hide the
+                    // inference-fps slider and the "/Nfps" suffix and show the keyframe interval
+                    // instead (the GOP is what governs a synthetic window's cadence).
+                    const isSynthetic = stream.detector_type === 'synthetic';
 
                     vif_type = document.getElementById(id+"-type");
                     const detectorTypeIconPath = getDetectorTypeIconPath(stream.detector_type);
@@ -415,7 +419,7 @@
                     fps = document.getElementById(id+"-fps");
                     fps.textContent = `${stream.frame_rate}fps`
                     const gopContainer = document.getElementById(id+"-gopContainer");
-                    if (gopContainer) gopContainer.style.display = stream.use_transcoder ? 'none' : '';
+                    if (gopContainer) gopContainer.style.display = (stream.use_transcoder && !isSynthetic) ? 'none' : '';
                     const gopEl = document.getElementById(id+"-gop");
                     if (gopEl) {
                         gopEl.textContent = stream.gop_size != null ? `Key Frame Interval:${stream.gop_size}` : '';
@@ -429,7 +433,7 @@
                         }
                     }
                     const skipSliderContainer = document.getElementById(id+"-skipSliderContainer");
-                    if (skipSliderContainer) skipSliderContainer.style.display = stream.use_transcoder ? '' : 'none';
+                    if (skipSliderContainer) skipSliderContainer.style.display = (stream.use_transcoder && !isSynthetic) ? '' : 'none';
                     slider = document.getElementById(id+"-skipSlider");
                     slider.max = stream.frame_rate;
                     if (!isSkipSliderInteracting(stream.app_name, stream.stream_name)) {
@@ -438,13 +442,26 @@
                     }
                     dfps = document.getElementById(id+"-dfps");
                     dfps.textContent = `/${stream.inference_fps}fps`;
-                    dfps.style.display = stream.use_transcoder ? '' : 'none';
+                    dfps.style.display = (stream.use_transcoder && !isSynthetic) ? '' : 'none';
                     equ = document.getElementById(id+"-equ");
                     equ.textContent = `${Number(1/stream.frame_rate*1000).toFixed(0)}ms`
 
                     sts = document.getElementById(id+"-sts");
                     sts.textContent = `${stream.status}`;
                     sts.className = stream.status.toLowerCase() == 'connected' ? 'text-good' : stream.status.toLowerCase() == 'disabled' || stream.status.toLowerCase() == 'error' ? 'text-alert' : 'text-warn';
+
+                    // VI-605: VLM endpoint health is separate from the VIS connection status above —
+                    // the WebSocket link stays "connected" while the upstream VLM endpoint is down, so
+                    // surface "AI offline" distinctly. vlm_degraded is omitted (undefined) for non-VLM
+                    // streams and before the first VLM result, so the indicator only shows on an outage.
+                    vlmHealth = document.getElementById(id+"-vlm-health");
+                    if (stream.vlm_degraded === true) {
+                        vlmHealth.textContent = "AI offline — VLM endpoint unreachable";
+                        vlmHealth.className = "text-alert";
+                    } else {
+                        vlmHealth.textContent = "";
+                        vlmHealth.className = "";
+                    }
 
                     const url = new URL(stream.vi_service_url);
                     viHost = document.getElementById(id+"-vihost");
@@ -505,12 +522,13 @@
             {
                 stream_name = stream_name + "-vi";
             }
-            thumbnail_link.href = `javascript:loadPlayerPage('${hostname}','${stream.app_name}','${stream_name}')`;
+            const extraParams = stream.detector_type == 'synthetic' ? `&minScore=0.4` : '';
+            thumbnail_link.href = `javascript:loadPlayerPage('${hostname}','${stream.app_name}','${stream_name}','${extraParams}')`;
         }
 
         function getDetectorTypeIconPath(detectorType) {
             const normalizedType = String(detectorType || '').toLowerCase();
-            if (normalizedType === 'object' || normalizedType === 'scene' || normalizedType === 'vlm') {
+            if (normalizedType === 'object' || normalizedType === 'scene' || normalizedType === 'vlm' || normalizedType === 'synthetic') {
                 return `${pathPrefix}${normalizedType}.png`;
             }
             return `${pathPrefix}unknown.png`;
@@ -590,9 +608,19 @@
                         frms = perf.object_frames_detected;
                         frms_ttl = perf.video_frames_ttl;
                     }
-                    else {
+                    else if(stream.detector_type == "scene") {
                         v = Math.min( (perf.scene_frames_detected / perf.video_frames_ttl)*100.0,100.0);
                         frms = perf.scene_frames_detected;
+                        frms_ttl = perf.video_frames_ttl;
+                    }
+					else if(stream.detector_type == "vlm") {
+                        v = Math.min( (perf.vlm_frames_detected / perf.video_frames_ttl)*100.0,100.0);
+                        frms = perf.vlm_frames_detected;
+                        frms_ttl = perf.video_frames_ttl;
+                    }
+                    else if(stream.detector_type == "synthetic") {
+                        v = Math.min( (perf.synthetic_frames_detected / perf.video_frames_ttl)*100.0,100.0);
+                        frms = perf.synthetic_frames_detected;
                         frms_ttl = perf.video_frames_ttl;
                     }
                 }
@@ -830,10 +858,10 @@
             }
         }
 
-        function loadPlayerPage(host, appName, streamName)
+        function loadPlayerPage(host, appName, streamName, extraParams)
         {
-            vifPlaybackUrl = `${protocol}//${host}/${appName}/${streamName}/playlist.m3u8`;
-            loadAjaxPluginContent("server","vif", "playback.html","");
+            const playbackUrl = `${protocol}//${host}/${appName}/${streamName}/playlist.m3u8`;
+            loadAjaxPluginContent("server","vif", `playback.html?src=${encodeURIComponent(playbackUrl)}${extraParams || ''}`, "");
         }
 
         function securityCheck()

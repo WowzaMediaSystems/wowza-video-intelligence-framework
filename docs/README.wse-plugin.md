@@ -166,8 +166,17 @@ Update the Default.json `vi_service_url` and `vi_service_api_key` to point to th
 | inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
 
-#### VLM free-form analysis
-When a VLM analysis window has no `class_names` (a free-form prompt) — or VIS returns output that can't be parsed as structured results — event listeners receive a single detection with `class_name` set to `description` and the full analysis text in `reasoning`, instead of an empty detections list. Avoid configuring a real VLM class named `description`, as it would be indistinguishable from this synthetic class.
+#### VLM Analysis Modes (Detect / Describe / Custom)
+
+The standalone `detector_type="vlm"` analyzer issues **exactly one VLM request per analysis window**. The bundled vLLM sidecar runs without prefix caching, so each request re-runs the full vision-token prefill over the window's frames — adding classes to one shared prompt is cheap; fanning out per-class requests is not. The Stream Manager UI (behind `?vlm=true`) exposes three modes. The mode is a UI construct: the VI service infers behavior from *which fields the config sets*, so no mode discriminator is sent on the wire.
+
+- **Detect** (default) — set `class_names` (short words/phrases, open vocabulary) and the analyzer returns a per-class verdict, surfacing only the classes actually visible as `{class_name, reasoning}` detections. Optionally attach **`class_hints`** — a map of *class name → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). Hints are **optional** and **render-only**: each is inlined next to its class in the prompt at a cost of only a few prompt tokens, and they never change the result shape. In the UI, Detect is a per-class repeater — one row per class, each with an optional hint field.
+- **Describe** — set no `class_names` and no prompts. The analyzer returns a free-form written description of each window (see the fallback note below).
+- **Custom** (advanced) — supply your own `user_prompt` (required) and optionally a `system_prompt`, a `class_names` list, and a custom `response_schema`. Both prompts support the placeholders `{class_list}` (the configured classes as a bullet list, with any hints inlined — injected only where the placeholder appears), `{frame_count}` (images in the window) and `{duration_seconds}` (window length in seconds). A custom `response_schema` flows through to the model verbatim for structured extraction (e.g. read a gauge value). In the UI the schema is built with a guided **Fields** editor — one row per output field (name, optional description, a *required* toggle, and a type) that generates the JSON Schema for you. Supported types are *string / number / integer / boolean / string[] / enum* (a string allowed-value list) and *object / object[]* (which open an indented sub-builder, recursively). A **Raw JSON** toggle remains for anything the builder can't express (numeric/string constraints, `$ref`, `oneOf`/`anyOf`, non-string enums, …). The two views convert losslessly: switching to Raw serializes the builder, and switching back imports the JSON when it decomposes into supported shapes — otherwise a complex schema simply stays in Raw JSON and is never dropped.
+
+**Custom-schema output.** When a custom `response_schema` produces JSON that is not the default `{"results":[{class_name, reasoning}]}` shape, the whole structure is attached to the detection's `data` field and flows — structured — through the webhook, ID3 and log sinks (no per-schema configuration). The on-screen overlay can't pick a field from an arbitrary schema, so it renders a generic `vlm` label for custom-schema windows. ID3 timed-metadata has practical size limits, so consume large custom schemas via the webhook or log sinks. Detect/Describe output is unchanged.
+
+**Free-form / fallback detection.** In Describe mode — or when the VI service returns output that can't be parsed as structured results (e.g. truncated) — event listeners receive a single detection with `class_name` set to `description` and the full analysis text in `reasoning`, instead of an empty detections list. Avoid configuring a real VLM class named `description`, as it would be indistinguishable from this synthetic class.
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
@@ -215,7 +224,37 @@ When a VLM analysis window has no `class_names` (a free-form prompt) — or VIS 
 | replace_video | false | Replaces original video with frame accurate overlays |
 | fade_step | 0 | How many frames it takes to fade objects out once they are no longer tracked. Set to 0 for high skip_frame values |
 
-
+## Logging
+By default logging is added to the standard Wowza Streaming log files `wowzastreamingengine_access.log` and `wowzastreamingengine_error.log`.  If you want to log just VIF events from WSE, you can create a new Logger with the name `VIFLogger`.  Add the logger to the `Loggers` section of the `log4j2-config.xml` file.
+```
+    <Loggers>
+		<Logger name="VIFLogger" level="info" additivity="false">
+			<AppenderRef ref="stdout"/>
+			<AppenderRef ref="serverAccess"/>
+			<AppenderRef ref="vifLogFile"/>
+		</Logger>
+    </Loggers>
+```
+with an appender that creates a rolling log file named `vif4j_access.log`:
+```
+    <Appenders>
+		<RollingFile name="vifLogFile" fileName="${sys:com.wowza.wms.ConfigHome}/logs/vif4j_access.log" filePattern="${sys:com.wowza.wms.ConfigHome}/logs/vif4j_access.%d{yyyy-MM-dd}.log">
+			<PatternLayout>
+				<Header>#Version: 1.0\n#Start-Date: %d{yyyy-MM-dd HH:mm:ss zzz}\n#Software: ${sys:wse-software-version}\n#Date: %d{yyyy-MM-dd}\n#Fields: date\ttime\ttz\tx-event\tx-category\tx-severity\tx-status\tx-comment%n</Header>
+				<Pattern>%d{yyyy-MM-dd}\t%d{HH:mm:ss}\t%d{z}\t%replace{%X{x-event}}{^$}{-}\t%replace{%X{x-category}}{^$}{-}\t%replace{%X{x-severity}}{^$}{-}\t%replace{%X{x-status}}{^$}{-}\t%replace{%X{x-comment}}{^$}{-}%n</Pattern>
+				<AlwaysWriteExceptions>false</AlwaysWriteExceptions>
+			</PatternLayout>
+			<Policies>
+				<TimeBasedTriggeringPolicy />
+			</Policies>
+			<DefaultRolloverStrategy>
+				<Delete basePath="${sys:com.wowza.wms.ConfigHome}/logs" maxDepth="1">
+					<IfLastModified age="5d" />
+				</Delete>
+			</DefaultRolloverStrategy>
+		</RollingFile>
+	</Appenders>
+```
 ## API
 ### API pattern is
 * `/v1/{server}/plugin/vif/status` (GET) current system status with all streams
