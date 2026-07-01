@@ -2,10 +2,7 @@
 
 The Video Intelligence framework can run a **vision-language model (VLM)** over your live streams. Unlike the scene and object detectors, which score a fixed set of trained classes, a VLM understands free-text vocabulary — "person wearing a hard hat", "forklift near pedestrians", "smoke without visible flames" — and explains its reasoning with every result.
 
-There are two ways to use it, and they compose:
-
-- **Standalone VLM analysis** (`detector_type: "vlm"`) — the VLM watches the stream directly. Give it a list of classes (any short phrase works) and it returns a per-class verdict with reasoning.
-- **VLM verification** (`vlm_verification` on a scene or object stream) — the fast detector does the watching, and the VLM double-checks its detections asynchronously. Use this to suppress false positives before you page someone at 3 a.m.
+With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
 The VLM is any **OpenAI-compatible HTTP endpoint** — the framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar serving **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly), so everything can run locally on your GPU, or you can point at a hosted provider instead.
 
@@ -154,51 +151,30 @@ Settings live in the `vlm_analysis` block — globally for defaults, per-stream 
 
 #### Standalone VLM (`detector_type: "vlm"` + `vlm_analysis`)
 
+The standalone analyzer makes **one VLM call per analysis window** and works in one of three ways. There is no `mode` switch — VIS infers what to do from **which fields you set**, so explicit overrides always win. The Engine Manager UI presents these as **Detect / Describe / Custom**:
+
+- **Detect** — set `class_names` (open vocabulary), no custom prompts. Returns a per-class verdict with reasoning (`{class_name, reasoning}`), surfacing only the classes actually present. Optionally attach `class_hints` to disambiguate a class.
+- **Describe** — set nothing (no classes, no prompts). Returns a free-text description of each window using the built-in descriptive prompt.
+- **Custom** — write your own `system_prompt` / `user_prompt`; output follows your prompt and stays **free-form by default**. Optionally add `class_names` (+ hints) to feed `{class_list}`, and a `response_schema` for structured output. Your prompts and schema are used verbatim. (Setting a custom `user_prompt` is what tells the analyzer you are driving the request, so it no longer imposes the per-class schema — see `response_schema` below.)
+
 | Field | Default | Meaning |
 |---|---|---|
 | `model_name` | from global block | Model name sent to the endpoint |
 | `endpoint_url` | from global block | OpenAI-compatible endpoint URL |
 | `api_key` | none | Bearer token; omit for the bundled sidecar |
-| `class_names` | none | Open-vocabulary classes to detect; results are per-class verdicts with reasoning. **Keep this set** — the engine only surfaces per-class results |
-| `class_groups` | none | Advanced: split classes into groups analyzed in parallel, each with optional per-group `system_prompt`, `user_prompt`, `temperature`, `max_tokens`, `response_schema` (e.g. a strict safety group and a lenient inventory group) |
+| `class_names` | none | Open-vocabulary classes (Detect, or Custom with `{class_list}`). In Detect mode the engine surfaces per-class verdicts; leave unset for a free-text Describe |
+| `class_hints` | none | Optional map of *class → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). **Render-only**: each hint is inlined next to its class in the prompt's `{class_list}` (as `- fire: …`); it never changes the result shape and costs only a few prompt tokens. Keys must be members of `class_names` (case-insensitive) |
+| `system_prompt` | built-in | Custom mode: overrides the built-in system prompt. Supports the placeholders below |
+| `user_prompt` | built-in | Custom mode: your instruction to the model. Supports the placeholders below |
+| `response_schema` | auto | JSON Schema for structured output. The per-class results schema is applied automatically **only in Detect** — `class_names` set and no custom `user_prompt`. Once you supply your own `user_prompt`, output stays free-form unless you also set `response_schema` (so a custom prompt is never overridden by forced class output). A schema you provide is passed to the endpoint **verbatim** (unfiltered) and its output is flattened onto the result |
 | `temperature` | `0.1` | Sampling temperature (0.0–2.0) |
 | `max_tokens` | `512` | Response budget per request |
-| `response_schema` | auto | JSON Schema for structured output; a per-class results schema is applied automatically when `class_names` is set |
 | `request_timeout_seconds` | `60.0` | Per-request HTTP timeout, including queue wait at the endpoint |
 | `max_concurrent_requests` | `16` | Cap on in-flight requests to this endpoint from this VIS |
 
-#### Verification (`vlm_verification` inside `scene_analysis` or `object_analysis`)
-
-Adds a VLM second opinion to an existing detector. Note: this block does **not** inherit from `vlm_analysis` — set `model_name` and `endpoint_url` explicitly.
-
-```jsonc
-"detector_type": "scene",
-"scene_analysis": {
-    "class_names": ["fire", "smoke", "fighting"],
-    "sensitivity": 5,
-    "vlm_verification": {
-        "model_name": "Qwen/Qwen3-VL-4B-Instruct-FP8",
-        "endpoint_url": "http://vlm.docker:8000/v1",
-        "cooldown_seconds": 30
-    }
-}
-```
-
-| Field | Default | Meaning |
-|---|---|---|
-| `model_name`, `endpoint_url`, `api_key` | — | As above; required except `api_key` |
-| `cooldown_seconds` | `30.0` | Minimum seconds between verifications per class group — controls VLM load and cost |
-| `class_groups` | none | Verify related classes together, with optional per-group prompts and `cooldown_seconds` (e.g. verify fire/smoke every 10 s, everything else every 60 s) |
-| `system_prompt` / `user_prompt` | built-in | Override the verification prompts; `{class_list}` and `{detector_type}` placeholders are substituted |
-| `temperature` | `0.1` | Sampling temperature |
-| `max_tokens` | `256` | Response budget |
-| `response_schema` | built-in | Verification verdict schema (`class_name`, `verified`, `reasoning`) |
-| `max_pending_verifications` | `8` | Per-stream cap on queued + in-flight verifications; excess requests are dropped (with a WARNING) rather than piling up behind a slow VLM |
-| `request_timeout_seconds` | `60.0` | Per-request HTTP timeout |
-| `max_concurrent_requests` | `16` | Per-endpoint in-flight cap |
+**Prompt placeholders** (Custom mode) are substituted in **both** `system_prompt` and `user_prompt`: `{class_list}` (a bullet list of `class_names`, with hints inlined as `- class: hint`; expanded only when `class_names` is set), `{frame_count}` (images in the window), and `{duration_seconds}` (window length). If you set classes but reference `{class_list}` in neither prompt, the classes never reach the model — the Manager UI flags this.
 
 ### What you receive
 
-- **Standalone VLM** results carry, per class, the class name and the model's `reasoning`. Delivered through the same event listeners as every detector: ID3 tags, webhooks, log files, and video overlays (overlays show class names — VLM results have no bounding boxes).
-- **Verification** results arrive asynchronously after the original detection (typically within a few seconds), correlated to it by request ID, with `vlm_confirmed` (`true`/`false`) and `vlm_reasoning` per class. The original detections are never delayed — verification is purely additive.
-- **Resilience**: VLM streams stay alive while the endpoint is unreachable — VIS emits empty results (with a periodic status log) and resumes analysis automatically once the endpoint is up, so a stream started during the sidecar's multi-minute first boot simply begins analyzing when the model finishes loading. Scene/object detection with verification attached is likewise unaffected by a VLM outage.
+- **Standalone VLM** results depend on the mode: **Detect** carries per class the class name and the model's `reasoning`; **Describe** carries a free-text `description`; **Custom** carries whatever your `response_schema` defines (flattened onto the result). Delivered through the same event listeners as every detector: ID3 tags, webhooks, log files, and video overlays (overlays show class names / text — VLM results have no bounding boxes).
+- **Resilience**: VLM streams stay alive while the endpoint is unreachable — VIS emits empty results (with a periodic status log) and resumes analysis automatically once the endpoint is up, so a stream started during the sidecar's multi-minute first boot simply begins analyzing when the model finishes loading. While the endpoint is down the overlay shows a read-only **"AI offline"** badge, so an outage is distinguishable from a genuinely quiet scene. The same outage is also surfaced off the overlay: it raises a throttled **WARNING** in the WSE log (with an INFO on recovery) and sets a `vlm_degraded` flag on the stream's status that the Manager dashboard renders as a distinct **"AI offline — VLM endpoint unreachable"** line — all three signals reuse the one wire flag and stay separate from the VIS connection `status`, which remains `connected` during a VLM-endpoint outage.
