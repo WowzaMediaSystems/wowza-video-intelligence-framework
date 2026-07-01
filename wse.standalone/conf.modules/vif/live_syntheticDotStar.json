@@ -1,0 +1,25 @@
+{
+	//Opt-in: there is no bundled SVD NIM, so this stream is inactive by default.
+	//Set the global synthetic_analysis endpoint (+ api_key/function_id for NVCF),
+	//then flip active to true to run real-time Real/Fake detection.
+	"active": false,
+	"app_name": "live",
+	"stream_name": "synthetic.*",
+	"vif_event_listeners": {
+		"LogFiles": {
+			"class_name": "LogFileEvent",
+			"methods": ["immediate"]
+		}
+	},
+	//One clip = `duration` seconds of the source H.264, remuxed (no re-encode)
+	//and relayed to the NIM. VIC taps the source H.264 directly (no transcode);
+	//a non-H.264 source is reported as an error (transcode it upstream).
+	"duration": 2,
+
+	"detector_type":"synthetic",
+	"synthetic_analysis": {
+		//endpoint/use_tls/api_key/function_id/classification_threshold are
+		//inherited from the global synthetic_analysis above; override per stream
+		//here if needed.
+	}
+}
