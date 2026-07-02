@@ -113,7 +113,16 @@ services:
         # to that user before running the service -- so no host-side chown and
         # no init container are needed.
         volumes:
-        # Mount models directory for checkpoints
+        # Mount models directory for checkpoints and the TensorRT engine cache
+        # (models/engines). Writable by default so VIS can download weights and
+        # build engines on first boot.
+        #
+        # Hardening (optional): mount read-only to block planting a malicious
+        # .pth that the startup model scan would deserialize. Only for stacks
+        # that pre-seed all weights AND pre-build the TRT engines and use no
+        # custom models -- read-only, VIS cannot download weights, build/refresh
+        # engines, or write the cache at runtime. Swap the line below for:
+        #   - ./vis/models:/build/models:ro
           - ./vis/models:/build/models
         # Optional: Mount SSL certificates for HTTPS/WSS
         # - ./certs:/certs:ro

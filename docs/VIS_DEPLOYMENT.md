@@ -75,6 +75,15 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 > outside `/build`) to `1001:1001`, then drops privileges to `vis` before
 > launching the service — so **no manual `chown` is required**.
 
+> **Hardening — read-only models mount (optional).** VIS deserializes `.pth`
+> files under `./vis/models` at startup, so write access to that host directory
+> is a code-execution surface. For a locked-down deployment that pre-seeds all
+> weights and pre-builds the TensorRT engines and uses no custom models, mount
+> the directory read-only in `docker-compose.yaml`:
+> `- ./vis/models:/build/models:ro`. Read-only, VIS cannot download weights,
+> build/refresh engines, or write the cache at runtime — so seed everything
+> first.
+
 ## Air-Gapped Deployments
 
 VIS does **not** require direct internet access at runtime, but it must be able to reach the Wowza Streaming Engine instances it serves.
