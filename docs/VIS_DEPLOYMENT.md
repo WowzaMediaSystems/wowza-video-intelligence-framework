@@ -227,6 +227,16 @@ Because the proxy presents a real CA certificate, Engine validates it with no
 truststore surgery. Self-signed certs would re-introduce that friction — use a
 real CA (e.g. Let's Encrypt) for the proxy.
 
+**Point Engine at the proxy, not at VIS.** With `wss`, `VIS_HOST`/`VIS_PORT`
+must target the TLS proxy (`:5443`), never VIS's plaintext port (`:5001`).
+
+Troubleshooting `wss`:
+- `Unsupported or unrecognized SSL message` — Engine is doing TLS against a
+  plaintext endpoint; it's still pointing at VIS `:5001`. Point it at the proxy `:5443`.
+- Certificate/`valid certification path` error — the cert isn't trusted by
+  Engine's Java or its name doesn't match `VIS_HOST`. Use a CA-issued cert whose
+  name equals `VIS_HOST` (a self-signed cert would need importing into Engine's truststore).
+
 ## Managing the Service
 
 ```bash
