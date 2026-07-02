@@ -16,13 +16,9 @@ services:
             - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
-            # Source IPs allowed to reach the WSE REST control interface (8087).
-            # Default covers loopback + the pinned Docker bridge subnet (see the
-            # `networks:` block at the bottom of this file) so Manager->WSE and
-            # host access work out of the box. Widen deliberately via IPWHITELIST
-            # in .env -- do NOT set it back to `*` on a host with the control
-            # ports published to 0.0.0.0.
-            - IPWHITELIST=${IPWHITELIST:-127.0.0.1,172.20.*.*}
+            # Source IPs allowed to reach the WSE REST interface. Set IPWHITELIST
+            # in .env to restrict access; default allows any IP.
+            - IPWHITELIST=${IPWHITELIST:-*}
             - LOG_LEVEL=INFO #DEBUG INFO WARN ERROR
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change
             - VIS_API_KEY=${VIS_API_KEY}
@@ -43,12 +39,8 @@ services:
             - 443:443                   #SSL
             - 554:554                   #RTSP
             - 1935:1935                 #RTMP
-            # Control plane: bound to localhost so it is not wide-open on the
-            # host/LAN by default. To administer WSE from another machine,
-            # change to 0.0.0.0 (or "<host-ip>:8087:8087"), tighten IPWHITELIST
-            # in .env to the operator IP(s), and lock down with a host firewall.
-            - 127.0.0.1:8087:8087       #REST API
-            - 127.0.0.1:8089:8089       #REST API Documenation
+            - 8087:8087                 #REST API
+            - 8089:8089                 #REST API Documenation
             - 6970-6999:6970-6999/udp   #WEBRTC
             - 10000:10000/udp           #SRT
         env_file:
@@ -71,10 +63,8 @@ services:
             # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
             # - JKS_PASSWORD=tbd
         ports:
-            # Manager UI: bound to localhost by default (see the WSE control
-            # plane note above). Widen the same way to administer remotely.
-            - 127.0.0.1:8088:8080
-            - 127.0.0.1:8443:8443
+            - 8088:8080
+            - 8443:8443
         env_file:
             - .env
         extra_hosts:
@@ -250,14 +240,3 @@ services:
                 - driver: nvidia
                   capabilities: [gpu, compute, utility]
                   count: all
-
-# Pin the compose default network to a known subnet so the IPWHITELIST default
-# (127.0.0.1,172.20.*.*) deterministically covers Manager->WSE and NATed host
-# access over the bridge. If `docker compose up` reports an address-pool
-# overlap on this host, change BOTH this subnet and the IPWHITELIST default in
-# the wse service (and IPWHITELIST in .env if set).
-networks:
-    default:
-        ipam:
-            config:
-                - subnet: 172.20.0.0/16
