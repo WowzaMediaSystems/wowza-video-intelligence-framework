@@ -14,3 +14,7 @@ vis/
 
 # WSE Conf
 wse/
+
+# Local AI-assistant config (per-machine; never commit)
+.claude/settings.local.json
+CLAUDE.local.md
