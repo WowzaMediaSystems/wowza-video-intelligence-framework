@@ -70,7 +70,9 @@ training GPUs that ship without NVENC/NVDEC**:
 ### Manifest profiles (per GPU architecture)
 
 The NIM auto-selects the right model profile for the detected GPU. To pin it
-(useful for air-gapped pre-seeding), set `SVD_NIM_MANIFEST_PROFILE` in `.env`:
+(useful for air-gapped pre-seeding), set `NIM_MANIFEST_PROFILE` in `.env` —
+leave it commented out otherwise, as an empty-but-set value disables
+auto-selection and the NIM won't start:
 
 | Architecture | Compute cap | Manifest profile id |
 | --- | --- | --- |
@@ -111,14 +113,25 @@ SVD_GPU_IDS=1
 docker compose --profile default --profile svd up -d
 ```
 
-The first boot downloads the GPU-specific model profile into
-`./vis/svd-nim-cache` (reused on every later boot). Wait for `svd` to report
-healthy:
+The first boot downloads the GPU-specific model profile into the
+`svd-nim-cache` Docker volume and reuses it on every later boot (the volume
+survives `docker compose down`; only `down -v` removes it). Wait for `svd` to
+report healthy:
 
 ```bash
 docker compose --profile svd ps
 docker compose --profile svd logs -f svd
 ```
+
+> **Why a Docker volume plus a chown step?** The NIM runs as a non-root user
+> (uid 1000, `triton-server`) and its image doesn't pre-create
+> `/opt/nim/.cache`, so a fresh cache mount is created **root-owned** and the
+> NIM can't write it (`Permission denied: '/opt/nim/.cache/…'`) and won't
+> start — this is true for a `./vis` bind mount **and** for a named volume.
+> The stack handles it automatically: a one-shot `svd-cache-init` service
+> chowns the `svd-nim-cache` volume to the NIM's uid before the NIM boots, so
+> the NIM itself stays non-root. This is the one place the SVD sidecar needs
+> setup the VLM sidecar (which runs as root) doesn't.
 
 **3. Point a stream at it.** In `wse/conf/video-intelligence.json` (or the
 Manager UI), configure a synthetic stream whose endpoint is the in-network
@@ -171,19 +184,34 @@ config at it:
 
 The SVD NIM runs **fully offline at inference time** — no telemetry and no
 license phone-home during streaming. The only network step is the **one-time
-model download** on first boot. To run with no runtime internet:
+model download** on first boot, which lands in the `svd-nim-cache` Docker
+volume (see Deployment option A above for why the cache is a volume, not a
+`./vis` folder). Pre-seeding therefore means populating that volume on the
+air-gapped host:
 
-1. On a machine **with** NGC access, pull the image and pre-seed the model
-   profile cache (run the sidecar once so it populates `./vis/svd-nim-cache`, or
-   use the NIM's `download-to-cache`/`nim download` workflow).
-2. Copy the image (`docker save`/`load`) and the populated `./vis/svd-nim-cache`
-   directory to the air-gapped host.
+1. **On a machine with NGC access**, pull the image and populate the cache by
+   running the sidecar once (`docker compose --profile svd up -d svd`, then wait
+   for it to report healthy). Export the image and the populated volume:
+   ```bash
+   docker save nvcr.io/nim/nvidia/synthetic-video-detector:latest -o svd-nim-image.tar
+   docker run --rm -v svd-nim-cache:/cache -v "$PWD":/out busybox \
+     tar czf /out/svd-nim-cache.tgz -C /cache .
+   ```
+2. **Copy** `svd-nim-image.tar` and `svd-nim-cache.tgz` to the air-gapped host,
+   load the image, and restore the volume **before** the first `--profile svd`
+   start:
+   ```bash
+   docker load -i svd-nim-image.tar
+   docker volume create svd-nim-cache
+   docker run --rm -v svd-nim-cache:/cache -v "$PWD":/in busybox \
+     tar xzf /in/svd-nim-cache.tgz -C /cache
+   ```
 3. Keep `NGC_API_KEY` set (the NIM still validates it against the **local**
-   cache) and start with `--profile svd`. With the cache present, the NIM serves
-   the cached profile with **no download and no outbound connection**.
+   cache) and start with `--profile svd`. With the volume pre-populated, the NIM
+   serves the cached profile with **no download and no outbound connection**.
 
-Pin `SVD_NIM_MANIFEST_PROFILE` to the target GPU's profile id (table above) so
-the pre-seed matches the air-gapped hardware exactly.
+Pin `NIM_MANIFEST_PROFILE` to the target GPU's profile id (table above) so the
+pre-seed matches the air-gapped hardware exactly.
 
 ---
 

@@ -265,20 +265,34 @@ services:
         hostname: svd.docker
         image: ${SVD_NIM_IMAGE:-nvcr.io/nim/nvidia/synthetic-video-detector:latest}
         profiles: ["svd"]
+        # Wait for the one-shot that makes the model-cache volume writable by
+        # the non-root NIM before booting -- see the svd-cache-init service.
+        depends_on:
+          svd-cache-init:
+            condition: service_completed_successfully
         restart: unless-stopped
         shm_size: "8gb"   # NIM decode + inference need large shared memory
         environment:
           - NGC_API_KEY=${NGC_API_KEY:-}                       # NGC key; also pulls the model profile on first boot
-          - NIM_MANIFEST_PROFILE=${SVD_NIM_MANIFEST_PROFILE:-} # optional GPU-arch profile id; auto-selected when empty (see docs)
+          # Optional GPU-arch profile id; the NIM auto-selects when this is
+          # UNSET. Passed as a bare key (NOT `=${...:-}`) on purpose: an
+          # empty-but-set value suppresses auto-selection and the NIM fails to
+          # start, whereas a bare key is omitted from the container entirely
+          # when unset. To pin a profile, set NIM_MANIFEST_PROFILE=<id> in .env
+          # (see docs/SYNTHETIC_VIDEO_DETECTOR.md).
+          - NIM_MANIFEST_PROFILE
           - NIM_CACHE_PATH=/opt/nim/.cache
           - NVIDIA_VISIBLE_DEVICES=${SVD_GPU_IDS:-all}         # pin to specific card(s) on multi-GPU hosts, e.g. "1"
-        # The GPU-specific model profile is downloaded here on first boot and
-        # reused after. For air-gapped hosts, pre-seed it on a connected
-        # machine (run the NIM once, or `nim download`), copy
-        # ./vis/svd-nim-cache over, and keep NGC_API_KEY set -- the cached
-        # profile is then served with no runtime download or phone-home.
+        # Model-profile cache, kept in a named volume (not a ./vis bind mount)
+        # so it's Docker-managed and survives `down` -- only `down -v` removes
+        # it. A fresh volume is created root-owned, but the NIM runs as non-root
+        # uid 1000, so the svd-cache-init one-shot below chowns it before this
+        # service starts (see that service's comment). The GPU-specific profile
+        # downloads here on first boot and is reused after. For air-gapped
+        # hosts, pre-seed it from a connected machine -- see
+        # ./docs/SYNTHETIC_VIDEO_DETECTOR.md.
         volumes:
-          - ./vis/svd-nim-cache:/opt/nim/.cache
+          - svd-nim-cache:/opt/nim/.cache
         # gRPC (8001) + HTTP mgmt/health (8000) are reachable on the compose
         # network by default (VIS connects to svd.docker:8001 in-network). To
         # reach the NIM from a VIS on another host, publish the gRPC port:
@@ -293,7 +307,7 @@ services:
           timeout: 10s
           retries: 5
           # First boot downloads the GPU-specific model profile; the long
-          # grace covers slow links. Later boots reuse ./vis/svd-nim-cache.
+          # grace covers slow links. Later boots reuse the svd-nim-cache volume.
           start_period: 1800s
         deploy:
           resources:
@@ -305,3 +319,32 @@ services:
                 - driver: nvidia
                   capabilities: [video, gpu, compute, utility]
                   count: all
+
+    # ── SVD cache-permissions init (one-shot) ─────────────────────────────
+    # A fresh Docker volume is created root-owned, but the SVD NIM runs as
+    # non-root uid 1000 (triton-server) and its image does NOT pre-create
+    # /opt/nim/.cache -- so without this the NIM can't write its model cache
+    # ("Permission denied: '/opt/nim/.cache/...'") and never starts. This
+    # one-shot chowns the cache volume to the NIM's uid:gid and exits; the
+    # `svd` service waits on it (depends_on: service_completed_successfully)
+    # and then runs normally as the non-root NIM user. It reuses the NIM image
+    # (already pulled -- nothing extra to ship or pre-seed for air-gap) and is
+    # the ONLY svd-profile container that runs as root. No GPU needed.
+    svd-cache-init:
+        image: ${SVD_NIM_IMAGE:-nvcr.io/nim/nvidia/synthetic-video-detector:latest}
+        profiles: ["svd"]
+        user: "0:0"   # root, just long enough to chown the volume
+        entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /opt/nim/.cache"]
+        volumes:
+          - svd-nim-cache:/opt/nim/.cache
+        restart: "no"
+
+# ── Named volumes ──────────────────────────────────────────────────────────
+volumes:
+    # SVD NIM model-profile cache. Docker-managed named volume; the `svd` and
+    # `svd-cache-init` services above explain why it needs the chown one-shot.
+    # `name:` pins the real Docker volume name (no compose-project prefix) so
+    # the air-gap seed/restore commands in docs/SYNTHETIC_VIDEO_DETECTOR.md can
+    # reference a stable `svd-nim-cache`.
+    svd-nim-cache:
+        name: svd-nim-cache
