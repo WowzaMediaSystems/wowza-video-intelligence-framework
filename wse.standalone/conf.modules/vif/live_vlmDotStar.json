@@ -55,5 +55,21 @@
 		//"user_prompt": "Read the gauge in {frame_count} frame(s); report the value.",
 		//"system_prompt": "You are a precise instrument reader.",
 		//"response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
+		//
+		//Detect "Reasoning Level" (speed vs. accuracy): the class_names block
+		//above is High (strongest grounding, per-class reasoning text, slowest).
+		//For faster decode add reasoning_level plus its prompts and a per-class
+		//boolean schema -> Low/Medium need system_prompt + user_prompt +
+		//response_schema together (a partial block is treated as High). The
+		//Manager UI writes these for you; hand-written example for Medium below
+		//(scene-first schema; Low omits the "scene" property and uses the Low
+		//prompts). Never put reasoning_level in the global vlm_analysis defaults
+		//block -> the schema is per-stream, so it must live on the stream.
+		//"reasoning_level": "medium",
+		//"system_prompt": "You are a strict visual detector over a time-ordered clip from ONE video. First identify what the footage actually is. Test patterns, SMPTE color bars, solid-color frames, slates, black frames or graphics contain NONE of the target classes — report every class as absent. Judge only what is clearly, literally visible; never infer from context or expectation.",
+		//"user_prompt": "These are {frame_count} frames over ~{duration_seconds}s from one clip, in time order. Candidate classes:\n{class_list}\nIn `scene`, name what the footage is in <=6 words. Then, for each candidate, set true ONLY if it is clearly visible in at least one frame, and false otherwise.",
+		//"response_schema": { "type": "object", "properties": { "scene": { "type": "string", "description": "what the footage is, <=6 words" }, "fire": { "type": "boolean" }, "smoke": { "type": "boolean" }, "person": { "type": "boolean" }, "vehicle": { "type": "boolean" } }, "required": ["scene","fire","smoke","person","vehicle"], "additionalProperties": false },
+		//"max_tokens": 128,
+		//"temperature": 0.0
 	}
 }

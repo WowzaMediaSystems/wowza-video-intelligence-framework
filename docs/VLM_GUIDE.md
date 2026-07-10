@@ -157,12 +157,29 @@ The standalone analyzer makes **one VLM call per analysis window** and works in 
 - **Describe** — set nothing (no classes, no prompts). Returns a free-text description of each window using the built-in descriptive prompt.
 - **Custom** — write your own `system_prompt` / `user_prompt`; output follows your prompt and stays **free-form by default**. Optionally add `class_names` (+ hints) to feed `{class_list}`, and a `response_schema` for structured output. Your prompts and schema are used verbatim. (Setting a custom `user_prompt` is what tells the analyzer you are driving the request, so it no longer imposes the per-class schema — see `response_schema` below.)
 
+##### Detect: Reasoning Level (speed vs. accuracy)
+
+Within **Detect**, a **Reasoning Level** trades decode speed for robustness against false positives. All three levels surface the same thing — **only the detected classes**, rendered identically (chips, overlay, webhook/ID3/log) — so the level is invisible downstream; it only changes how hard the model deliberates and, at Low/Medium, drops the per-class `reasoning` text from the payload. The Engine Manager UI exposes it as a **Low / Medium / High** selector under the Detect class list; hand-written configs select it with a `reasoning_level` field.
+
+| Level | `reasoning_level` | Output | Speed | Use it when |
+|---|---|---|---|---|
+| **High** (default) | *(field absent)* | per class `{class_name, reasoning}` | slowest | accuracy matters most; you want the model's per-class justification in the payload |
+| **Medium** | `"medium"` | booleans, preceded by an internal `scene` characterization | fast | you want most of High's grounding at a fraction of the cost — a good default when throughput matters |
+| **Low** | `"low"` | one boolean per class | fastest | maximum throughput; the scene is simple and false positives are cheap to tolerate |
+
+Why the middle rung exists: High's free-text `reasoning` (~200 output tokens/request) dominates decode latency, but it also does real grounding work — dropping it entirely (Low) can make a model call *everything* present on ambiguous footage like color-bars test patterns. **Medium** keeps a tiny (~8–20 token) `scene` field that forces the model to characterize the footage *before* it emits the booleans, recovering most of that grounding for a few extra tokens. The `scene` value is an internal deliberation aid only — it is **never** shown on any output surface.
+
+Accepted tradeoff: Low has no safety net beyond its guardrail prompt and `temperature: 0.0`, and Medium adds only the `scene` anchor — either can still return an all-present result on adversarial input. Pick the level to match how costly a false positive is for your use case.
+
+> **Do not set `reasoning_level` in the global `vlm_analysis` defaults block.** Low/Medium require their injected prompts *and* a per-class response schema sent together, and that schema is built per stream from its own class list. A `reasoning_level` in the global defaults would propagate to every VLM stream without its matching schema; the Engine detects such a mismatched (or otherwise incomplete) block on load and safely treats that stream as High. Set the level per stream — the Manager UI does this for you.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `model_name` | from global block | Model name sent to the endpoint |
 | `endpoint_url` | from global block | OpenAI-compatible endpoint URL |
 | `api_key` | none | Bearer token; omit for the bundled sidecar |
 | `class_names` | none | Open-vocabulary classes (Detect, or Custom with `{class_list}`). In Detect mode the engine surfaces per-class verdicts; leave unset for a free-text Describe |
+| `reasoning_level` | *(absent = High)* | Detect only: `"low"` or `"medium"` selects a faster reasoning level (see above). Low/Medium also require the injected `system_prompt`/`user_prompt`/`response_schema` — set them per stream (the Manager UI does), never in the global defaults block |
 | `class_hints` | none | Optional map of *class → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). **Render-only**: each hint is inlined next to its class in the prompt's `{class_list}` (as `- fire: …`); it never changes the result shape and costs only a few prompt tokens. Keys must be members of `class_names` (case-insensitive) |
 | `system_prompt` | built-in | Custom mode: overrides the built-in system prompt. Supports the placeholders below |
 | `user_prompt` | built-in | Custom mode: your instruction to the model. Supports the placeholders below |
