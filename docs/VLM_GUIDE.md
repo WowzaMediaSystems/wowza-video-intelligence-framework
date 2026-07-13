@@ -161,15 +161,13 @@ The standalone analyzer makes **one VLM call per analysis window** and works in 
 
 Within **Detect**, the **Reasoning Level** picks how much the model deliberates per window. All three levels surface the same output — **only the detected classes**, rendered identically (chips, overlay, webhook/ID3/log) — so the level is invisible downstream. The Engine Manager UI exposes it as a **Low / Medium / High** selector under the Detect class list; hand-written configs use the `reasoning_level` field.
 
-| Level | `reasoning_level` | Output | Speed |
+| Level | `reasoning_level` | Reasoning | Speed |
 |---|---|---|---|
-| **High** (default) | *(field absent)* | per class `{class_name, reasoning}` | slowest |
-| **Medium** | `"medium"` | one boolean per class, grounded by an internal `scene` inventory (never shown in any output) | fast |
-| **Low** | `"low"` | one boolean per class | fastest |
+| **High** (default) | *(field absent)* | strongest | slowest |
+| **Medium** | `"medium"` | moderate | fast |
+| **Low** | `"low"` | minimal | fastest |
 
 Tradeoff: Low and Medium give up some of High's grounding in exchange for speed — pick the level by how accuracy-sensitive the stream is.
-
-> Set `reasoning_level` per stream, never in the global `vlm_analysis` defaults block — Low/Medium require their injected prompts and per-class schema alongside it (an incomplete block safely runs as High). The Manager UI writes all of this for you.
 
 | Field | Default | Meaning |
 |---|---|---|
