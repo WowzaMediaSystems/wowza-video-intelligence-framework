@@ -27,14 +27,22 @@ services:
         pull_policy: always
         restart: unless-stopped
         volumes:
-          - ./vis-tls-proxy.conf:/etc/nginx/nginx.conf:ro
+          # Mounted as a template: the stock nginx entrypoint runs envsubst and
+          # writes the rendered config to /etc/nginx/nginx.conf at start.
+          - ./vis-tls-proxy.conf:/etc/nginx/templates/nginx.conf.template:ro
           - ./certs:/certs:ro
+        environment:
+          # Only VIS_* names are substituted, so nginx's own $variables are left
+          # intact; NGINX_ENVSUBST_OUTPUT_DIR redirects output to the main config.
+          VIS_TLS_PORT: ${VIS_TLS_PORT:-5443}
+          NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+          NGINX_ENVSUBST_FILTER: "VIS_"
         ports:
-          - "${VIS_TLS_PORT:-5443}:5443"
+          - "${VIS_TLS_PORT:-5443}:${VIS_TLS_PORT:-5443}"
         extra_hosts:
             - "host.docker.internal:host-gateway"
         healthcheck:
-          test: ["CMD", "sh", "-c", "nc -z localhost 5443"]
+          test: ["CMD", "sh", "-c", "nc -z localhost ${VIS_TLS_PORT:-5443}"]
           interval: 30s
           timeout: 10s
           retries: 3
