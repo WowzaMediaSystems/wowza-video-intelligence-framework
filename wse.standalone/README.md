@@ -1,5 +1,29 @@
 # WSE Video Intelligence Plugin
-This folder contains the files required to install the WSE Video Intelligence Plugin on an existing install of WSE. 
+
+This module provides an integration with the video intelligence service to perform object and scene detection on a video feed.
+
+You can install WSE Video Intelligence Module onto an existing Wowza Streaming Engine server (Must be version 4.11.1 or greater)
+
+## Using the plugin installer to update Wowza Streaming Engine
+
+The WSE Video Intelligence jar includes a script to update your Wowza Streaming Engine.  This will update the xml files, copy necessary files to your Wowza Streaming Engine installation.
+```
+java -jar wse-plugin-video-intelligence-x.y.z.jar Install
+```
+
+If your system does not have java installed natively, you can use the java that comes with WSE
+```
+/usr/local/WowzaStreamingEngine/java/bin/java
+```
+or
+```
+C:\Program Files\Wowza Media Systems\Wowza Streaming Engine x.y.z+vv\jre\bin\java
+```
+
+Add  `--help` to the above commands to see all the options available.
+
+## Manually updating Wowza Streaming Engine
+
 
 The following folders contain examples of the changes required for the WSE XML files and plugin configuration:
 * conf
