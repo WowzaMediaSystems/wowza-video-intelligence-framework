@@ -75,6 +75,17 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 > outside `/build`) to `1001:1001`, then drops privileges to `vis` before
 > launching the service — so **no manual `chown` is required**.
 
+> **Kubernetes / non-root orchestrators.** The image declares no `USER`: it
+> starts as root and drops to `vis` (1001) at runtime via the entrypoint. This
+> has consequences for k8s and image scanners:
+> - Set `runAsUser: 1001` and `runAsGroup: 1001` in the pod/container
+>   `securityContext`. `runAsNonRoot: true` alone fails at admission — the
+>   kubelet reads the image's declared user (root), not the post-drop identity.
+> - Starting as 1001 skips the root entrypoint's `chown` step, so pre-own the
+>   mounted volumes as `1001:1001` (or use an `fsGroup: 1001`) before start.
+> - Trivy / Docker Scout "runs as root" findings are expected here (image
+>   metadata reports no user); the process still runs unprivileged at runtime.
+
 > **Hardening — read-only models mount (optional).** VIS deserializes `.pth`
 > files under `./vis/models` at startup, so write access to that host directory
 > is a code-execution surface. For a locked-down deployment that pre-seeds all
