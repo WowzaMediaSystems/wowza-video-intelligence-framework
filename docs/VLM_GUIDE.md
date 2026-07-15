@@ -159,7 +159,7 @@ The standalone analyzer makes **one VLM call per analysis window** and works in 
 
 ##### Detect: Reasoning Level (speed vs. accuracy)
 
-Within **Detect**, the **Reasoning Level** picks how much the model deliberates per window. All three levels surface the same output — **only the detected classes**, rendered identically (chips, overlay, webhook/ID3/log) — so the level is invisible downstream. The Engine Manager UI exposes it as a **Low / Medium / High** selector under the Detect class list; hand-written configs use the `reasoning_level` field.
+Within **Detect**, the **Reasoning Level** picks how much the model deliberates per window. All three levels surface the same output — **only the detected classes**, rendered identically (class labels in the UI, overlay, webhook/ID3/log) — so the level is invisible downstream. The Engine Manager UI exposes it as a **Low / Medium / High** selector under the Detect class list; hand-written configs use the `reasoning_level` field.
 
 | Level | `reasoning_level` | Reasoning | Speed |
 |---|---|---|---|
@@ -167,7 +167,7 @@ Within **Detect**, the **Reasoning Level** picks how much the model deliberates 
 | **Medium** | `"medium"` | moderate | fast |
 | **Low** | `"low"` | minimal | fastest |
 
-Tradeoff: Low and Medium give up some of High's grounding in exchange for speed — pick the level by how accuracy-sensitive the stream is.
+Tradeoff: Low and Medium trade away some of High's verification effort in exchange for speed — pick the level by how accuracy-sensitive the stream is.
 
 | Field | Default | Meaning |
 |---|---|---|

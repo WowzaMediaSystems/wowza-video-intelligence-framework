@@ -57,14 +57,9 @@
 		//"response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
 		//
 		//Detect "Reasoning Level": for faster decode add reasoning_level
-		//("low"/"medium") plus its prompts and per-class boolean schema — all
-		//together, per stream (a partial block runs as High). The Manager UI
-		//writes these for you; hand-written Medium example:
-		//"reasoning_level": "medium",
-		//"system_prompt": "You are a strict visual detector over a time-ordered clip from ONE video. First inventory what you actually see, then judge each class against that inventory. Test patterns, SMPTE color bars, solid-color frames, slates, black frames or graphics contain NONE of the target classes — mark every class absent for them. Judge only what is clearly, literally visible; never infer from context or expectation.",
-		//"user_prompt": "These are {frame_count} frames over ~{duration_seconds}s from one clip, in time order. Candidate classes:\n{class_list}\nIn `scene`, list the salient objects and actions you actually see across the frames (<=20 words). Then, for each candidate, set true ONLY if it is clearly visible in at least one frame, and false otherwise.",
-		//"response_schema": { "type": "object", "properties": { "scene": { "type": "string", "description": "the salient objects and actions visible, <=20 words" }, "fire": { "type": "boolean" }, "smoke": { "type": "boolean" }, "person": { "type": "boolean" }, "vehicle": { "type": "boolean" } }, "required": ["scene","fire","smoke","person","vehicle"], "additionalProperties": false },
-		//"max_tokens": 160,
-		//"temperature": 0.0
+		//("low"/"medium"), per stream (omit for High). The Manager UI writes
+		//the matching prompts and per-class boolean schema for you; to hand-write
+		//them, see docs/VLM_GUIDE.md:
+		//"reasoning_level": "medium"
 	}
 }
