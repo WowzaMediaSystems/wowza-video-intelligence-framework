@@ -67,24 +67,23 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
 
-> **Non-root user — mount ownership (handled automatically).** The service runs
-> as a non-root `vis` user (uid/gid **1001**). Bind mounts keep their host
-> ownership, so a non-root process would otherwise hit `EACCES` writing models
-> and logs. The image entrypoint handles this: it starts as root, `chown`s the
-> mounted paths (`./vis/models` and `./vis/logs`, including `/logs`, which lives
-> outside `/build`) to `1001:1001`, then drops privileges to `vis` before
-> launching the service — so **no manual `chown` is required**.
+> **Non-root user — mount ownership (handled automatically).** The image runs as
+> a non-root `vis` user (uid/gid **1001**). Bind mounts keep their host
+> ownership, so the container would otherwise hit `EACCES` writing models and
+> logs. The compose stack includes a one-shot `vis-init` service that runs as
+> root, `chown`s `./vis/models` and `./vis/logs` (including `/logs`, which lives
+> outside `/build`) to `1001:1001`, and exits before the VIS service starts — so
+> **no manual `chown` is required**.
 
-> **Kubernetes / non-root orchestrators.** The image declares no `USER`: it
-> starts as root and drops to `vis` (1001) at runtime via the entrypoint. This
-> has consequences for k8s and image scanners:
-> - Set `runAsUser: 1001` and `runAsGroup: 1001` in the pod/container
->   `securityContext`. `runAsNonRoot: true` alone fails at admission — the
->   kubelet reads the image's declared user (root), not the post-drop identity.
-> - Starting as 1001 skips the root entrypoint's `chown` step, so pre-own the
->   mounted volumes as `1001:1001` (or use an `fsGroup: 1001`) before start.
-> - Trivy / Docker Scout "runs as root" findings are expected here (image
->   metadata reports no user); the process still runs unprivileged at runtime.
+> **Kubernetes / non-root orchestrators.** The image declares `USER vis`
+> (uid/gid 1001), so it runs unprivileged by default and reports its user
+> correctly to orchestrators and scanners:
+> - `runAsNonRoot: true` passes admission, and Trivy / Docker Scout report the
+>   image as non-root.
+> - The image does not fix bind-mount ownership itself (no root entrypoint), so
+>   pre-own the mounted volumes as `1001:1001` — use an `fsGroup: 1001` or an
+>   init container running as root (`runAsUser: 0`) that `chown`s them, mirroring
+>   the compose `vis-init` service.
 
 > **Hardening — read-only models mount (optional).** VIS deserializes `.pth`
 > files under `./vis/models` at startup, so write access to that host directory

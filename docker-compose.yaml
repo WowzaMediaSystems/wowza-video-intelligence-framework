@@ -70,6 +70,20 @@ services:
         extra_hosts:
           - "host.docker.internal:host-gateway"
 
+    # One-shot init: hands the ./vis bind mounts to the non-root vis user
+    # (uid/gid 1001) so VIS can write models/logs, then exits (VIS waits via
+    # depends_on). Reuses the VIS image -- no extra pull, no GPU needed.
+    vis-init:
+        image: wowza/wowza-video-intelligence-service:latest-gpu
+        pull_policy: always
+        profiles: ["", "vi-service", "default", "vlm"]
+        user: "0:0"
+        restart: "no"
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}"]
+        volumes:
+          - ./vis/models:/build/models
+          - ./vis/logs:${LOG_DIR:-/logs}
+
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
         image: wowza/wowza-video-intelligence-service:latest-gpu
@@ -77,6 +91,9 @@ services:
         #platform: linux/arm64
         profiles: ["", "vi-service", "default", "vlm"]
         restart: unless-stopped
+        depends_on:
+          vis-init:
+            condition: service_completed_successfully
         environment:
         # Core service configuration
           - VIS_PORT=${VIS_PORT:-5001}
@@ -107,11 +124,10 @@ services:
         # in .env to override (default /logs); the ./vis/logs bind mount
         # below follows it.
           - LOG_PATH=${LOG_DIR:-/logs}
-        # The bind mounts below keep HOST ownership, but the image entrypoint
-        # starts as root, chowns the mounted paths (incl. /logs, which lives
-        # outside /build) to the non-root `vis` user (uid/gid 1001), then drops
-        # to that user before running the service -- so no host-side chown and
-        # no init container are needed.
+        # The bind mounts below keep HOST ownership, but the `vis-init` service
+        # above chowns them to 1001 before this service starts, so no host-side
+        # action is needed. (LOG_PATH=/logs lives outside /build; vis-init covers
+        # it too.)
         volumes:
         # Mount models directory for checkpoints and the TensorRT engine cache
         # (models/engines). Writable by default so VIS can download weights and
