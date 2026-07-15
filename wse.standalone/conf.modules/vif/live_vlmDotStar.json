@@ -58,7 +58,7 @@
 		//
 		//Detect "Reasoning Level": reasoning_level picks how much the model
 		//deliberates - "high" (default) / "medium" / "low", per stream. "high"
-		//is the marker alone (omitting is equivalent); for faster decode use
+		//is the marker alone (omitting is equivalent); for faster inference use
 		//"low"/"medium". The Manager UI writes the matching prompts and per-class
 		//boolean schema for "low"/"medium"; to hand-write them, see docs/VLM_GUIDE.md:
 		//"reasoning_level": "medium"
