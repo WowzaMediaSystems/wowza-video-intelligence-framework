@@ -163,7 +163,7 @@ Within **Detect**, the **Reasoning Level** picks how much the model deliberates 
 
 | Level | `reasoning_level` | Reasoning | Speed |
 |---|---|---|---|
-| **High** (default) | *(field absent)* | strongest | slowest |
+| **High** (default) | `"high"` | strongest | slowest |
 | **Medium** | `"medium"` | moderate | fast |
 | **Low** | `"low"` | minimal | fastest |
 
@@ -175,7 +175,7 @@ Tradeoff: Low and Medium trade away some of High's verification effort in exchan
 | `endpoint_url` | from global block | OpenAI-compatible endpoint URL |
 | `api_key` | none | Bearer token; omit for the bundled sidecar |
 | `class_names` | none | Open-vocabulary classes (Detect, or Custom with `{class_list}`). In Detect mode the engine surfaces per-class verdicts; leave unset for a free-text Describe |
-| `reasoning_level` | *(absent = High)* | Detect only: `"low"` or `"medium"` selects a faster reasoning level (see above); requires its injected prompts + schema alongside, per stream |
+| `reasoning_level` | `"high"` | Detect only: `"high"` (default) / `"medium"` / `"low"` picks how much the model deliberates (see above). `"low"`/`"medium"` require their injected prompts + schema alongside, per stream |
 | `class_hints` | none | Optional map of *class → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). **Render-only**: each hint is inlined next to its class in the prompt's `{class_list}` (as `- fire: …`); it never changes the result shape and costs only a few prompt tokens. Keys must be members of `class_names` (case-insensitive) |
 | `system_prompt` | built-in | Custom mode: overrides the built-in system prompt. Supports the placeholders below |
 | `user_prompt` | built-in | Custom mode: your instruction to the model. Supports the placeholders below |

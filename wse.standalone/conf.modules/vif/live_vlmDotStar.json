@@ -56,10 +56,11 @@
 		//"system_prompt": "You are a precise instrument reader.",
 		//"response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
 		//
-		//Detect "Reasoning Level": for faster decode add reasoning_level
-		//("low"/"medium"), per stream (omit for High). The Manager UI writes
-		//the matching prompts and per-class boolean schema for you; to hand-write
-		//them, see docs/VLM_GUIDE.md:
+		//Detect "Reasoning Level": reasoning_level picks how much the model
+		//deliberates - "high" (default) / "medium" / "low", per stream. "high"
+		//is the marker alone (omitting is equivalent); for faster decode use
+		//"low"/"medium". The Manager UI writes the matching prompts and per-class
+		//boolean schema for "low"/"medium"; to hand-write them, see docs/VLM_GUIDE.md:
 		//"reasoning_level": "medium"
 	}
 }
