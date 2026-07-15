@@ -56,11 +56,12 @@
 		//"system_prompt": "You are a precise instrument reader.",
 		//"response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
 		//
-		//Detect "Reasoning Level": reasoning_level picks how much the model
-		//deliberates - "high" (default) / "medium" / "low", per stream. "high"
-		//is the marker alone (omitting is equivalent); for faster inference use
-		//"low"/"medium". The Manager UI writes the matching prompts and per-class
-		//boolean schema for "low"/"medium"; to hand-write them, see docs/VLM_GUIDE.md:
+		//Detect "Reasoning Level" - how much the model deliberates: "high"
+		//(default, the field alone; omitting is equivalent), or "medium"/"low"
+		//for faster inference. "medium"/"low" are prompt presets, not standalone
+		//switches: they only work together with their matching prompts and
+		//per-class boolean schema. The Manager UI writes all of it; to hand-write
+		//a preset, see docs/VLM_GUIDE.md:
 		//"reasoning_level": "medium"
 	}
 }
