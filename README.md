@@ -240,7 +240,7 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 ## Synthetic / Deepfake Detection (Optional)
 
-VIF can flag **synthetic / AI-generated (deepfake)** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Maxine Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC (VI-550 partnership) and needs an NVENC/NVDEC GPU (T4/A10/A40/L4/L40/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
+VIF can flag **synthetic / AI-generated (deepfake)** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Maxine Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC (VI-550 partnership) and needs an NVENC/NVDEC GPU (T4/A10/A16/A40/L4/L40/L40S/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
 
 See [`docs/SYNTHETIC_VIDEO_DETECTOR.md`](docs/SYNTHETIC_VIDEO_DETECTOR.md) for the full deployment, GPU support matrix, air-gapped pre-seed, stream-config, and EU AI Act context.
 

@@ -251,11 +251,12 @@ services:
     # model profile on first boot):
     #   docker login nvcr.io   # username: $oauthtoken   password: <NGC_API_KEY>
     #
-    # Streams opt in by setting `endpoint: "svd.docker:8001"` + `ssl_mode:
-    # "disabled"` in their synthetic config (the service also resolves as
-    # plain `svd`). For a hosted / bring-your-own endpoint instead, skip this
-    # profile and point `endpoint` at it (e.g. grpc.nvcf.nvidia.com:443 with
-    # api_key + function_id).
+    # Streams opt in by setting `endpoint: "svd.docker:8001"` in their
+    # synthetic config (the service also resolves as plain `svd`; transport
+    # security auto-detects, so a non-443 in-network port stays plaintext —
+    # no TLS setting needed). For a hosted / bring-your-own endpoint instead,
+    # skip this profile and point `endpoint` at it (e.g.
+    # grpc.nvcf.nvidia.com:443 with api_key + function_id).
     #
     # GPU REQUIREMENT: the NIM decodes on the GPU and needs NVDEC/NVENC +
     # Tensor cores -- T4 / A10 / A16 / A40 / L4 / L40 / RTX 4090 / 5090 /
