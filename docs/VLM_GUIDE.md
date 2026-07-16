@@ -157,12 +157,27 @@ The standalone analyzer makes **one VLM call per analysis window** and works in 
 - **Describe** — set nothing (no classes, no prompts). Returns a free-text description of each window using the built-in descriptive prompt.
 - **Custom** — write your own `system_prompt` / `user_prompt`; output follows your prompt and stays **free-form by default**. Optionally add `class_names` (+ hints) to feed `{class_list}`, and a `response_schema` for structured output. Your prompts and schema are used verbatim. (Setting a custom `user_prompt` is what tells the analyzer you are driving the request, so it no longer imposes the per-class schema — see `response_schema` below.)
 
+##### Detect: Reasoning Level (speed vs. accuracy)
+
+Within **Detect**, the **Reasoning Level** picks how much the model deliberates per window. All three levels surface the same output — **only the detected classes**, rendered identically (class labels in the UI, overlay, webhook/ID3/log) — so the level is invisible downstream. The Engine Manager UI exposes it as a **Low / Medium / High** selector under the Detect class list; hand-written configs use the `reasoning_level` field.
+
+| Level | `reasoning_level` | Reasoning | Speed |
+|---|---|---|---|
+| **High** (default) | `"high"` | strongest | slowest |
+| **Medium** | `"medium"` | moderate | fast |
+| **Low** | `"low"` | minimal | fastest |
+
+Tradeoff: Low and Medium trade away some of High's verification effort in exchange for speed — pick the level by how accuracy-sensitive the stream is.
+
+The prompts and output schema behind each level are built into the service — setting the field is all it takes. If the stream sets custom `system_prompt`/`user_prompt`/`response_schema`, those win and `reasoning_level` is ignored.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `model_name` | from global block | Model name sent to the endpoint |
 | `endpoint_url` | from global block | OpenAI-compatible endpoint URL |
 | `api_key` | none | Bearer token; omit for the bundled sidecar |
 | `class_names` | none | Open-vocabulary classes (Detect, or Custom with `{class_list}`). In Detect mode the engine surfaces per-class verdicts; leave unset for a free-text Describe |
+| `reasoning_level` | `"high"` | Detect only: `"high"` (default) / `"medium"` / `"low"` picks how much the model deliberates (see above). Ignored when custom prompts or a `response_schema` are set |
 | `class_hints` | none | Optional map of *class → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). **Render-only**: each hint is inlined next to its class in the prompt's `{class_list}` (as `- fire: …`); it never changes the result shape and costs only a few prompt tokens. Keys must be members of `class_names` (case-insensitive) |
 | `system_prompt` | built-in | Custom mode: overrides the built-in system prompt. Supports the placeholders below |
 | `user_prompt` | built-in | Custom mode: your instruction to the model. Supports the placeholders below |
