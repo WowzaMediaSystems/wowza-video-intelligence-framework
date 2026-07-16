@@ -1,0 +1,38 @@
+{
+	"active":true,
+	"app_name": "live",
+	"stream_name": "scene.*",
+	"vif_event_listeners": {
+		"Id3Tags": {
+			"class_name": "Id3Event",
+			"methods": ["immediate"]
+		},
+		"Webhooks": {
+			"class_name": "WebhookEvent2",
+			"methods": ["disabled"]
+		},
+		"LogFiles": {
+			"class_name": "LogFileEvent",
+			"methods": ["immediate"]
+		},
+		"Overlays": {
+			"class_name": "OverlayEvent",
+			"confidence_threshold": 0.7,
+			"methods": ["immediate"],
+			"properties": {
+				"jitter": 2,
+				"debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",
+				"show_stats": true
+			}
+		}
+	},
+	"frame_buffer": 10,
+	"inference_fps": 5,
+	"duration": 2,
+
+	"detector_type":"scene",
+	"scene_analysis": {
+		"class_names":["fire","fighting","running", "person climbing fence","crowd of people","taking pictures","walking","standing","color bars"],
+		"sensitivity": 5
+	}
+}

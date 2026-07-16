@@ -1,116 +1,147 @@
 # WSE Video Intelligence Module
 This module provides an integration with the video intelligence service to perform object and scene detection on a video feed.
 
-## Install
+## Install onto an existing Wowza Streaming Engine server (Must be version 4.11 or greater)
+### Lib folder and jar files
 * copy the following Wowza jars to the WSE lib directory
 
 	* wse-plugin-metadata-injection-x.y.z.jar
 	* wse-plugin-overlays-x.y.z.jar
-	* wse-plugin-thumbnail-api-x.y.z.jar
 	* wse-plugin-video-intelligence-x.y.z.jar
 * copy the following 3rd party jars to the WSE lib directory
+	* classgraph-4.8.184.jar
 	* commons-text-1.15.0.jar
-	* javax-websocket-client-impl-9.4.58.v20250814.jar
-	* javax.websocket-api-1.0.jar
-	* jetty-client-9.4.58.v20250814.jar
-	* websocket-api-9.4.58.v20250814.jar
-	* websocket-client-9.4.58.v20250814.jar
-	* websocket-common-9.4.58.v20250814.jar
+	* jakarta.websocket-api-2.1.1.jar
+	* jakarta.websocket-client-api-2.1.1.jar
+	* jetty-ee10-websocket-jakarta-client-12.1.9.jar
+	* jetty-ee10-websocket-jakarta-common-12.1.9.jar
+	* jetty-websocket-core-client-12.1.9.jar
+	* jetty-websocket-core-common-12.1.9.jar
 
-* add server listeners to Server.xml
-```xml
-<ServerListener>
-	<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.module.overlays.OverlayServer</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.videointelligence.VifServer</BaseClass>
-</ServerListener>
-<ServerListener>
-	<BaseClass>com.wowza.wms.plugin.thumbnailapi.ThumbnailServer</BaseClass>
-</ServerListener>
-```
+### Server.xml
+* add Server Listeners to Server.xml
+	```xml
+	<ServerListeners>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.webhooks.WebhookListener</BaseClass>
+		</ServerListener>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.plugin.overlays.OverlayServer</BaseClass>
+		</ServerListener>
+		<ServerListener>
+			<BaseClass>com.wowza.wms.plugin.videointelligence.VifServer</BaseClass>
+		</ServerListener>
+	```
 
-* Server Properties
-```xml
-<Property>
-	<Name>OverlayServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
-<Property>
-	<Name>ThumbnailApiServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
-<Property>
-	<Name>VideoIntelligenceServer</Name>
-	<Value>unauthorized | authorized</Value>
-	<Type>String</Type>
-</Property>
- ```
+* add server Properties to Server.xml
+	```xml
+	<Properties>
+		<Property>
+			<Name>OverlayServer</Name>
+			<Value>authorized</Value>
+			<Type>String</Type>
+		</Property>
 
-* add to each Application.xml the following modules
-```xml
-<Module>
-	<Name>ModuleVideoIntelligence</Name>
-	<Description>VideoIntelligence</Description>
-	<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
-</Module>
-<Module>
-	<Name>ID3AndPDTInjectionModule</Name>
-	<Description>ID3AndPDTInjectionModule</Description>
-	<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
-</Module>
-<Module>
- 	<Name>OverlayModule</Name>
-	<Description>OverlayModule</Description>
-	<Class>com.wowza.wms.plugin.overlays.OverlayModule</Class>
-</Module>
-```
+		<Property>
+			<Name>VideoIntelligenceServer</Name>
+			<Value>authorized</Value>
+			<Type>String</Type>
+		</Property>
+	```
 
-* add to each Application.xml the following basic properties for ID3 metadata
-```xml
-<Property>
-	<Name>amfToID3ConversionEnabled</Name>
-	<Value>true</Value>
-</Property>
-<Property>
-	<Name>amfToID3ConversionAddToManifest</Name>
-	<Value>true</Value>
-</Property>
-<Property>
-	<Name>amfToID3ConversionVerboseMaximum</Name>
-	<Value>0</Value>
-</Property>
-```
+### Application.xml
+* add application Modules to each Application.xml that VIF will run under.
+	```xml
+	<Modules>
+		<Module>
+			<Name>ModuleVideoIntelligence</Name>
+			<Description>VideoIntelligence</Description>
+			<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
+		</Module>
+		<Module>
+			<Name>ID3AndPDTInjectionModule</Name>
+			<Description>ID3AndPDTInjectionModule</Description>
+			<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
+		</Module>
+		<Module>
+			<Name>OverlayModule</Name>
+			<Description>OverlayModule</Description>
+			<Class>com.wowza.wms.plugin.overlays.OverlayModule</Class>
+		</Module>
+	```
 
-* add to each Application.xml the following HTTStreamer properties for ID3 metadata
-```xml
-<Property>
-	<Name>cupertinoEnableProgramDateTime</Name>
-	<Value>true</Value>
-	<Type>Boolean</Type>
-</Property>
-<Property>
-	<Name>cupertinoEnableId3ProgramDateTime</Name>
-	<Value>true</Value>
-	<Type>Boolean</Type>
-</Property>
-```
+* add application Properties to each Application.xml that VIF will run under.
+	```xml
+	<Properties>
+		<Property>
+			<Name>amfToID3ConversionEnabled</Name>
+			<Value>true</Value>
+		</Property>
+		<Property>
+			<Name>amfToID3ConversionAddToManifest</Name>
+			<Value>true</Value>
+		</Property>
+		<Property>
+			<Name>amfToID3ConversionVerboseMaximum</Name>
+			<Value>0</Value>
+		</Property>
+	```
 
-* Need a transcoder template, with one encode, with:
-	* `<Name>videoIntelligence</Name>`
-	* `<StreamName>mp4:${SourceStreamName}-vi</StreamName>`
-	* `<FitMode>match-source</FitMode>`
+* add HTTPStreamer Properties to each Application.xml that VIF will run under.
+	```xml
+	<HTTPStreamer>
+		<Properties>
+			<Property>
+				<Name>cupertinoEnableProgramDateTime</Name>
+				<Value>true</Value>
+				<Type>Boolean</Type>
+			</Property>
+			<Property>
+				<Name>cupertinoEnableId3ProgramDateTime</Name>
+				<Value>true</Value>
+				<Type>Boolean</Type>
+			</Property>
+	```
 
-Overlays will be added to any stream ending with -vi
+* enable the transcoder for each Application.xml that VIF will run under and use `vif-gpu-eva.xml` as the fallback
+	```xml
+	<Transcoder>
+		<LiveStreamTranscoder>transcoder</LiveStreamTranscoder>
+		<Templates>${SourceStreamName}.xml,vif-gpu-eva.xml</Templates>
+	```
 
-## Configuration
-configuration for the module is stored in `conf/video-intelligence.json`.
-The top level configuration contains the default settings then per steam configurations is in the `streams` array of configurations
+### WSEM
+* To enable VIF in WSEM/UI, need to copy to
+	```shell
+	mkdir -p /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	cp -r docker/manager/ui /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	```
+  or build a new `.war` file with wsem-war/build-war.sh and move it
+	```shell
+	rm -r /usr/local/WowzaStreamingEngine/manager/temp
+	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager
+	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
+	```
+* If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API
+	```xml
+	<RESTInterface>
+		<IPWhiteList>*</IPWhiteList>
+	```
+* If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
+
+### Misc
+* Overlays will be added to the stream ending with `-vi`
+
+* For Ubuntu/linux, you may need to install fonts for overlays to work correctly
+	```shell
+	apt-get install -y libfreetype6 fontconfig
+	```
+
+## VIF Configuration
+Configuration files for the module are stored in `conf.modules/vif/`
+The top level/defaults are in the `Default.json` file, individual streams are stored in their own file with `<applicationName>_<streamName>.json`
+
+Update the Default.json `vi_service_url` and `vi_service_api_key` to point to the VIS service
 
 | Key                  | Default                                           | Purpose                                                                      |
 | -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -131,9 +162,21 @@ The top level configuration contains the default settings then per steam configu
 | catch_up_max_behind_seconds | null (=2s) | **Scene/VLM:** how far behind live (seconds) detections may fall before catch-up skips to live. **Object:** not used — object latency is bounded by the `inference_fps` throttle toward the sustainable rate, and the slow-inference warning fires at a fixed ~1s single-frame round-trip. For **Scene/VLM**, unset derives to the buffer's design headroom (~2s), bounding latency near `inference_time + 2s`; lower for tighter latency, raise to tolerate more lag. |
 | auto_frame_throttle | false | Opt-in frame-rate throttle (default **off**, all modes): reduce `inference_fps` when inference falls behind. **Object detection:** its latency lever — keeps the analyzed frame near live and contiguous for the tracker. **Scene/VLM:** a pre-step that throttles before `catch_up_to_live` resorts to skipping, for fewer coverage gaps. Renamed from `auto_scene_frame_throttle` (still accepted on read). |
 | use_transcoder| true | use transcoder to grab frames |
-| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true |
+| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true. **VLM:** each analysis window is one request carrying `duration × inference_fps` images, and the VLM endpoint caps images per prompt (the bundled vLLM sidecar allows 8) — keep `duration × inference_fps` at 8 or below (e.g. 2 fps × 2s, the example config's values). `-1` resolves to the source frame rate and will exceed the cap, so it is not supported for VLM; the Stream Manager UI enforces this. |
 | inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
+
+#### VLM Analysis Modes (Detect / Describe / Custom)
+
+The standalone `detector_type="vlm"` analyzer issues **exactly one VLM request per analysis window**. The bundled vLLM sidecar runs without prefix caching, so each request re-runs the full vision-token prefill over the window's frames — adding classes to one shared prompt is cheap; fanning out per-class requests is not. The Stream Manager UI (behind `?vlm=true`) exposes three modes. The mode is a UI construct: the VI service infers behavior from *which fields the config sets*, so no mode discriminator is sent on the wire.
+
+- **Detect** (default) — set `class_names` (short words/phrases, open vocabulary) and the analyzer returns a per-class verdict, surfacing only the classes actually visible as `{class_name, reasoning}` detections. Optionally attach **`class_hints`** — a map of *class name → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). Hints are **optional** and **render-only**: each is inlined next to its class in the prompt at a cost of only a few prompt tokens, and they never change the result shape. In the UI, Detect is a per-class repeater — one row per class, each with an optional hint field.
+- **Describe** — set no `class_names` and no prompts. The analyzer returns a free-form written description of each window (see the fallback note below).
+- **Custom** (advanced) — supply your own `user_prompt` (required) and optionally a `system_prompt`, a `class_names` list, and a custom `response_schema`. Both prompts support the placeholders `{class_list}` (the configured classes as a bullet list, with any hints inlined — injected only where the placeholder appears), `{frame_count}` (images in the window) and `{duration_seconds}` (window length in seconds). A custom `response_schema` flows through to the model verbatim for structured extraction (e.g. read a gauge value). In the UI the schema is built with a guided **Fields** editor — one row per output field (name, optional description, a *required* toggle, and a type) that generates the JSON Schema for you. Supported types are *string / number / integer / boolean / string[] / enum* (a string allowed-value list) and *object / object[]* (which open an indented sub-builder, recursively). A **Raw JSON** toggle remains for anything the builder can't express (numeric/string constraints, `$ref`, `oneOf`/`anyOf`, non-string enums, …). The two views convert losslessly: switching to Raw serializes the builder, and switching back imports the JSON when it decomposes into supported shapes — otherwise a complex schema simply stays in Raw JSON and is never dropped.
+
+**Custom-schema output.** When a custom `response_schema` produces JSON that is not the default `{"results":[{class_name, reasoning}]}` shape, the whole structure is attached to the detection's `data` field and flows — structured — through the webhook, ID3 and log sinks (no per-schema configuration). The on-screen overlay can't pick a field from an arbitrary schema, so it renders a generic `vlm` label for custom-schema windows. ID3 timed-metadata has practical size limits, so consume large custom schemas via the webhook or log sinks. Detect/Describe output is unchanged.
+
+**Free-form / fallback detection.** In Describe mode — or when the VI service returns output that can't be parsed as structured results (e.g. truncated) — event listeners receive a single detection with `class_name` set to `description` and the full analysis text in `reasoning`, instead of an empty detections list. Avoid configuring a real VLM class named `description`, as it would be indistinguishable from this synthetic class.
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
@@ -181,7 +224,37 @@ The top level configuration contains the default settings then per steam configu
 | replace_video | false | Replaces original video with frame accurate overlays |
 | fade_step | 0 | How many frames it takes to fade objects out once they are no longer tracked. Set to 0 for high skip_frame values |
 
-
+## Logging
+By default logging is added to the standard Wowza Streaming log files `wowzastreamingengine_access.log` and `wowzastreamingengine_error.log`.  If you want to log just VIF events from WSE, you can create a new Logger with the name `VIFLogger`.  Add the logger to the `Loggers` section of the `log4j2-config.xml` file.
+```
+    <Loggers>
+		<Logger name="VIFLogger" level="info" additivity="false">
+			<AppenderRef ref="stdout"/>
+			<AppenderRef ref="serverAccess"/>
+			<AppenderRef ref="vifLogFile"/>
+		</Logger>
+    </Loggers>
+```
+with an appender that creates a rolling log file named `vif4j_access.log`:
+```
+    <Appenders>
+		<RollingFile name="vifLogFile" fileName="${sys:com.wowza.wms.ConfigHome}/logs/vif4j_access.log" filePattern="${sys:com.wowza.wms.ConfigHome}/logs/vif4j_access.%d{yyyy-MM-dd}.log">
+			<PatternLayout>
+				<Header>#Version: 1.0\n#Start-Date: %d{yyyy-MM-dd HH:mm:ss zzz}\n#Software: ${sys:wse-software-version}\n#Date: %d{yyyy-MM-dd}\n#Fields: date\ttime\ttz\tx-event\tx-category\tx-severity\tx-status\tx-comment%n</Header>
+				<Pattern>%d{yyyy-MM-dd}\t%d{HH:mm:ss}\t%d{z}\t%replace{%X{x-event}}{^$}{-}\t%replace{%X{x-category}}{^$}{-}\t%replace{%X{x-severity}}{^$}{-}\t%replace{%X{x-status}}{^$}{-}\t%replace{%X{x-comment}}{^$}{-}%n</Pattern>
+				<AlwaysWriteExceptions>false</AlwaysWriteExceptions>
+			</PatternLayout>
+			<Policies>
+				<TimeBasedTriggeringPolicy />
+			</Policies>
+			<DefaultRolloverStrategy>
+				<Delete basePath="${sys:com.wowza.wms.ConfigHome}/logs" maxDepth="1">
+					<IfLastModified age="5d" />
+				</Delete>
+			</DefaultRolloverStrategy>
+		</RollingFile>
+	</Appenders>
+```
 ## API
 ### API pattern is
 * `/v1/{server}/plugin/vif/status` (GET) current system status with all streams
@@ -239,4 +312,4 @@ View the stream, see id3 tags and overlays
 View the status of WSE and the streams being processed [View the page](http://localhost:8088/vif/vif-status.html)
 
 ## Docker compose
-Provided is a `docker-compose.yaml` that will start WSE with a pre configured `Server.xml` and `live` application along with a sample `video-intelligence.json`
+Provided is a `docker-compose.yaml` that will start WSE with a pre configured `Server.xml` and `live` application along with a sample json files

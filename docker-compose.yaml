@@ -8,14 +8,11 @@ services:
         profiles: ["", "wse", "wse-only", "default"]
         restart: unless-stopped # Automatically restarts unless manually stopped
         ##### comment deploy section below for non gpu support
-        deploy:
-          resources:
-            reservations:
-              devices:
-                - driver: nvidia
-                  capabilities: [video, gpu, compute, utility]
-                  count: all
+        runtime: nvidia
         environment:
+            # NVIDIA GPU configuration
+            - NVIDIA_VISIBLE_DEVICES=all
+            - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
             - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
@@ -30,6 +27,7 @@ services:
         #to persist the configurations between starts of Wowza Streaming Engine, uncomment the lines below:
         volumes:
              - ./wse/conf:/usr/local/WowzaStreamingEngine/conf
+             - ./wse/conf.modules:/usr/local/WowzaStreamingEngine/conf.modules
              - ./wse/content:/usr/local/WowzaStreamingEngine/content
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
@@ -58,7 +56,6 @@ services:
             - LOG_LEVEL=WARN #DEBUG INFO WARN ERROR
             - WSE_HOST=http://wse.docker:8087
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change <http://localhost:8088/RESTAPIDocumentation/>
-            - PLAYER_TOKEN=${PLAYER_TOKEN}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
             # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
@@ -125,13 +122,7 @@ services:
           timeout: 10s
           retries: 3
           start_period: 10s
-        deploy:
-          resources:
-            reservations:
-              devices:
-                - driver: nvidia
-                  capabilities: [gpu, compute, utility]
-                  count: all
+        runtime: nvidia
 
     # ── VLM sidecar (opt-in) ───────────────────────────────────────────────
     # OpenAI-compatible vLLM server backing the standalone `detector_type=vlm`

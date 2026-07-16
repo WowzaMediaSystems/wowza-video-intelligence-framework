@@ -1,0 +1,59 @@
+{
+	"active":true,
+	"app_name": "live",
+	"stream_name": "vlm.*",
+	"vif_event_listeners": {
+		"Id3Tags": {
+			"class_name": "Id3Event",
+			"methods": ["immediate"]
+		},
+		"Webhooks": {
+			"class_name": "WebhookEvent2",
+			"methods": ["disabled"]
+		},
+		"LogFiles": {
+			"class_name": "LogFileEvent",
+			"methods": ["immediate"]
+		},
+		"Overlays": {
+			"class_name": "OverlayEvent",
+			"methods": ["immediate"],
+			"properties": {
+				"debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",
+				"show_stats": true
+			}
+		}
+	},
+	"frame_buffer": 10,
+	//VLM requests are heavier than scene/object inference: 2 fps over a
+	//2 second window sends one request of 4 frames every 2 seconds. The bundled
+	//vLLM sidecar allows at most 8 images per prompt, so keep
+	//duration x inference_fps at 8 or below (-1 = match source exceeds it).
+	"inference_fps": 2,
+	"duration": 2,
+
+	"detector_type":"vlm",
+	"vlm_analysis": {
+		//model_name and endpoint_url are inherited from the global vlm_analysis
+		//defaults above (the bundled vLLM sidecar); override here to use a
+		//different model or endpoint for this stream.
+		//
+		//This is "Detect" mode (default): class_names is open vocabulary — any
+		//short word or phrase works (e.g. "person wearing a hard hat"). The
+		//engine surfaces per-class results only.
+		"class_names":["fire","smoke","person","vehicle"]
+		//
+		//Optional render-only per-class hints disambiguate a class at a few
+		//prompt tokens' cost; each key must be one of class_names:
+		//"class_hints": { "fire": "visible open flame, not red lighting" }
+		//
+		//"Describe" mode: remove class_names (and prompts) entirely -> a
+		//free-form description per window (class_name "description").
+		//
+		//"Custom" mode: supply your own prompt(s) and (optionally) a schema.
+		//Prompts support {class_list}, {frame_count} and {duration_seconds}:
+		//"user_prompt": "Read the gauge in {frame_count} frame(s); report the value.",
+		//"system_prompt": "You are a precise instrument reader.",
+		//"response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
+	}
+}
