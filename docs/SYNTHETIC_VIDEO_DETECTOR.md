@@ -389,7 +389,7 @@ air-gapped host:
    ```
    The tar helper runs inside the detector image itself (just loaded on the
    line above), so nothing beyond the two files needs to reach the air-gapped
-   host — a utility image like busybox would be one more thing to ship.
+   host.
 3. Keep `NGC_API_KEY` set (it is validated against the **local** cache) and
    start with `--profile svd`. With the volume pre-populated, the detector
    serves the cached model with **no download and no outbound connection**.
@@ -411,8 +411,8 @@ auto-selection and the detector won't start:
 | Ampere (A10/A16/A40) | 8.6 | `15d466e43b11fa523e0662603f09bce6e5c7fc92fba33ea5c6122b98ec546bd8` |
 | Turing (T4) | 7.5 | `ae4879839cd92b9ca86791d2455b3ce72261f485f00a89e2056e11c3e69d4bc3` |
 
-(Confirm the current ids against the model's own
-[release notes](https://docs.nvidia.com/nim/maxine/synthetic-video-detector) —
+(Confirm the current ids against NVIDIA's [Model Manifest Profiles
+table](https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/getting-started.html#model-manifest-profiles) —
 they can change per model version.)
 
 ---
@@ -431,5 +431,5 @@ threshold and your human-review policy to your obligations.
 
 - [`README.md`](../README.md) — framework quick start and configuration.
 - [`VLM_GUIDE.md`](VLM_GUIDE.md) — the VLM sidecar this profile mirrors.
-- NVIDIA SVD model docs: <https://docs.nvidia.com/nim/maxine/synthetic-video-detector>
+- NVIDIA SVD model docs: <https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/index.html>
 - Try the API: <https://build.nvidia.com/nvidia/synthetic-video-detector>
