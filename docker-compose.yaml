@@ -73,7 +73,7 @@ services:
         image: wowza/wowza-video-intelligence-service:latest-gpu
         pull_policy: always
         #platform: linux/arm64
-        profiles: ["", "vi-service", "default", "vlm"]
+        profiles: ["", "vi-service", "default"]
         restart: unless-stopped
         environment:
         # Core service configuration
@@ -129,12 +129,13 @@ services:
     # analyzer and the `vlm_verification` overlay on scene/object detectors.
     #
     # Opt-in via the `vlm` compose profile -- a bare `docker compose up`
-    # never starts it:
-    #   docker compose up                                  # full stack, no vlm
-    #   docker compose --profile vlm up                    # vis + vlm only
-    #   docker compose --profile default --profile vlm up  # full stack + vlm
+    # never starts it, and the profile gates ONLY the vLLM sidecar;
+    # combine profiles to start it alongside the services it serves:
+    #   docker compose --profile vlm up                        # vLLM sidecar only
+    #   docker compose --profile default --profile vlm up      # full stack + vlm
+    #   docker compose --profile vi-service --profile vlm up   # VIS + vlm pairing
     # Teardown: a bare `docker compose down` leaves vlm running; use
-    # `docker compose --profile vlm down` to stop it.
+    # `docker compose --profile vlm down` to stop it (the sidecar only).
     #
     # Start order doesn't matter: VIS connects on demand, so vLLM's
     # multi-minute model warmup never blocks VIS or scene/object detection.
