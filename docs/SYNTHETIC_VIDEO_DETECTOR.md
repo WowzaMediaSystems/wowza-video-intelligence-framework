@@ -14,7 +14,11 @@ endpoint** you already run (including NVIDIA's hosted dev endpoint - for evaluat
 
 > **Licensing.** The SVD model is distributed through NVIDIA NGC / NVIDIA AI
 > Enterprise and is access-gated. You authenticate to NVIDIA with your own key. 
-> Wowza does not redistribute the model image or weights.
+> Wowza does not redistribute the model image or weights. To get a key, join
+> NVIDIA's AI for Media Private Access Program and generate an NGC API key
+> with at least the **NGC Catalog** permission — NVIDIA's [Generate an API
+> Key](https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/getting-started.html#generate-an-api-key)
+> walks through it.
 
 ---
 
@@ -25,7 +29,8 @@ admin credentials — see [README](../README.md)), an NVIDIA GPU from the
 [supported matrix](#gpu-support-matrix) with current drivers, and the [NVIDIA
 Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 
-**1. Authenticate to NVIDIA and set your key** (one time):
+**1. Authenticate to NVIDIA and set your key** (one time; no key yet? — see
+[how to get one](https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/getting-started.html#generate-an-api-key)):
 
 ```bash
 docker login nvcr.io      # username: $oauthtoken   password: <your NGC API key>
