@@ -9,5 +9,10 @@
 # or set COMPOSE_FILE in .env so a bare `docker compose up` picks it up
 # automatically (see .env.example).
 services:
+    wse:
+        volumes:
+             - /usr/bin/tegrastats:/tmp/tegrastats        
     video-intelligence-service-gpu:
         image: wowza/wowza-video-intelligence-service:latest-jetpack7
+        volumes:
+             - /usr/bin/tegrastats:/tmp/tegrastats        

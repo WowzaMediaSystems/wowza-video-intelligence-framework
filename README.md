@@ -69,39 +69,15 @@ Local directories such as `logs/`, `tmp/`, `vis/`, and `wse/` are gitignored. In
 - VIF stream/default configuration - use the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page in WSE Manager, or the WSE REST API
 - `wse/conf.modules/vif/` - if local WSE volume mounts are enabled, advanced users can directly edit files to configure video intelligence routing, service connection settings, and feature behavior
 
-## Persistent Volume Mounts
-
-In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount are enabled by default. These map host folders into the containers:
-
-- `./wse/conf -> /usr/local/WowzaStreamingEngine/conf`
-- `./wse/conf.modules -> /usr/local/WowzaStreamingEngine/conf.modules`
-- `./wse/content -> /usr/local/WowzaStreamingEngine/content`
-- `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
-- `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
-- `./vis/models -> /build/models`
-
-What this enables:
-
-- Persistent WSE config and runtime files across container recreation.
-- Editing WSE config directly in your repo and seeing those changes in the running container.
-- Keeping WSE logs on the host for troubleshooting and historical inspection.
-- Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
-- Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
-
-This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:
-
-- `./wse/*` can preserve older runtime or config state that masks image changes.
-- `./vis/models/engines` can preserve stale TensorRT engines built for an older runtime, model set, or GPU environment.
-- Take care with `./vis/models/`: it may also contain custom model weights (`.pth`) that you want to keep.
-
-If you disable these mounts, WSE and VIS fall back to container filesystem defaults and local changes are not preserved when containers are recreated.
-
 ## Running Wowza VIF Locally (Quick Start)
 
 Make sure you have a valid [Wowza Streaming Engine key](https://www.wowza.com/free-trial).
 
 Before starting, confirm your machine meets the [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif). The default local workflow runs all three containers (`wse`, `manager`, and `video-intelligence-service-gpu`).
 
+> [!TIP]  
+> To install on an existing installation of Wowza Streaming Engine see instuctions [here](wse.standalone/README.md)
+> 
 #### 1. Create `.env` from the example and edit values:
     
 ```bash
@@ -174,6 +150,33 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > - The first time Docker Compose is run, the containers may take up to 20 minutes to download all required files. Actual time may vary based on available bandwidth  
 > - Each time the Video Intelligence Service (VIS) container starts, it may take approximately 3 minutes before detections are available
 
+### Persistent Volume Mounts
+
+In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount are enabled by default. These map host folders into the containers:
+
+- `./wse/conf -> /usr/local/WowzaStreamingEngine/conf`
+- `./wse/conf.modules -> /usr/local/WowzaStreamingEngine/conf.modules`
+- `./wse/content -> /usr/local/WowzaStreamingEngine/content`
+- `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
+- `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
+- `./vis/models -> /build/models`
+
+What this enables:
+
+- Persistent WSE config and runtime files across container recreation.
+- Editing WSE config directly in your repo and seeing those changes in the running container.
+- Keeping WSE logs on the host for troubleshooting and historical inspection.
+- Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
+- Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
+
+This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:
+
+- `./wse/*` can preserve older runtime or config state that masks image changes.
+- `./vis/models/engines` can preserve stale TensorRT engines built for an older runtime, model set, or GPU environment.
+- Take care with `./vis/models/`: it may also contain custom model weights (`.pth`) that you want to keep.
+
+If you disable these mounts, WSE and VIS fall back to container filesystem defaults and local changes are not preserved when containers are recreated.
+
 ## Testing Object Detection and Scene Understanding
 
 In the default examples included in this repository, a stream with a name matching `object.*` triggers object detection using an RF-DETR Medium model capable of identifying up to 80 COCO object categories, including people, vehicles, animals, and more. A stream matching `scene.*` triggers scene understanding, which classifies the overall activity or situation visible in the video and is currently experimental.
@@ -204,7 +207,6 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v
    - The `-vi` rendition includes overlays. For example, publish `object_mystream1`, then play `http://localhost/live/object_mystream1-vi/playlist.m3u8` in an HLS player.
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
-
 
 ## Default Model Coverage and Configuration
 

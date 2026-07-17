@@ -6,7 +6,7 @@ You can install WSE Video Intelligence Module onto an existing Wowza Streaming E
 
 ## Using the plugin installer to update Wowza Streaming Engine
 
-The WSE Video Intelligence jar includes a script to update your Wowza Streaming Engine.  This will update the xml files, copy necessary files to your Wowza Streaming Engine installation.
+The WSE Video Intelligence jar includes a script to update your Wowza Streaming Engine.  This will update the xml files, copy necessary files to your Wowza Streaming Engine installation. The wse-pluging-video-intelligence wse-plugin-video-intelligence-x.y.z.jar can be found [here](lib).
 ```
 java -jar wse-plugin-video-intelligence-x.y.z.jar Install
 ```
