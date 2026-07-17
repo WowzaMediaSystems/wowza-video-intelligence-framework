@@ -1,21 +1,20 @@
 # Synthetic Video Detector (Deepfake) Guide
 
-The Video Intelligence framework can flag **synthetic / AI-generated (deepfake)
-video** on a live stream. A detector type, `detector_type: "synthetic"`, watches
-your stream in short windows and returns a per-window **Real vs Fake** verdict —
-a `"synthetic"` / `"real"` label with a probability score — backed by the
-**NVIDIA Maxine Synthetic Video Detector (SVD)** model.
+The Video Intelligence framework can flag **synthetic / AI-generated video**
+on a live stream, backed by the **NVIDIA Maxine Synthetic Video Detector (SVD)** model.
+With `detector_type: "synthetic"`, the framework watches your stream in short windows 
+and returns a per-window **Real vs Fake** verdict, based on a configurable threshold
+
 
 It is **opt-in** and **bring-your-own endpoint**: nothing about the synthetic
 detector runs unless a stream is explicitly configured for it and pointed at a
 reachable SVD endpoint. That endpoint can be a **local detector sidecar** this
 framework brings up for you (`--profile svd`), or any **hosted / self-hosted SVD
-endpoint** you already run (including NVIDIA's hosted dev endpoint).
+endpoint** you already run (including NVIDIA's hosted dev endpoint - for evaluation purposes only).
 
 > **Licensing.** The SVD model is distributed through NVIDIA NGC / NVIDIA AI
-> Enterprise and is access-gated; the Wowza ⇄ NVIDIA partnership is what clears
-> that entitlement. You authenticate to NVIDIA with your own key. Wowza does not
-> redistribute the model image or weights.
+> Enterprise and is access-gated. You authenticate to NVIDIA with your own key. 
+> Wowza does not redistribute the model image or weights.
 
 ---
 
@@ -127,7 +126,7 @@ for a faster verdict cadence — the **Wowza Streaming Engine Transcoder is the
 right tool and your first choice**; you just configure the encode so the re-encode
 keeps the signal.
 
-The detector keys on subtle, high-frequency artifacts of AI generation, and a
+The detector keys on subtle artifacts of AI generation, and a
 re-encode loses them in exactly one way: by **not spending enough bits**. The
 Transcoder's default rate control is *average* bitrate, which under-spends on
 low-motion footage (a talking head, a locked-off camera) and quantizes the
@@ -243,22 +242,12 @@ default. Configure your synthetic stream with:
 | --- | --- | --- |
 | Detector Type | `synthetic` | Enables the synthetic detector |
 | Endpoint | `svd.docker:8001` | The in-network sidecar (host:port) |
-| Classification Threshold | `0.3` | A probability above this is labeled `"synthetic"` |
+| Classification Threshold | `0.3` | A score above this is labeled `"synthetic"` |
 | Duration | `2.0` | Window length in seconds |
 
 To reach the detector from a Video Intelligence Service running on **another
 machine**, uncomment the `ports:` block on the `svd` service in
 `docker-compose.yaml` and use that machine's address as the endpoint.
-
-> **Why a Docker volume plus a chown step?** The detector runs as a non-root
-> user (uid 1000, `triton-server`) and its image doesn't pre-create
-> `/opt/nim/.cache`, so a fresh cache mount is created **root-owned** and the
-> detector can't write it (`Permission denied: '/opt/nim/.cache/…'`) and won't
-> start — this is true for a `./vis` bind mount **and** for a named volume.
-> The stack handles it automatically: a one-shot `svd-cache-init` service
-> chowns the `svd-nim-cache` volume to the detector's uid before it boots, so
-> the detector itself stays non-root. This is the one place the SVD sidecar
-> needs setup the VLM sidecar (which runs as root) doesn't.
 
 ---
 
@@ -306,7 +295,7 @@ to override. Set them from the Manager UI or your stream configuration.
 | --- | --- | --- |
 | `endpoint` | — (required) | The SVD endpoint as `host:port` (not an http URL) |
 | `duration` | `2.0` | Analysis window length in seconds (see [window length](#a-note-on-window-length)) |
-| `classification_threshold` | `0.3` | Probability strictly above this ⇒ verdict `"synthetic"` |
+| `classification_threshold` | `0.3` | Scores strictly above this ⇒ verdict `"synthetic"` |
 | `use_tls` | auto | Force TLS on/off; omit to auto-detect from the port |
 | `api_key` | none | Bearer token for the endpoint; omit for a bare self-hosted detector |
 | `function_id` | none | Required by NVIDIA's hosted endpoint; omit otherwise |
@@ -327,7 +316,7 @@ Each window produces one result:
 | --- | --- |
 | `verdict` | `"synthetic"`, `"real"`, or `"unknown"` (no verdict — endpoint unreachable or rejecting requests) |
 | `synthetic_probability` | `0.0–1.0`; strictly above `classification_threshold` ⇒ `"synthetic"` |
-| `synthetic_logit` | the underlying model score the probability is derived from |
+| `synthetic_logit` | the underlying model output the score is derived from |
 | `total_clips` | how many frame-level scores the model produced for the window |
 | `per_clip_scores[]` | the full frame-level score breakdown — included only when `include_per_clip_scores` is `true` |
 
@@ -349,7 +338,7 @@ rendition.
 > source rendition stays untouched — at the cost of transcoding that one extra
 > rendition.
 
-`verdict: "unknown"` (with a zeroed probability) is emitted when the endpoint is
+`verdict: "unknown"` (with a zeroed score) is emitted when the endpoint is
 unreachable — or reachable but rejecting requests, for example on an invalid or
 under-scoped API key (see [Deployment option
 B](#deployment-option-b--hosted--bring-your-own-endpoint)) — so a slow, down, or
