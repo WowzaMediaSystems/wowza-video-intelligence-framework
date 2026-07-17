@@ -1138,7 +1138,7 @@
                     <option value="vlm">VLM</option>
                     <option value="synthetic">Synthetic</option>
                 </select>
-                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated / deepfake content (a Real-vs-Fake verdict).</span></div>
+                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated content (a Real-vs-Fake verdict).</span></div>
             </div>
 
             <div class="form-group" id="cfg-duration-group">
@@ -1542,7 +1542,7 @@
 
             <!-- Synthetic Analysis Section -->
             <div class="form-section" id="synthetic-analysis-section" style="display:none;">
-                <div class="form-section-title">Synthetic (Deepfake) Detection</div>
+                <div class="form-section-title">Synthetic Video Detection</div>
                 <div class="section-help">
                     Relay each source H.264 window to the NVIDIA Synthetic Video Detector NIM (over gRPC) for a per-window Real-vs-Fake verdict. Opt-in / bring-your-own endpoint; H.264-only; no re-encode.
                 </div>
