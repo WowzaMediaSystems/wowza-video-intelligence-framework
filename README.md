@@ -1,4 +1,4 @@
-# Wowza Streaming Engine · Video Intelligence Framework BETA
+# Wowza Streaming Engine · Video Intelligence Framework
 
 **Docker-based Wowza Streaming Engine with a Video Intelligence add-on for real-time object detection and scene understanding.**  
 
@@ -7,7 +7,6 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 [![Docker](https://img.shields.io/badge/docker-required-blue?logo=docker&style=flat-square)](https://docs.docker.com/engine/install/)
 [![WSE](https://img.shields.io/badge/Wowza%20Streaming%20Engine-license%20required-orange?style=flat-square)](https://auth.wowza.com/register?type=engine)
 [![License](https://img.shields.io/badge/license-proprietary-red?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/status-beta-yellow?style=flat-square)](#)
 
 ---
 
