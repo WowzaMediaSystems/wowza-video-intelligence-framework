@@ -16,7 +16,9 @@ services:
             - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
-            - IPWHITELIST=*
+            # Source IPs allowed to reach the WSE REST interface. Set IPWHITELIST
+            # in .env to restrict access; default allows any IP.
+            - IPWHITELIST=${IPWHITELIST:-*}
             - LOG_LEVEL=INFO #DEBUG INFO WARN ERROR
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change
             - VIS_API_KEY=${VIS_API_KEY}
@@ -68,6 +70,20 @@ services:
         extra_hosts:
           - "host.docker.internal:host-gateway"
 
+    # One-shot init: hands the ./vis bind mounts to the non-root vis user
+    # (uid/gid 1001) so VIS can write models/logs, then exits (VIS waits via
+    # depends_on). Reuses the VIS image -- no extra pull, no GPU needed.
+    vis-init:
+        image: wowza/wowza-video-intelligence-service:latest-gpu
+        pull_policy: always
+        profiles: ["", "vi-service", "default", "vlm"]
+        user: "0:0"
+        restart: "no"
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}"]
+        volumes:
+          - ./vis/models:/build/models
+          - ./vis/logs:${LOG_DIR:-/logs}
+
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
         image: wowza/wowza-video-intelligence-service:latest-gpu
@@ -75,6 +91,9 @@ services:
         #platform: linux/arm64
         profiles: ["", "vi-service", "default", "vlm"]
         restart: unless-stopped
+        depends_on:
+          vis-init:
+            condition: service_completed_successfully
         environment:
         # Core service configuration
           - VIS_PORT=${VIS_PORT:-5001}
@@ -85,6 +104,10 @@ services:
         # - INFERENCE_THREADS_PER_GPU=32
         # Optional: Enable API key authentication
           - VIS_API_KEY=${VIS_API_KEY}
+        # Refuse to start without a non-empty VIS_API_KEY (fail closed). Set
+        # SECURE_MODE=false in .env only for air-gapped/internal-only
+        # deployments that consciously opt out of authentication.
+          - SECURE_MODE=${SECURE_MODE:-true}
         # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
         # - TRT_MODELS=object-detection-medium
         # - TRT_MODELS=object-detection-nano,my-custom-model.pth
@@ -101,17 +124,38 @@ services:
         # in .env to override (default /logs); the ./vis/logs bind mount
         # below follows it.
           - LOG_PATH=${LOG_DIR:-/logs}
+        # The bind mounts below keep HOST ownership, but the `vis-init` service
+        # above chowns them to 1001 before this service starts, so no host-side
+        # action is needed. (LOG_PATH=/logs lives outside /build; vis-init covers
+        # it too.)
         volumes:
-        # Mount models directory for checkpoints
+        # Mount models directory for checkpoints and the TensorRT engine cache
+        # (models/engines). Writable by default so VIS can download weights and
+        # build engines on first boot.
+        #
+        # Hardening (optional): mount read-only to block planting a malicious
+        # .pth that the startup model scan would deserialize. Only for stacks
+        # that pre-seed all weights AND pre-build the TRT engines and use no
+        # custom models -- read-only, VIS cannot download weights, build/refresh
+        # engines, or write the cache at runtime. Swap the line below for:
+        #   - ./vis/models:/build/models:ro
           - ./vis/models:/build/models
         # Optional: Mount SSL certificates for HTTPS/WSS
         # - ./certs:/certs:ro
-        # Optional: Mount for RT-DETR v2 model cache (for offline usage)
-        # - ~/.cache/huggingface:/root/.cache/huggingface:ro
+        # Optional: Mount for RT-DETR v2 model cache (for offline usage).
+        # HOME=/build for the vis user, so HF caches under /build/.cache.
+        # - ~/.cache/huggingface:/build/.cache/huggingface:ro
         # Mount log directory (target follows LOG_DIR from .env)
           - ./vis/logs:${LOG_DIR:-/logs}
-        ports:
-          - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
+        # The service is only reachable on the internal compose network by
+        # default. Engine reaches it by hostname
+        # (VIS_HOST=video-intelligence-service.docker) on the bridge, so the
+        # same-host stack works without publishing the port. To reach VIS from
+        # other machines (e.g. Engine running on a different host), publish the
+        # port by uncommenting below -- and set a non-empty VIS_API_KEY in .env
+        # (keep SECURE_MODE=true) so the endpoint requires authentication:
+        # ports:
+        #   - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
         env_file:
             - .env
         extra_hosts:
