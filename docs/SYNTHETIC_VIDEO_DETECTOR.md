@@ -1,4 +1,4 @@
-# Synthetic Video Detector (Deepfake) Guide
+# Synthetic Video Detector Guide
 
 The Video Intelligence framework can flag **synthetic / AI-generated video**
 on a live stream, backed by the **NVIDIA Maxine Synthetic Video Detector (SVD)** model.
