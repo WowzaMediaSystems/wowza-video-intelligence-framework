@@ -208,32 +208,6 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
 
-## Persistent Volume Mounts
-
-In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount are enabled by default. These map host folders into the containers:
-
-- `./wse/conf -> /usr/local/WowzaStreamingEngine/conf`
-- `./wse/conf.modules -> /usr/local/WowzaStreamingEngine/conf.modules`
-- `./wse/content -> /usr/local/WowzaStreamingEngine/content`
-- `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
-- `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
-- `./vis/models -> /build/models`
-
-What this enables:
-
-- Persistent WSE config and runtime files across container recreation.
-- Editing WSE config directly in your repo and seeing those changes in the running container.
-- Keeping WSE logs on the host for troubleshooting and historical inspection.
-- Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
-- Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
-
-This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:
-
-- `./wse/*` can preserve older runtime or config state that masks image changes.
-- `./vis/models/engines` can preserve stale TensorRT engines built for an older runtime, model set, or GPU environment.
-- Take care with `./vis/models/`: it may also contain custom model weights (`.pth`) that you want to keep.
-
-If you disable these mounts, WSE and VIS fall back to container filesystem defaults and local changes are not preserved when containers are recreated.
 ## Default Model Coverage and Configuration
 
 By default, VIF uses a RF-DETR based computer vision model capable of detecting up to 80 object categories defined by the COCO dataset. 
