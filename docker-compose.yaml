@@ -229,11 +229,13 @@ services:
     # per-window Real/Fake verdict.
     #
     # Opt-in via the `svd` compose profile -- a bare `docker compose up`
-    # never starts it:
-    #   docker compose --profile svd up                    # vis + svd only
-    #   docker compose --profile default --profile svd up  # full stack + svd
+    # never starts it, and the profile gates ONLY the detector sidecar;
+    # combine profiles to start it alongside the services it serves:
+    #   docker compose --profile svd up                        # detector sidecar only
+    #   docker compose --profile default --profile svd up      # full stack + svd
+    #   docker compose --profile vi-service --profile svd up   # VIS + svd pairing
     # Teardown: a bare `docker compose down` leaves svd running; use
-    # `docker compose --profile svd down` to stop it.
+    # `docker compose --profile svd down` to stop it (the sidecar only).
     #
     # ACCESS-GATED IMAGE: nvcr.io/nim/nvidia/synthetic-video-detector is
     # distributed through NVIDIA NGC / NVIDIA AI Enterprise and requires the
@@ -274,7 +276,6 @@ services:
           # (see docs/SYNTHETIC_VIDEO_DETECTOR.md).
           - NIM_MANIFEST_PROFILE
           - NIM_CACHE_PATH=/opt/nim/.cache
-          - NVIDIA_VISIBLE_DEVICES=${SVD_GPU_IDS:-all}         # pin to specific card(s) on multi-GPU hosts, e.g. "1"
         # Model-profile cache, kept in a named volume (not a ./vis bind mount)
         # so it's Docker-managed and survives `down` -- only `down -v` removes
         # it. A fresh volume is created root-owned, but the NIM runs as non-root
@@ -305,9 +306,11 @@ services:
           resources:
             reservations:
               devices:
-                # `video` capability is REQUIRED: the NIM uses NVDEC/NVENC.
-                # All GPUs are exposed; pin to a dedicated card on multi-GPU
-                # hosts via SVD_GPU_IDS in .env (indices match nvidia-smi).
+                # `video` capability is REQUIRED (the NIM decodes with
+                # NVDEC/NVENC), and only this device-reservation form reliably
+                # injects the codec libraries. To pin the NIM to a dedicated
+                # card on a multi-GPU host, replace `count: all` with e.g.
+                # `device_ids: ["1"]` (indices match nvidia-smi).
                 - driver: nvidia
                   capabilities: [video, gpu, compute, utility]
                   count: all

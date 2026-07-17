@@ -40,9 +40,11 @@ In `.env`:
 
 ```bash
 NGC_API_KEY=<your NGC API key>
-# Optional, on a multi-GPU host, give the detector its own card:
-SVD_GPU_IDS=1
 ```
+
+Optional, on a multi-GPU host: give the detector its own card by editing the
+`svd` service's device reservation in `docker-compose.yaml` — replace
+`count: all` with e.g. `device_ids: ["1"]` (indices match `nvidia-smi`).
 
 **2. Start the stack with the synthetic detector sidecar:**
 
