@@ -267,7 +267,7 @@ configuration at it:
 | Endpoint | `grpc.nvcf.nvidia.com:443` | The hosted endpoint (host:port) |
 | API Key | `<your key>` | Sent to authenticate the request |
 | Function ID | `<function id>` | Required by NVIDIA's hosted endpoint |
-| Classification Threshold | `0.3` | A probability above this is labeled `"synthetic"` |
+| Classification Threshold | `0.3` | A score above this is labeled `"synthetic"` |
 | Duration | `2.0` | Window length in seconds |
 
 - **Transport security is automatic.** A `:443` endpoint (hosted, public-cert
@@ -320,7 +320,7 @@ Each window produces one result:
 | Field | Meaning |
 | --- | --- |
 | `verdict` | `"synthetic"`, `"real"`, or `"unknown"` (no verdict — endpoint unreachable or rejecting requests) |
-| `synthetic_probability` | `0.0–1.0`; strictly above `classification_threshold` ⇒ `"synthetic"` |
+| `synthetic_score` | `0.0–1.0`; strictly above `classification_threshold` ⇒ `"synthetic"` |
 | `synthetic_logit` | the underlying model output the score is derived from |
 | `total_clips` | how many frame-level scores the model produced for the window |
 | `per_clip_scores[]` | the full frame-level score breakdown — included only when `include_per_clip_scores` is `true` |

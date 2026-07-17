@@ -130,6 +130,6 @@
         "endpoint": "grpc.nvcf.nvidia.com:443",
         //"api_key": "nvapi-...",           // NVCF: sent as Authorization: Bearer; self-hosted: usually none
         //"function_id": "847b6e53-0133-452d-ab85-d7acf3ace723",  // NVCF SVD function id
-        "classification_threshold": 0.3     // verdict "synthetic" when synthetic_probability > threshold
+        "classification_threshold": 0.3     // verdict "synthetic" when synthetic_score > threshold
     }
 }
