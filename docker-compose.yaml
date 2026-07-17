@@ -76,7 +76,7 @@ services:
     # (uid/gid 1001) so VIS can write models/logs, then exits (VIS waits via
     # depends_on). Reuses the VIS image -- no extra pull, no GPU needed.
     vis-init:
-        image: wowza/wowza-video-intelligence-service:latest-gpu
+        image: wowza/wowza-video-intelligence-service:1.0.0-gpu
         pull_policy: always
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
@@ -88,7 +88,7 @@ services:
 
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
-        image: wowza/wowza-video-intelligence-service:latest-gpu
+        image: wowza/wowza-video-intelligence-service:1.0.0-gpu
         pull_policy: always
         #platform: linux/arm64
         profiles: ["", "vi-service", "default", "vlm"]
