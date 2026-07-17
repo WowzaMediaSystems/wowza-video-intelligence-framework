@@ -74,8 +74,8 @@ Put inference on the GPU box and keep the engine wherever your streaming runs:
 │  engine + manager  │─────▶│  VIS ──▶ vlm sidecar    │
 └────────────────────┘ :5001└─────────────────────────┘
 
-box B:  docker compose --profile vlm up -d          # VIS + VLM only
-box A:  docker compose --profile wse up -d          # engine + manager only
+box B:  docker compose --profile vi-service --profile vlm up -d   # VIS + VLM only
+box A:  docker compose --profile wse up -d                        # engine + manager only
         # .env on box A: VIS_PROTOCOL=ws  VIS_HOST=<box B address>  VIS_PORT=5001
 ```
 
@@ -92,7 +92,7 @@ Spread streams or applications across several GPU boxes. `vi_service_url` is ove
 ]
 ```
 
-Run each GPU box with `docker compose --profile vlm up -d` — with the default configuration, each VIS uses its own local VLM sidecar.
+Run each GPU box with `docker compose --profile vi-service --profile vlm up -d` — with the default configuration, each VIS uses its own local VLM sidecar.
 
 ### 4. Many engines, one VIS
 
