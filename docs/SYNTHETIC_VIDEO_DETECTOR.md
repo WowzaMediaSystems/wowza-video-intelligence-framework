@@ -366,11 +366,15 @@ air-gapped host:
 
 1. **On a machine with NGC access**, pull the image and populate the cache by
    running the sidecar once (`docker compose --profile svd up -d svd`, then wait
-   for it to report healthy). Export the image and the populated volume:
+   for it to report healthy). Export the image and the populated volume (the
+   image tar is **~36 GB** — plan transfer media accordingly; the cache is well
+   under 1 GB):
    ```bash
    docker save nvcr.io/nim/nvidia/synthetic-video-detector:latest -o svd-nim-image.tar
-   docker run --rm -v svd-nim-cache:/cache -v "$PWD":/out busybox \
-     tar czf /out/svd-nim-cache.tgz -C /cache .
+   docker run --rm --user 0:0 --entrypoint tar \
+     -v svd-nim-cache:/cache -v "$PWD":/out \
+     nvcr.io/nim/nvidia/synthetic-video-detector:latest \
+     czf /out/svd-nim-cache.tgz -C /cache .
    ```
 2. **Copy** `svd-nim-image.tar` and `svd-nim-cache.tgz` to the air-gapped host,
    load the image, and restore the volume **before** the first `--profile svd`
@@ -378,9 +382,14 @@ air-gapped host:
    ```bash
    docker load -i svd-nim-image.tar
    docker volume create svd-nim-cache
-   docker run --rm -v svd-nim-cache:/cache -v "$PWD":/in busybox \
-     tar xzf /in/svd-nim-cache.tgz -C /cache
+   docker run --rm --user 0:0 --entrypoint tar \
+     -v svd-nim-cache:/cache -v "$PWD":/in \
+     nvcr.io/nim/nvidia/synthetic-video-detector:latest \
+     xzf /in/svd-nim-cache.tgz -C /cache
    ```
+   The tar helper runs inside the detector image itself (just loaded on the
+   line above), so nothing beyond the two files needs to reach the air-gapped
+   host — a utility image like busybox would be one more thing to ship.
 3. Keep `NGC_API_KEY` set (it is validated against the **local** cache) and
    start with `--profile svd`. With the volume pre-populated, the detector
    serves the cached model with **no download and no outbound connection**.
