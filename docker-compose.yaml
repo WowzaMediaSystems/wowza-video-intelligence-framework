@@ -210,6 +210,9 @@ services:
         # recreated (image update, compose edit). Safe to delete -- the
         # next boot just recompiles.
           - ./vis/vlm-cache:/root/.cache/vllm
+        # vLLM logs only to stdout; the entrypoint tee's it to vlm.log here so
+        # it persists like VIS. Root-owned (vllm is root); vlm-logrotate rotates it.
+          - ./vis/vlm-logs:/logs
         entrypoint: ["/bin/bash", "/vlm-entrypoint.sh"]
         # Set any of these in .env (or the shell) to override; defaults and
         # per-knob docs live in ./vis/vlm-entrypoint.sh. Unlike the other
@@ -230,6 +233,7 @@ services:
           - VLM_MAX_IMAGES_PER_PROMPT=${VLM_MAX_IMAGES_PER_PROMPT:-}
           - VLM_PORT=${VLM_PORT:-}                                      # served port (default 8000); the healthcheck follows it
           - VLM_EXTRA_ARGS=${VLM_EXTRA_ARGS:-}
+          - VLM_LOG_DIR=${VLM_LOG_DIR-/logs}                            # file-log dir (mounted below); set empty to disable file logging
         # Read by vLLM / HuggingFace directly, not by the entrypoint:
           - VLLM_API_KEY=${VLLM_API_KEY:-}      # require this key on the endpoint (see ports note below)
           - HF_TOKEN=${HF_TOKEN:-}              # optional HuggingFace token: higher rate limits on the first-boot weight download
@@ -265,3 +269,29 @@ services:
                 - driver: nvidia
                   capabilities: [gpu, compute, utility]
                   count: all
+
+    # ── VLM log rotation (opt-in, pairs with vlm) ──────────────────────────
+    # Rotates ./vis/vlm-logs/vlm.log daily (vLLM can't rotate its own file).
+    # Carries the vlm profile; idle via missingok if file logging is disabled.
+    vlm-logrotate:
+        image: alpine:3.20
+        profiles: ["vlm"]
+        restart: unless-stopped
+        volumes:
+          - ./vis/vlm-logs:/logs
+          - ./vlm-logrotate.conf:/vlm-logrotate.conf:ro
+        # Install logrotate at start (needs network); if it fails, idle without
+        # rotating (no retry). Config copied to a root-owned path (logrotate needs uid 0).
+        command:
+          - /bin/sh
+          - -c
+          - |
+            apk add --no-cache logrotate >/dev/null 2>&1 || {
+              echo "[vlm-logrotate] logrotate unavailable (no network?); rotation disabled"
+              while :; do sleep 86400; done
+            }
+            cp /vlm-logrotate.conf /etc/logrotate-vlm.conf
+            while true; do
+              logrotate -s /logs/.logrotate.state /etc/logrotate-vlm.conf
+              sleep 86400
+            done

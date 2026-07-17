@@ -63,12 +63,25 @@
 # Use the same <Y> to size the `max_concurrent_requests` cap in the VIS
 # WebSocket VLM config -- vLLM does not expose the ceiling over HTTP, so
 # VIS cannot read it automatically.
+#
+# LOGS: output is tee'd to VLM_LOG_DIR/vlm.log (default /logs) and stdout;
+# set VLM_LOG_DIR empty to disable. The vlm-logrotate sidecar rotates it.
 
 set -euo pipefail
 
 # Bump on every edit to this file.
-ENTRYPOINT_REVISION="2026-06-10"
+ENTRYPOINT_REVISION="2026-07-17"
 echo "[vlm-entrypoint] revision ${ENTRYPOINT_REVISION}"
+
+# Tee output to a file (like VIS) before the exec so vLLM stays PID 1 and tee
+# runs as a child. Empty VLM_LOG_DIR or an unwritable dir -> stdout only.
+VLM_LOG_DIR="${VLM_LOG_DIR-/logs}"
+if [ -n "${VLM_LOG_DIR}" ] && mkdir -p "${VLM_LOG_DIR}" 2>/dev/null; then
+  exec > >(tee -a "${VLM_LOG_DIR}/vlm.log") 2>&1
+  echo "[vlm-entrypoint] logging to ${VLM_LOG_DIR}/vlm.log (also on stdout)"
+else
+  echo "[vlm-entrypoint] file logging off -- stdout only"
+fi
 
 MODEL="${VLM_MODEL:-Qwen/Qwen3-VL-4B-Instruct-FP8}"
 MAX_MODEL_LEN="${VLM_MAX_MODEL_LEN:-16384}"
