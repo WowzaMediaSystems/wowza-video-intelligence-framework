@@ -163,7 +163,7 @@ services:
         extra_hosts:
             - "host.docker.internal:host-gateway"
         healthcheck:
-          test: ["CMD", "sh", "-c", "nc -z localhost ${VIS_PORT:-5001}"]
+          test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', int('${VIS_PORT:-5001}')), timeout=5).close()"]
           interval: 30s
           timeout: 10s
           retries: 3
