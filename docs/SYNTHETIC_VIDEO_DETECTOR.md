@@ -252,9 +252,9 @@ default. Configure your synthetic stream with:
 | Classification Threshold | `0.3` | A score above this is labeled `"synthetic"` |
 | Duration | `2.0` | Window length in seconds |
 
-To reach the detector from a Video Intelligence Service running on **another
-machine**, uncomment the `ports:` block on the `svd` service in
-`docker-compose.yaml` and use that machine's address as the endpoint.
+The sidecar can also serve a Video Intelligence Service running on **another
+machine** — see [Deployment topologies](#deployment-topologies) for publishing
+the port and securing the connection.
 
 ---
 
@@ -290,6 +290,84 @@ configuration at it:
   (NVIDIA's hosted endpoint does; a bare self-hosted endpoint does not).
 - NVIDIA's hosted **Try API** has a per-request size cap and is a dev
   convenience, not a production target.
+
+---
+
+## Deployment topologies
+
+The detector sidecar and the Video Intelligence Service that queries it don't
+have to share a machine — a common split puts the sidecar alone on a GPU host
+from the [support matrix](#gpu-support-matrix) and the rest of the stack
+elsewhere.
+
+### Same host (the default)
+
+Everything as in the [Quick start](#quick-start): the sidecar and the service
+share the internal compose network, the endpoint is `svd.docker:8001`, and
+**no host port is published** — the detector is unreachable from outside the
+machine, so there is nothing extra to secure.
+
+### Remote detector host
+
+To serve a Video Intelligence Service on another machine, publish the gRPC
+port — uncomment the `ports:` block on the `svd` service in
+`docker-compose.yaml` on the detector host — and use `<detector-host>:8001`
+as the stream's endpoint.
+
+A published port accepts connections from the network, and it speaks
+**plaintext gRPC by default**: the video crosses the network unencrypted, and
+anyone who can reach the port can submit video for analysis (a self-hosted
+detector does not check API keys — only NVIDIA's hosted endpoint does).
+Restrict who can reach the port (firewall / security group), and whenever the
+hop leaves a trusted network, enable TLS.
+
+### Securing the connection (TLS)
+
+The detector terminates TLS natively. On the **detector host**:
+
+1. Place the server certificate and key in `./certs/` (issued for the
+   hostname streams will dial), readable by the container — the detector runs
+   as a non-root user:
+
+   ```bash
+   mkdir -p certs    # certs/server-cert.pem + certs/server-key.pem
+   chmod 644 certs/server-cert.pem certs/server-key.pem
+   ```
+
+2. Uncomment the `./certs` mount on the `svd` service in `docker-compose.yaml`.
+
+3. Set the TLS mode and the in-container certificate paths in `.env`:
+
+   ```bash
+   NIM_SSL_MODE=tls
+   NIM_SSL_CERT_PATH=/certs/server-cert.pem
+   NIM_SSL_KEY_PATH=/certs/server-key.pem
+   ```
+
+4. Recreate the sidecar: `docker compose --profile svd up -d svd`.
+
+TLS covers the gRPC endpoint (`8001`). The HTTP health/metrics port (`8000`)
+stays plaintext — the bundled container healthcheck keeps working unchanged —
+so if you publish `8000` at all, treat it as unencrypted.
+
+Then on the **stream configuration** (the machine running the Video
+Intelligence Service):
+
+- Turn `Use TLS` on. The automatic transport detection assumes plaintext on
+  non-`443` ports, so it must be set explicitly for `<detector-host>:8001`.
+- If the certificate is not from a public CA, set `tls_ca_cert` to the CA (or
+  self-signed) certificate, as a **file path readable by the Video
+  Intelligence Service**. With the bundled compose stack, drop the file in
+  `./certs/` on that machine, uncomment the `./certs` mount on the
+  `video-intelligence-service-gpu` service, and use `/certs/<file>.pem`.
+
+**Mutual TLS** additionally authenticates the clients: only holders of a
+client certificate signed by your CA can use the detector. On the detector
+host set `NIM_SSL_MODE=mtls` and point `NIM_SSL_CA_CERTS_PATH` at the CA
+certificate that signs your client certificates (in `./certs/` next to the
+server pair); each stream then also sets `tls_client_cert` +
+`tls_client_key` (file paths on the Video Intelligence Service machine,
+delivered the same way as `tls_ca_cert` above).
 
 ---
 

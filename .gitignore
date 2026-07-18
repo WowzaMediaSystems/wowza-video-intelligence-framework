@@ -1,6 +1,9 @@
 # Ignore environment file with secrets
 .env
 
+# TLS certificate material (vis-tls-proxy, SVD NIM_SSL_*)
+certs/
+
 # Ignore all log files
 *.log
 
