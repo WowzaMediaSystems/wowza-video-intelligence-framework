@@ -419,8 +419,8 @@ Equivalently, in the stream configuration JSON:
 ```
 
 The three certificate properties are **file paths readable by the Video
-Intelligence Service** — not by the engine, and not by the detector. Drop
-the files in `./certs/` on the machine where VIS runs, uncomment the
+Intelligence Service**, preferably stored in the mounted `./certs/` folder.
+Drop the files in `./certs/` on the machine where VIS runs, uncomment the
 `./certs` mount on the `video-intelligence-service-gpu` service, and use
 `/certs/<file>.pem` as shown.
 
