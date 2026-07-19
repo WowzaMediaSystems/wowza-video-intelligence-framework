@@ -318,8 +318,7 @@ A published port accepts connections from the network, and it speaks
 **plaintext gRPC by default**: the video crosses the network unencrypted, and
 anyone who can reach the port can submit video for analysis (a self-hosted
 detector does not check API keys — only NVIDIA's hosted endpoint does).
-Restrict who can reach the port (firewall / security group), and whenever the
-hop leaves a trusted network, enable TLS.
+Restrict who can reach the port (firewall / security group) and enable TLS.
 
 ### Securing the connection (TLS)
 
@@ -357,9 +356,9 @@ Intelligence Service):
   non-`443` ports, so it must be set explicitly for `<detector-host>:8001`.
 - If the certificate is not from a public CA, set `tls_ca_cert` to the CA (or
   self-signed) certificate, as a **file path readable by the Video
-  Intelligence Service**. With the bundled compose stack, drop the file in
-  `./certs/` on that machine, uncomment the `./certs` mount on the
-  `video-intelligence-service-gpu` service, and use `/certs/<file>.pem`.
+  Intelligence Service**. Drop the file in `./certs/` on the machine where VIS runs,
+  uncomment the `./certs` mount on the `video-intelligence-service-gpu` service,
+  and use `/certs/<file>.pem` in the `tls_ca_cert` .env property.
 
 **Mutual TLS** additionally authenticates the clients: only holders of a
 client certificate signed by your CA can use the detector. On the detector
