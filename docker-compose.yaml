@@ -323,14 +323,11 @@ services:
           # (see docs/SYNTHETIC_VIDEO_DETECTOR.md).
           - NIM_MANIFEST_PROFILE
           # Server-side TLS on the NIM's ports -- for securing a PUBLISHED
-          # endpoint (see the ports note below). Same bare-key pass-through
-          # mechanism as NIM_MANIFEST_PROFILE: omitted from the container
-          # unless set in .env, so the default in-network deployment is
-          # untouched. Set NIM_SSL_MODE=mtls (mutual TLS -- also authenticates
-          # clients; plain tls encrypts only) plus the
-          # /certs paths in .env and uncomment the ./certs mount below; full
-          # walkthrough in docs/SYNTHETIC_VIDEO_DETECTOR.md (Deployment
-          # topologies).
+          # endpoint (see the ports note below).
+          # Set NIM_SSL_MODE=mtls (mutual TLS -- also authenticates clients;
+          # plain tls encrypts only) plus the /certs paths in .env and
+          # uncomment the ./certs mount below; full walkthrough in
+          # docs/SYNTHETIC_VIDEO_DETECTOR.md (Deployment topologies).
           - NIM_SSL_MODE
           - NIM_SSL_CERT_PATH
           - NIM_SSL_KEY_PATH
@@ -346,7 +343,7 @@ services:
         # ./docs/SYNTHETIC_VIDEO_DETECTOR.md.
         volumes:
           - svd-nim-cache:/opt/nim/.cache
-          # Certificate material for the NIM_SSL_* settings above -- uncomment
+          # Certificate files for the NIM_SSL_* settings above -- uncomment
           # when enabling TLS:
           # - ./certs:/certs:ro
         # gRPC (8001) + HTTP mgmt/health (8000) are reachable on the compose
