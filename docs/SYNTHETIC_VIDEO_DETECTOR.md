@@ -20,6 +20,20 @@ endpoint** you already run (including NVIDIA's hosted dev endpoint - for evaluat
 > Key](https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/getting-started.html#generate-an-api-key)
 > walks through it.
 
+## Table of Contents
+
+- [Quick start](#quick-start)
+- [What to expect](#what-to-expect)
+- [GPU support matrix](#gpu-support-matrix)
+- [Deployment option A — local detector sidecar](#deployment-option-a--local-detector-sidecar---profile-svd)
+- [Deployment option B — hosted / bring-your-own endpoint](#deployment-option-b--hosted--bring-your-own-endpoint)
+- [Deployment topologies](#deployment-topologies)
+- [Configuration reference](#configuration-reference)
+- [What you receive](#what-you-receive)
+- [Air-gapped deployment](#air-gapped-deployment)
+- [Compliance note (EU AI Act Article 50)](#compliance-note-eu-ai-act-article-50)
+- [See also](#see-also)
+
 ---
 
 ## Quick start
@@ -261,8 +275,8 @@ the port and securing the connection.
 ## Deployment option B — hosted / bring-your-own endpoint
 
 If you already run an SVD endpoint (self-hosted elsewhere, or NVIDIA's hosted
-dev endpoint), **don't** enable the `svd` profile — just point the stream's
-configuration at it:
+dev endpoint — **for evaluation only, not production**), **don't** enable the
+`svd` profile — just point the stream's configuration at it:
 
 | Setting | Value | Meaning |
 | --- | --- | --- |
@@ -286,8 +300,10 @@ configuration at it:
   an invocation-scoped key (for example from
   [build.nvidia.com](https://build.nvidia.com/nvidia/synthetic-video-detector))
   and use that as the API Key.
-- **API Key and Function ID** are only needed by endpoints that require them
-  (NVIDIA's hosted endpoint does; a bare self-hosted endpoint does not).
+- **API Key and Function ID** exist for NVIDIA's hosted endpoint only — and
+  that endpoint is for **evaluation, not production**. A self-hosted detector
+  ignores them entirely; to control who can use it, use
+  [mTLS](#securing-the-connection-mtls) instead.
 - NVIDIA's hosted **Try API** has a per-request size cap and is a dev
   convenience, not a production target.
 
@@ -318,55 +334,82 @@ A published port accepts connections from the network, and it speaks
 **plaintext gRPC by default**: the video crosses the network unencrypted, and
 anyone who can reach the port can submit video for analysis (a self-hosted
 detector does not check API keys — only NVIDIA's hosted endpoint does).
-Restrict who can reach the port (firewall / security group) and enable TLS.
+Restrict who can reach the port (firewall / security group) and secure the
+connection with [mTLS](#securing-the-connection-mtls).
 
-### Securing the connection (TLS)
+### Securing the connection (mTLS)
 
-The detector terminates TLS natively. On the **detector host**:
+The detector terminates TLS natively, in two modes: **TLS** encrypts the
+traffic and proves the detector's identity to streams; **mutual TLS (mTLS)**
+additionally authenticates every client — only holders of a client
+certificate signed by your CA can use the detector. A self-hosted detector
+does not check API keys, so **mTLS is the only built-in way to control who
+can use a published endpoint** — prefer it unless something else (network
+isolation, a fronting proxy) already restricts access.
 
-1. Place the server certificate and key in `./certs/` (issued for the
-   hostname streams will dial), readable by the container — the detector runs
-   as a non-root user:
+**1. Generate the certificates.** Any PKI works — if your organization runs
+one, request the certificates there. For a self-contained setup, with
+OpenSSL:
 
-   ```bash
-   mkdir -p certs    # certs/server-cert.pem + certs/server-key.pem
-   chmod 644 certs/server-cert.pem certs/server-key.pem
-   ```
+```bash
+# One-time CA -- signs everything; keep ca-key.pem offline and safe
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+  -keyout ca-key.pem -out ca-cert.pem -subj "/CN=my-vif-ca"
 
-2. Uncomment the `./certs` mount on the `svd` service in `docker-compose.yaml`.
+# Server certificate -- CN/SAN must match the hostname streams dial
+# (the <detector-host> in the stream's endpoint)
+openssl req -newkey rsa:2048 -nodes \
+  -keyout server-key.pem -out server.csr -subj "/CN=<detector-host>"
+openssl x509 -req -in server.csr -sha256 -days 825 \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -extfile <(printf "subjectAltName=DNS:<detector-host>") \
+  -out server-cert.pem
 
-3. Set the TLS mode and the in-container certificate paths in `.env`:
+# Client certificate -- one per Video Intelligence Service allowed in
+openssl req -newkey rsa:2048 -nodes \
+  -keyout client-key.pem -out client.csr -subj "/CN=vis-client"
+openssl x509 -req -in client.csr -sha256 -days 825 \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out client-cert.pem
+```
 
-   ```bash
-   NIM_SSL_MODE=tls
-   NIM_SSL_CERT_PATH=/certs/server-cert.pem
-   NIM_SSL_KEY_PATH=/certs/server-key.pem
-   ```
+**2. Configure the detector host.** Place `server-cert.pem`,
+`server-key.pem`, and `ca-cert.pem` in `./certs/`, readable by the container
+(the detector runs as a non-root user — `chmod 644` the files). Uncomment
+the `./certs` mount on the `svd` service in `docker-compose.yaml`, and set
+in `.env`:
 
-4. Recreate the sidecar: `docker compose --profile svd up -d svd`.
+```bash
+NIM_SSL_MODE=mtls
+NIM_SSL_CERT_PATH=/certs/server-cert.pem
+NIM_SSL_KEY_PATH=/certs/server-key.pem
+NIM_SSL_CA_CERTS_PATH=/certs/ca-cert.pem
+```
+
+(For encryption-only TLS without client authentication, set
+`NIM_SSL_MODE=tls` and omit `NIM_SSL_CA_CERTS_PATH`.)
+
+Recreate the sidecar: `docker compose --profile svd up -d svd`.
 
 TLS covers the gRPC endpoint (`8001`). The HTTP health/metrics port (`8000`)
 stays plaintext — the bundled container healthcheck keeps working unchanged —
 so if you publish `8000` at all, treat it as unencrypted.
 
-Then on the **stream configuration** (the machine running the Video
-Intelligence Service):
+**3. Configure the streams.** On the stream configuration (the machine
+running the Video Intelligence Service):
 
 - Turn `Use TLS` on. The automatic transport detection assumes plaintext on
   non-`443` ports, so it must be set explicitly for `<detector-host>:8001`.
-- If the certificate is not from a public CA, set `tls_ca_cert` to the CA (or
-  self-signed) certificate, as a **file path readable by the Video
-  Intelligence Service**. Drop the file in `./certs/` on the machine where VIS runs,
-  uncomment the `./certs` mount on the `video-intelligence-service-gpu` service,
-  and use `/certs/<file>.pem` in the `tls_ca_cert` .env property.
+- Set `tls_ca_cert` to the CA certificate (`ca-cert.pem`) — required
+  whenever the server certificate is not from a public CA.
+- For mTLS, set `tls_client_cert` and `tls_client_key` to the client
+  certificate pair.
 
-**Mutual TLS** additionally authenticates the clients: only holders of a
-client certificate signed by your CA can use the detector. On the detector
-host set `NIM_SSL_MODE=mtls` and point `NIM_SSL_CA_CERTS_PATH` at the CA
-certificate that signs your client certificates (in `./certs/` next to the
-server pair); each stream then also sets `tls_client_cert` +
-`tls_client_key` (file paths on the Video Intelligence Service machine,
-delivered the same way as `tls_ca_cert` above).
+The three certificate properties are **file paths readable by the Video
+Intelligence Service**. Drop the files in `./certs/` on the machine where
+VIS runs, uncomment the `./certs` mount on the
+`video-intelligence-service-gpu` service, and use `/certs/<file>.pem` as the
+property value in the stream configuration.
 
 ---
 
@@ -381,8 +424,8 @@ to override. Set them from the Manager UI or your stream configuration.
 | `duration` | `2.0` | Analysis window length in seconds (see [window length](#a-note-on-window-length)) |
 | `classification_threshold` | `0.3` | Scores strictly above this ⇒ verdict `"synthetic"` |
 | `use_tls` | auto | Force TLS on/off; omit to auto-detect from the port |
-| `api_key` | none | Bearer token for the endpoint; omit for a bare self-hosted detector |
-| `function_id` | none | Required by NVIDIA's hosted endpoint; omit otherwise |
+| `api_key` | none | Only for NVIDIA's hosted evaluation endpoint; a self-hosted detector ignores it |
+| `function_id` | none | Only for NVIDIA's hosted evaluation endpoint; omit otherwise |
 | `tls_ca_cert` | none | CA certificate for a private-CA endpoint |
 | `tls_client_cert` / `tls_client_key` | none | Client certificate + key for mutual TLS (set both) |
 | `request_timeout_seconds` | `60.0` | Per-window request timeout |

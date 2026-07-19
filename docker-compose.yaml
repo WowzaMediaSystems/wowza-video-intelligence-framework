@@ -326,7 +326,8 @@ services:
           # endpoint (see the ports note below). Same bare-key pass-through
           # mechanism as NIM_MANIFEST_PROFILE: omitted from the container
           # unless set in .env, so the default in-network deployment is
-          # untouched. Set NIM_SSL_MODE=tls (or mtls for mutual TLS) plus the
+          # untouched. Set NIM_SSL_MODE=mtls (mutual TLS -- also authenticates
+          # clients; plain tls encrypts only) plus the
           # /certs paths in .env and uncomment the ./certs mount below; full
           # walkthrough in docs/SYNTHETIC_VIDEO_DETECTOR.md (Deployment
           # topologies).
