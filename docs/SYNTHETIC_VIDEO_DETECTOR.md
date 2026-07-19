@@ -395,21 +395,34 @@ TLS covers the gRPC endpoint (`8001`). The HTTP health/metrics port (`8000`)
 stays plaintext — the bundled container healthcheck keeps working unchanged —
 so if you publish `8000` at all, treat it as unencrypted.
 
-**3. Configure the streams.** On the stream configuration (the machine
-running the Video Intelligence Service):
+**3. Configure the streams.** In the Manager UI's synthetic stream
+configuration, set **Transport Security (TLS)** to *Force TLS* (automatic
+transport detection assumes plaintext on non-`443` ports, so it must be set
+explicitly for `<detector-host>:8001`), then enter the certificate paths
+under the collapsible **TLS Certificates** group:
 
-- Turn `Use TLS` on. The automatic transport detection assumes plaintext on
-  non-`443` ports, so it must be set explicitly for `<detector-host>:8001`.
-- Set `tls_ca_cert` to the CA certificate (`ca-cert.pem`) — required
+- **CA Certificate Path** — the CA certificate (`ca-cert.pem`); required
   whenever the server certificate is not from a public CA.
-- For mTLS, set `tls_client_cert` and `tls_client_key` to the client
-  certificate pair.
+- **Client Certificate Path** + **Client Key Path** — the client
+  certificate pair (mTLS; set both).
+
+Equivalently, in the stream configuration JSON:
+
+```json
+"synthetic_analysis": {
+  "endpoint": "<detector-host>:8001",
+  "use_tls": true,
+  "tls_ca_cert": "/certs/ca-cert.pem",
+  "tls_client_cert": "/certs/client-cert.pem",
+  "tls_client_key": "/certs/client-key.pem"
+}
+```
 
 The three certificate properties are **file paths readable by the Video
-Intelligence Service**. Drop the files in `./certs/` on the machine where
-VIS runs, uncomment the `./certs` mount on the
-`video-intelligence-service-gpu` service, and use `/certs/<file>.pem` as the
-property value in the stream configuration.
+Intelligence Service** — not by the engine, and not by the detector. Drop
+the files in `./certs/` on the machine where VIS runs, uncomment the
+`./certs` mount on the `video-intelligence-service-gpu` service, and use
+`/certs/<file>.pem` as shown.
 
 ---
 
