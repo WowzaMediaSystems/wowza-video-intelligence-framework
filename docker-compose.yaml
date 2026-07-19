@@ -322,6 +322,16 @@ services:
           # when unset. To pin a profile, set NIM_MANIFEST_PROFILE=<id> in .env
           # (see docs/SYNTHETIC_VIDEO_DETECTOR.md).
           - NIM_MANIFEST_PROFILE
+          # Server-side TLS on the NIM's ports -- for securing a PUBLISHED
+          # endpoint (see the ports note below).
+          # Set NIM_SSL_MODE=mtls (mutual TLS -- also authenticates clients;
+          # plain tls encrypts only) plus the /certs paths in .env and
+          # uncomment the ./certs mount below; full walkthrough in
+          # docs/SYNTHETIC_VIDEO_DETECTOR.md (Deployment topologies).
+          - NIM_SSL_MODE
+          - NIM_SSL_CERT_PATH
+          - NIM_SSL_KEY_PATH
+          - NIM_SSL_CA_CERTS_PATH
           - NIM_CACHE_PATH=/opt/nim/.cache
         # Model-profile cache, kept in a named volume (not a ./vis bind mount)
         # so it's Docker-managed and survives `down` -- only `down -v` removes
@@ -333,9 +343,15 @@ services:
         # ./docs/SYNTHETIC_VIDEO_DETECTOR.md.
         volumes:
           - svd-nim-cache:/opt/nim/.cache
+          # Certificate files for the NIM_SSL_* settings above -- uncomment
+          # when enabling TLS:
+          # - ./certs:/certs:ro
         # gRPC (8001) + HTTP mgmt/health (8000) are reachable on the compose
         # network by default (VIS connects to svd.docker:8001 in-network). To
-        # reach the NIM from a VIS on another host, publish the gRPC port:
+        # reach the NIM from a VIS on another host, publish the gRPC port --
+        # and when the hop crosses an untrusted network, secure it with TLS
+        # (NIM_SSL_* above; walkthrough in docs/SYNTHETIC_VIDEO_DETECTOR.md,
+        # Deployment topologies):
         # ports:
         #   - "8001:8001"   # gRPC inference
         #   - "8000:8000"   # HTTP metadata / metrics / health
