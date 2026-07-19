@@ -286,11 +286,12 @@ dev endpoint — **for evaluation only, not production**), **don't** enable the
 | Classification Threshold | `0.3` | A score above this is labeled `"synthetic"` |
 | Duration | `2.0` | Window length in seconds |
 
-- **Transport security is automatic.** A `:443` endpoint (hosted, public-cert
-  services) uses TLS; any other port (your in-network sidecar) stays plaintext.
-  Set `Use TLS` explicitly when the port heuristic is wrong, add a CA
-  certificate for a private CA, and provide a client certificate + key for
-  mutual TLS.
+- **Transport security is automatic.** TLS is used when the endpoint port is
+  `:443` (hosted, public-cert services) or when any TLS certificate material
+  (`tls_*`) is configured; otherwise the connection stays plaintext (your
+  in-network sidecar). Set `Use TLS` explicitly when that heuristic is wrong,
+  add a CA certificate for a private CA, and provide a client certificate +
+  key for mutual TLS.
 - **Use a key with invocation scope for NVIDIA's hosted endpoint.** NVIDIA
   issues keys with different scopes, and the key that pulls the sidecar image
   and model from NGC is **not necessarily authorized to invoke** the hosted
@@ -396,10 +397,12 @@ stays plaintext — the bundled container healthcheck keeps working unchanged �
 so if you publish `8000` at all, treat it as unencrypted.
 
 **3. Configure the streams.** In the Manager UI's synthetic stream
-configuration, set **Transport Security (TLS)** to *Force TLS* (automatic
-transport detection assumes plaintext on non-`443` ports, so it must be set
-explicitly for `<detector-host>:8001`), then enter the certificate paths
-under the collapsible **TLS Certificates** group:
+configuration, set **Transport Security (TLS)** to *Force TLS* (recommended —
+auto-detect also picks TLS once any certificate path below is set, but
+forcing it removes ambiguity, and it is required for a public-CA server
+certificate with no certificate paths configured, since auto-detect assumes
+plaintext on non-`443` ports), then enter the certificate paths under the
+collapsible **TLS Certificates** group:
 
 - **CA Certificate Path** — the CA certificate (`ca-cert.pem`); required
   whenever the server certificate is not from a public CA.
@@ -436,7 +439,7 @@ to override. Set them from the Manager UI or your stream configuration.
 | `endpoint` | — (required) | The SVD endpoint as `host:port` (not an http URL) |
 | `duration` | `2.0` | Analysis window length in seconds (see [window length](#a-note-on-window-length)) |
 | `classification_threshold` | `0.3` | Scores strictly above this ⇒ verdict `"synthetic"` |
-| `use_tls` | auto | Force TLS on/off; omit to auto-detect from the port |
+| `use_tls` | auto | Force TLS on/off; omit to auto-detect (TLS when any `tls_*` certificate is set or the port is `443`, else plaintext) |
 | `api_key` | none | Only for NVIDIA's hosted evaluation endpoint; a self-hosted detector ignores it |
 | `function_id` | none | Only for NVIDIA's hosted evaluation endpoint; omit otherwise |
 | `tls_ca_cert` | none | CA certificate for a private-CA endpoint |
