@@ -55,10 +55,5 @@
 		//"user_prompt": "Read the gauge in {frame_count} frame(s); report the value.",
 		//"system_prompt": "You are a precise instrument reader.",
 		//"response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
-		//
-		//Detect "Reasoning Level" - how much the model deliberates: "high"
-		//(default; omitting is equivalent), "medium" or "low" for faster
-		//inference. Ignored if custom prompts / response_schema are set:
-		//"reasoning_level": "medium"
 	}
 }

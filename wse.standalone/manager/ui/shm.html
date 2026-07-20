@@ -1,21 +1,5 @@
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=0.17.0">
 <style>
-
-    .vif-dashboard {
-        /* Status Colors */
-        --good-color: #00e676; /* Green */
-        --alert-color: #ff5252; /* Red */
-        --alert-bg: #ffe5e5;
-        --warn-color: #cc9900; /* yellow/amber */
-        --warn-bg: #fff8e5;
-        --accent-color: #00bcd4;
-    }
-
-<%--         body {
-        font-family: monospace;
-        margin: 0;
-        padding: 0;
-        background: #fff;
-    } --%>
 
     .vif-dashboard .plugin-scroll {
         width: 100%;
@@ -31,23 +15,24 @@
         box-sizing: border-box;
     }
 
-    .vif-dashboard h2 {
+    .vif-dashboard .sticky-page-header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: #fff;
+    }
+    /* Pin the "VIF Dashboard" page title to the same style as the other pages' h2
+       (vif.css .vif-plugin h2 sets only these two), with enough specificity to beat any
+       Manager-global h2 rule in the dashboard's injection context. Weight/family are left
+       to inherit so they match the other pages. Child combinator so it doesn't touch the
+       "Active Streams" h2 (which lives inside .streams-header-title). */
+    .vif-dashboard .streams-header > h2 {
         font-size: 18px;
         margin: 0;
-/*        padding-bottom: 10px;
-         margin: 16px;
-         margin-bottom: 10px;
- */    }
-
+    }
     .vif-dashboard .streams-header {
-        display: flex;
         align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 10px 16px;
-        border-bottom: 1px solid #ccc;
         margin-bottom: 10px;
-        padding-bottom: 10px;
         min-width: 0;
     }
 
@@ -59,32 +44,25 @@
         min-width: 0;
     }
 
+    /* Same muted treatment as .host-info-line (vif.css) so the header
+       summary doesn't add another type style to the stats section. */
     .vif-dashboard #header-values {
-        font-style: italic;
+        font-size: 0.85em;
+        color: #666;
         min-width: 0;
         overflow-wrap: anywhere;
     }
 
-    .vif-dashboard .status-bar {
-        font-size: 0.85em;
-        color: #fff;
-        text-align: right;
-        margin-left: auto;
-        margin: 7px;
+    /* The help-tip that explains the header averages sits right after
+       #header-values in the markup; when there are no active streams the div
+       is emptied (textContent = "") and a lone "?" explaining invisible
+       content would float next to "Active Streams: 0" - hide it whenever the
+       values it explains aren't rendered. */
+    .vif-dashboard #header-values:empty + .vif-help-tip {
+        display: none;
     }
 
-/*    .status-bar {
-        text-align: right;
-        font-size: 12px;
-        color: #444;
-        margin: 16px;
-        margin-bottom: 0;
-    }*/
-
     .vif-dashboard .content-wrapper {
-        padding: 16px;
-        width: 100%;
-        max-width: 100%;
         min-width: 0;
         overflow-x: hidden;
     }
@@ -96,41 +74,11 @@
 
     /* --- Host Info Grid --- */
     .vif-dashboard .host-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-bottom: 16px;
         width: 100%;
         max-width: 100%;
         min-width: 0;
     }
 
-    .vif-dashboard #host-display,
-    .vif-dashboard #host-nvidia,
-    .vif-dashboard #host-stats {
-        flex: 0 0 calc((100% - 8px) / 2);
-        width: calc((100% - 8px) / 2);
-        max-width: calc((100% - 8px) / 2);
-        margin-right: auto;
-        min-width: 0;
-    }
-
-    .vif-dashboard .metric-card {
-        min-width: 120px;
-        flex: 1 1 220px;
-        max-width: 100%;
-        background: #fafafa;
-        padding: 12px;
-        border-radius: 12px;
-        border: 1px solid #ccc;
-        transition: all 0.3s ease;
-    }
-
-    .vif-dashboard #host-stats .metric-card {
-        flex: 0 0 calc((100% - 24px) / 4);
-        max-width: calc((100% - 24px) / 4);
-        min-width: 0;
-    }
 
     .vif-dashboard .metric-thumb-card {
         min-width: min(240px, 100%);
@@ -142,42 +90,6 @@
         border: 1px solid #ccc;
         transition: all 0.3s ease;
     }
-
-    .vif-dashboard .metric-label {
-        font-size: 0.85em;
-        color: #444;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 5px;
-    }
-
-    .vif-dashboard .metric-value {
-        font-size: 1.3em;
-        font-weight: bold;
-        color: #333;
-        word-break: break-all;
-    }
-
-    /* Alert Classes */
-    .vif-dashboard .card-alert {
-        border: 1px solid var(--alert-color);
-        background-color: var(--alert-bg);
-    }
-    .vif-dashboard .card-alert .metric-value {
-        color: var(--alert-color);
-    }
-
-    .vif-dashboard .card-warn {
-        border: 1px solid var(--warn-color);
-        background-color: var(--warn-bg);
-    }
-    .vif-dashboard .card-warn .metric-value {
-        color: var(--warn-color);
-    }
-
-    .vif-dashboard .text-alert { color: var(--alert-color) !important; }
-    .vif-dashboard .text-warn { color: var(--warn-color) !important; }
-    .vif-dashboard .text-good { color: var(--good-color) !important; }
 
     /* --- Streams Table --- */
     .vif-dashboard .table-wrapper {
@@ -200,21 +112,29 @@
         table-layout: auto;
     }
 
-    .vif-dashboard thead {
+    /* Scoped to the streams table: the dashboard also renders small per-GPU
+       .gpu-table tables (vif.css) that must not inherit this chrome. */
+    .vif-dashboard #streams-table thead {
         background-color: #000;
     }
 
-    .vif-dashboard th,
-    .vif-dashboard td {
+    .vif-dashboard #streams-table th,
+    .vif-dashboard #streams-table td {
         padding: 12px 15px;
         border-bottom: 1px solid #ccc;
         vertical-align: middle;
     }
 
-    .vif-dashboard th {
+    .vif-dashboard #streams-table th {
         color: #fff;
         text-align: center;
         font-weight: normal;
+        white-space: nowrap;
+    }
+
+    .vif-dashboard #streams-table th:nth-child(7),
+    .vif-dashboard #streams-table td:nth-child(7) {
+        min-width: 200px;
         white-space: nowrap;
     }
 
@@ -263,10 +183,6 @@
         max-width: 500px;
     }
 
-    .vif-dashboard .slider {
-        accent-color: #2a71ab;
-    }
-
     .vif-dashboard .vif-controls {
         display: flex;
         align-items: center;
@@ -275,57 +191,65 @@
         min-width: 0;
     }
 
+    /* Top bar (title + config buttons) sitting directly above the metric
+       groups, no divider band - see the markup comment. Tighter than the old
+       standalone .streams-header band it replaces. */
+    .vif-dashboard .dashboard-topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    /* Give the dashboard Inference-fps range slider a FIXED width for every
+       detector type. The range input otherwise has no width rule, so inside
+       the shared-width Stream Info column its default flex-shrink let the
+       amount of sibling text on its line decide its rendered width - the scene
+       row's long "= N frames / Ns request" note squeezed it narrow while the
+       vlm row's short value left it wide. flex:0 0 <w> pins the basis and
+       disables grow/shrink so every detector's slider matches. */
+    .vif-dashboard .slider {
+        width: 140px;
+        flex: 0 0 140px;
+    }
+
+    .vif-dashboard .vif-skip-controls {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0;
+    }
+
+    /* Each line is its own right-aligned flex row; the 6px gap is the old
+       breathing room between the label, slider, value (line 1) and between the
+       note and its help-tip (line 2). */
+    .vif-dashboard .vif-skip-line,
+    .vif-dashboard .vif-skip-note-line {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    /* Line 2 collapses to zero height whenever the note span is empty (object/
+       synthetic rows, and windowed streams with no duration): an empty span is
+       a zero-height flex item, so those rows gain no blank line under the
+       slider. The tip is removed by updateSkipFrameDisplay() when the note
+       clears, so a lone "?" never sits on an otherwise-empty line 2. */
+
+    /* Fixed geometry for the Inference-fps value so a 1- vs 2-digit value can't
+       shift the slider horizontally - the whole point of the two-line split is
+       that the sliders in different detector rows align in the same column. */
+    .vif-dashboard .vif-skip-value {
+        display: inline-block;
+        min-width: 2ch;
+        text-align: left;
+    }
+
     /* The container - defines the size of the switch */
     .vif-dashboard .switch {
-        position: relative;
         display: flex;
-        width: 50px;
-        height: 23px;
-    }
-
-    /* Hide the default HTML checkbox */
-    .vif-dashboard .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-
-    /* The slider (the track) */
-    .vif-dashboard .slider-switch {
-        position: absolute;
-        cursor: pointer;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background-color: #ccc;
-        transition: .4s;
-        border-radius: 25px;
-    }
-
-    /* The knob (the circle that slides) */
-    .vif-dashboard .slider-switch:before {
-        position: absolute;
-        content: "";
-        height: 15px;
-        width: 15px;
-        left: 4px;
-        bottom: 4px;
-        background-color: white;
-        transition: .4s;
-        border-radius: 50%;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-
-    .vif-dashboard .item-right {
-      margin-left: auto;
-    }
-
-    /* Logic: When checked, change background color */
-    .vif-dashboard input:checked + .slider-switch {
-        background-color: #2a71ab;
-    }
-
-    /* Logic: When checked, move the knob to the right */
-    .vif-dashboard input:checked + .slider-switch:before {
-        transform: translateX(24px);
     }
 
     /* Thumbnail image styling */
@@ -361,57 +285,78 @@
         height: auto;
     }
 
+    .vif-dashboard .row-status-line {
+        display: block;
+        min-height: 1.35em;
+        line-height: 1.35;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+
+    /* The reason line's own row is a single colspan=8 cell spanning the whole
+       table. max-width:0 stops a long (server-provided) reason from widening
+       the table under table-layout:auto - the data rows above fix the column
+       widths and the reason div truncates within them. Replaces the legacy
+       height=14 attribute: height is now the constant .row-status-line slot. */
+    .vif-dashboard #streams-table td.row-status-cell {
+        max-width: 0;
+    }
+
+    .vif-dashboard .frames-window-note {
+        color: #555;
+        white-space: nowrap;
+    }
+
     @media (max-width: 1024px) {
         .vif-dashboard .content-wrapper {
             padding: 12px;
         }
 
-        .vif-dashboard #host-display,
-        .vif-dashboard #host-nvidia,
-        .vif-dashboard #host-stats {
-            flex-basis: 100%;
-            width: 100%;
-            max-width: 100%;
-            margin-right: 0;
-        }
-
-        .vif-dashboard th,
-        .vif-dashboard td {
+        .vif-dashboard #streams-table th,
+        .vif-dashboard #streams-table td {
             padding: 10px 12px;
-        }
-    }
-
-    @media (max-width: 1280px) {
-        .vif-dashboard #host-stats .metric-card {
-            flex: 1 1 calc((100% - 8px) / 2);
-            max-width: calc((100% - 8px) / 2);
         }
     }
 </style>
 
-<div class="vif-dashboard">
+<div class="vif-dashboard vif-plugin">
 <div class="plugin-scroll">
     <div class="content-wrapper">
 
+        <!-- Page header: same sticky-page-header / streams-header structure as
+             stream-config.html / default.html / playback.html (title left, buttons right,
+             divider below). The config buttons stand in for the other pages' Back button. -->
+        <div class="sticky-page-header">
         <div class="streams-header">
             <h2>VIF Dashboard</h2>
-            <div id="config-streams" class="item-right" style="display: none; flex-direction: column; gap: 4px; align-items: flex-end;">
-                <button onclick="loadAjaxPluginContent('server','vif','default.html','')">Default Config</button>
-                <button onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
+            <div id="config-streams" class="item-right" style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                <button id="btn-default-config" disabled title="Waiting for Engine connection" onclick="loadAjaxPluginContent('server','vif','default.html','')">Default Config</button>
+                <button id="btn-stream-configs" disabled title="Waiting for Engine connection" onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
+            </div>
+        </div>
+        </div>
+
+        <div id="dashboard-banner" class="dashboard-banner" style="display:none;"></div>
+
+        <div class="metric-group" id="wse-host-group">
+            <div class="metric-group-title">WSE Host</div>
+            <div id="host-display" class="host-container metric-grid">
+            </div>
+            <div id="host-nvidia" class="host-info-line">
+            </div>
+            <div id="host-stats" class="host-container metric-grid">
             </div>
         </div>
 
-        <div id="host-display" class="host-container">
-        </div>
-        <div id="host-nvidia" class="host-container">
-        </div>
-        <div id="host-stats" class="host-container">
-        </div>
+        <div id="vis-instances-container"></div>
 
         <div class="streams-header">
             <div class="streams-header-title">
                 <h2>Active Streams: <span id="active-streams">0</span></h2>
-                <div id="header-values" title="Processing Avg / Frame Detect Avg"></div>
+                <div id="header-values"></div>
+                <span class="vif-help-tip" title="Processing avg = mean Video Intelligence Service (VIS) processing time across active streams. Detect avg = mean WSE object-processing (frame detect) time across active streams.">?</span>
             </div>
             <div class="vif-controls item-right">
                 Thumbnails&nbsp;
@@ -433,10 +378,10 @@
                         <th>Type</th>
                         <th>Stream Name</th>
                         <th>Stream Info</th>
-                        <th title="Round Trip time to VIF Service">Ping (RTT)</th>
-                        <th title="VIF Service Object Processing Time">Ttl Processing Avg</th>
-                        <th title="WSE Object Processing Time">Frame Detect Avg</th>
-                        <th title="Frames Detected (n seconds) | Frames Captured (n seconds) | Avg Frames Detected — hover each cell to see the window (n) in seconds">Frames Detected</th>
+                        <th>Ping (RTT)<span class="vif-help-tip" title="Round-trip time to the Video Intelligence Service (VIS)">?</span></th>
+                        <th>Ttl Processing Avg<span class="vif-help-tip" title="Video Intelligence Service (VIS) processing time per analysis request">?</span></th>
+                        <th>Frame Detect Avg<span class="vif-help-tip" title="WSE Object Processing Time">?</span></th>
+                        <th>Frames Analyzed<span class="vif-help-tip" title="Frames analyzed by the Video Intelligence Service (VIS) out of the frames WSE captured from the stream, averaged over a period of time">?</span></th>
                         <th>Thumbnail</th>
                     </tr>
                 </thead>
@@ -449,15 +394,8 @@
 </div>
 </div>
 
+<script src="wse-plugins/server/vif/js/vif-core.js?v=0.17.0"></script>
+<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=0.17.0"></script>
 <script>
-    url = new URL(window.location.href);
-    serverUrl = serverUrl.replaceAll("wse.docker", url.hostname);
-    serverUrl = serverUrl.replaceAll("host.docker.internal", url.hostname);
-    serverUrl = serverUrl.replace(/\/+$/, ''); // remove trailing slash if there is one
-    var pathPrefix = 'wse-plugins/server/vif/';
-    var host = url.host;
-    var protocol = url.protocol;
-    var hostname = url.hostname;
+    VIF.dashboard.init();
 </script>
-
-<script src="wse-plugins/server/vif/shm.js"></script>
