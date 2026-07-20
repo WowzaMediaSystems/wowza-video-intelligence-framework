@@ -1,7 +1,28 @@
 # WSE Video Intelligence Module
 This module provides an integration with the video intelligence service to perform object and scene detection on a video feed.
 
-## Install onto an existing Wowza Streaming Engine server (Must be version 4.11 or greater)
+You can install WSE Video Intelligence Module onto an existing Wowza Streaming Engine server (Must be version 4.11.1 or greater)
+
+## Using the plugin installer to update Wowza Streaming Engine
+
+The WSE Video Intelligence jar includes a script to update your Wowza Streaming Engine.  This will update the xml files, copy necessary files to your Wowza Streaming Engine installation.
+```
+java -jar wse-plugin-video-intelligence-x.y.z.jar Install
+```
+
+If your system does not have java installed natively, you can use the java that comes with WSE
+```
+/usr/local/WowzaStreamingEngine/java/bin/java
+```
+or
+```
+C:\Program Files\Wowza Media Systems\Wowza Streaming Engine x.y.z+vv\jre\bin\java
+```
+
+Add  `--help` to the above commands to see all the options available.
+
+## Manually updating Wowza Streaming Engine
+
 ### Lib folder and jar files
 * copy the following Wowza jars to the WSE lib directory
 
@@ -17,6 +38,12 @@ This module provides an integration with the video intelligence service to perfo
 	* jetty-ee10-websocket-jakarta-common-12.1.9.jar
 	* jetty-websocket-core-client-12.1.9.jar
 	* jetty-websocket-core-common-12.1.9.jar
+
+* copy the lib-native `.so` files to the WSE lib-native folder, depending on your architecture
+    * libturbojpeg.aarch64/libturbojpeg.so.0.2.0
+    * libturbojpeg.amd64/libturbojpeg.so.0.2.0
+
+* copy the conf.modules files to the WSE conf.modules folder
 
 ### Server.xml
 * add Server Listeners to Server.xml
@@ -110,6 +137,8 @@ This module provides an integration with the video intelligence service to perfo
 		<Templates>${SourceStreamName}.xml,vif-gpu-eva.xml</Templates>
 	```
 
+* copy the VIF transcoder template files to the WSE transcoder/templates directory
+
 ### WSEM
 * To enable VIF in WSEM/UI, need to copy to
 	```shell
@@ -122,12 +151,13 @@ This module provides an integration with the video intelligence service to perfo
 	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager
 	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
 	```
-* If connecting to a remote instance (not localhost), add the specific client IP(s) to the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API. Use a comma-separated list of exact IPs (per-octet wildcards like `192.168.1.*` are supported); avoid `*`, which allows every source IP.
+* If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API
 	```xml
 	<RESTInterface>
-		<IPWhiteList>127.0.0.1,203.0.113.10</IPWhiteList>
+		<IPWhiteList>*</IPWhiteList>
 	```
 * If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
+* The VIF dashboard (`docker/manager/ui`, entry page `shm.html` per `config.json`) is reachable only through the WSE Manager — there is no standalone entry page; for standalone dev/preview use the `qa_automation` harness's static-server mode (VIS repo).
 
 ### Misc
 * Overlays will be added to the stream ending with `-vi`

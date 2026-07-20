@@ -2,5 +2,7 @@
 	"active": true,
 	"name": "VIF",
 	"icon": "fa-cubes",
-	"page": "shm.html"
+	"page": "shm.html",
+	"playback_host": "ENV.WSE_PLAYBACK_HOST",
+	"playback_port": "ENV.WSE_PLAYBACK_PORT"
 }

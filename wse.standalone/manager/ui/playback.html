@@ -1,82 +1,13 @@
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=0.17.0"></script>
 
+  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=0.17.0">
   <style>
-/*    * { box-sizing: border-box; }
-
- body {
-      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-      font-size: 16px;
-      line-height: 1.5;
-      color: #333;
-      background-color: #fff;
-      margin: 0;
-      padding: 0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-     .navbar {
-      background-color: #222;
-      border: 0;
-      margin-bottom: 0;
-      min-height: 50px;
-      position: relative;
-    }
-
-    .navbar-inverse { background-color: #222; border-color: transparent; }
-
-    .navbar-static-top { z-index: 1000; border-width: 0 0 1px; }
-
-    .navbar-brand {
-      float: left;
-      padding: 3px 15px;
-      font-size: 18px;
-      line-height: 20px;
-      height: 50px;
-      color: #eeeeee;
-      text-decoration: none;
-    }
-
-    .navbar-brand:hover { color: #eeeeee; text-decoration: none; }
-
-    .navbar-brand-wse {
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #eeeeee;
-      line-height: 1.2;
-    }
-
-    .navbar-brand-mgr {
-      text-transform: uppercase;
-      color: #999;
-      font-size: 0.65em;
-      font-weight: bold;
-    }
-    .hidden-sm, .hidden-xs { display: block !important; }
-    .visible-sm, .visible-xs { display: none !important; }
- */
     @media (max-width: 767px) {
-      .hidden-xs { display: none !important; }
-      .visible-xs { display: block !important; }
+      .vif-plugin .hidden-xs { display: none !important; }
+      .vif-plugin .visible-xs { display: block !important; }
     }
 
-/*    .container-full {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .container-full > * {
-      margin-left: 15px;
-      margin-right: 15px;
-    }*/
-
-    .controls-section {
+    .vif-plugin .controls-section {
       background: #f5f5f5;
       border: 1px solid #ddd;
       border-radius: 4px;
@@ -86,7 +17,7 @@
       flex-shrink: 0;
     }
 
-    .error-message {
+    .vif-plugin .error-message {
       background: #f2dede;
       border: 1px solid #ebccd1;
       border-radius: 4px;
@@ -95,7 +26,7 @@
       color: #a94442;
     }
 
-    .url-input-group {
+    .vif-plugin .url-input-group {
       display: flex;
       flex-direction: row;
       gap: 10px;
@@ -103,9 +34,9 @@
       flex-wrap: wrap;
     }
 
-    .url-input-group label { font-weight: bold; }
+    .vif-plugin .url-input-group label { font-weight: bold; }
 
-    .url-input-group input[type="text"] {
+    .vif-plugin .url-input-group input[type="text"] {
       display: block;
       flex: 1;
       min-width: 220px;
@@ -118,45 +49,19 @@
       border-radius: 4px;
     }
 
-    .url-input-group input:focus {
+    .vif-plugin .url-input-group input:focus {
       border-color: #66afe9;
       outline: 0;
       box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(102,175,233,.6);
     }
 
-/*    .btn {
+    .vif-plugin .url-input-group .switch {
       display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      margin-bottom: 0;
-      font-size: 14px;
-      font-weight: normal;
-      line-height: 1.42857143;
-      text-align: center;
-      white-space: nowrap;
-      vertical-align: middle;
-      cursor: pointer;
-      user-select: none;
-      background-image: none;
-      border: 1px solid transparent;
-      border-radius: 4px;
+      flex-shrink: 0;
     }
 
-    .btn-primary {
-      color: #fff;
-      background-color: #337ab7;
-      border-color: #2e6da4;
-    }
-
-    .btn-primary:hover, .btn-primary:focus {
-      color: #fff;
-      background-color: #286090;
-      border-color: #204d74;
-    }
-*/
     /* Controls: sliders */
-    .control-group {
+    .vif-plugin .control-group {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -167,12 +72,12 @@
       padding: 6px 10px;
     }
 
-    .control-group input[type="range"] {
+    .vif-plugin .control-group input[type="range"] {
       width: 170px;
       accent-color: #ff8400;
     }
 
-    .control-value {
+    .vif-plugin .control-value {
       display: inline-block;
       min-width: 4.5ch;
       text-align: right;
@@ -185,67 +90,25 @@
       padding: 2px 8px;
     }
 
-    /* Click-to-toggle tooltips */
-    .tooltip-wrap {
+    /* Label + help badge sit inline; the badge itself is the shared .vif-help-tip (css/vif.css). */
+    .vif-plugin .tooltip-wrap {
       display: inline-flex;
       align-items: center;
       gap: 6px;
     }
 
-    .tip-btn {
-      position: relative;
-      display: inline-flex;
+    /* Overlay label, help badge, and toggle switch are different heights, so center them
+       on the flex cross-axis rather than letting them settle on their baselines. */
+    .vif-plugin #overlayControlGroup {
       align-items: center;
-      justify-content: center;
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      border: 1px solid #ddd;
-      background: #fff;
-      color: #999;
-      cursor: pointer;
-      user-select: none;
-      outline: none;
     }
 
-    .tip-btn:hover { color: #ff8400; border-color: rgba(255,132,0,0.5); }
-
-    .tip-btn .tip-pop {
-      position: absolute;
-      top: calc(100% + 10px);
-      left: 50%;
-      transform: translateX(-50%);
-      width: 300px;
-      max-width: min(300px, 82vw);
-      background: #222;
-      color: #fff;
-      border-radius: 10px;
-      box-shadow: 0 12px 30px rgba(0,0,0,0.18);
-      padding: 12px 14px;
-      font-size: 13px;
-      line-height: 1.35;
-      text-align: left;
-      white-space: normal;
-      z-index: 5000;
-      display: none;
+    .vif-plugin #overlayControlGroup > * {
+      align-self: center;
+      margin: 0;
     }
 
-    .tip-btn .tip-pop:before {
-      content: "";
-      position: absolute;
-      top: -7px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 0;
-      height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-bottom: 8px solid #222;
-    }
-
-    .tip-btn.open .tip-pop { display: block; }
-
-    .main-grid {
+    .vif-plugin .main-grid {
       display: grid;
       grid-template-columns: 1fr;
       gap: 10px;
@@ -255,7 +118,7 @@
       margin-bottom: 10px;
     }
 
-    .card {
+    .vif-plugin .card {
       background: #f5f5f5;
       border: 1px solid #ddd;
       border-radius: 4px;
@@ -266,7 +129,7 @@
       min-height: 0;
     }
 
-    .card-player {
+    .vif-plugin .card-player {
       background: #f5f5f5;
       border: 1px solid #ddd;
       border-radius: 4px;
@@ -277,21 +140,21 @@
       min-height: 0;
     }
 
-    .card h2 {
+    .vif-plugin .card h2 {
       /*font-size: 18px;*/
       margin-bottom: 10px;
       color: #333;
       font-weight: 500;
     }
 
-    .card-player h2 {
+    .vif-plugin .card-player h2 {
       /*font-size: 18px;*/
       margin-bottom: 10px;
       color: #333;
       font-weight: 500;
     }
 
-    .badge {
+    .vif-plugin .badge {
       background: #ff8400;
       color: #fff;
       /*font-size: 12px;*/
@@ -301,7 +164,7 @@
       margin-left: 5px;
     }
 
-    #playerElement {
+    .vif-plugin #playerElement {
       border-radius: 4px;
       overflow: hidden;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -312,23 +175,23 @@
       min-height: 0;
     }
 
-    #playerElement video {
+    .vif-plugin #playerElement video {
       width: 100%;
       height: 100%;
       object-fit: contain;
     }
 
-    .tab-controls {
+    .vif-plugin .tab-controls {
       display: flex;
       gap: 3px;
       margin-bottom: 10px;
       flex-shrink: 0;
     }
 
-    .tab-controls input[type="radio"] { display: none; }
+    .vif-plugin .tab-controls input[type="radio"] { display: none; }
 
     /* Each tab label is a bar with right-justified actions inside */
-    .tab-controls label {
+    .vif-plugin .tab-controls label {
       flex: 1;
       display: flex;
       align-items: center;
@@ -346,7 +209,7 @@
       overflow: visible;
     }
 
-    .tab-left {
+    .vif-plugin .tab-left {
       display: inline-flex;
       align-items: center;
       gap: 8px;
@@ -354,13 +217,13 @@
       flex: 1;
     }
 
-    .tab-title {
+    .vif-plugin .tab-title {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    .tab-actions {
+    .vif-plugin .tab-actions {
       margin-left: auto;
       display: inline-flex;
       align-items: center;
@@ -369,7 +232,7 @@
       flex: 0 0 auto;
     }
 
-    .tab-copy-btn {
+    .vif-plugin .tab-copy-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -384,13 +247,13 @@
       pointer-events: auto;
     }
 
-    .tab-copy-btn:hover {
+    .vif-plugin .tab-copy-btn:hover {
       background: rgba(255,255,255,0.16);
       border-color: rgba(255,132,0,0.7);
       color: #fff;
     }
 
-    .tab-copy-status {
+    .vif-plugin .tab-copy-status {
       font-size: 12px;
       font-weight: 700;
       color: rgba(255,255,255,0.85);
@@ -399,18 +262,18 @@
       line-height: 1;
     }
 
-    .tab-controls input[type="radio"]:checked + label {
+    .vif-plugin .tab-controls input[type="radio"]:checked + label {
       background: #ff8400;
       color: #fff;
     }
 
-    .tab-controls input[type="radio"]:checked + label .tab-copy-btn {
+    .vif-plugin .tab-controls input[type="radio"]:checked + label .tab-copy-btn {
       border-color: rgba(0,0,0,0.18);
       background: rgba(0,0,0,0.15);
       color: #fff;
     }
 
-    .tab-controls label:hover {
+    .vif-plugin .tab-controls label:hover {
       background: #333;
       color: #fff;
     }
@@ -419,11 +282,11 @@
        Default: show icon only
        On click: hide icon, show status for 1s
     */
-    .tab-actions .tab-copy-status { display: none; }
-    .tab-controls label.copied .tab-copy-btn { display: none; }
-    .tab-controls label.copied .tab-copy-status { display: inline-block; }
+    .vif-plugin .tab-actions .tab-copy-status { display: none; }
+    .vif-plugin .tab-controls label.copied .tab-copy-btn { display: none; }
+    .vif-plugin .tab-controls label.copied .tab-copy-status { display: inline-block; }
 
-    .tab-content {
+    .vif-plugin .tab-content {
       flex: 1;
       display: none;
       flex-direction: column;
@@ -431,9 +294,10 @@
       overflow: hidden;
     }
 
-    .tab-content.active { display: flex !important; }
+    .vif-plugin .tab-content.active { display: flex !important; }
 
-    .event-display, .log-display {
+    .vif-plugin .event-display,
+.vif-plugin .log-display {
       background: #fff;
       border: 1px solid #ddd;
       border-radius: 4px;
@@ -446,31 +310,31 @@
       flex: 1;
     }
 
-    .log-display { white-space: pre-wrap; }
+    .vif-plugin .log-display { white-space: pre-wrap; }
 
-    .log-entry {
+    .vif-plugin .log-entry {
       margin-bottom: 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid rgba(255,132,0,0.2);
     }
 
-    .log-entry:last-child { border-bottom: none; }
+    .vif-plugin .log-entry:last-child { border-bottom: none; }
 
-    .log-timestamp {
+    .vif-plugin .log-timestamp {
       color: #ff8400;
       font-weight: bold;
       margin-bottom: 4px;
       /*font-size: 13px;*/
     }
 
-    .log-json {
+    .vif-plugin .log-json {
       color: #555;
       margin-left: 0;
       /*font-size: 13px;*/
       white-space: pre-wrap;
     }
 
-    .event-item {
+    .vif-plugin .event-item {
       margin-bottom: 6px;
       padding: 6px 8px;
       background: #fff;
@@ -479,20 +343,20 @@
       border-radius: 3px;
     }
 
-    .event-time {
+    .vif-plugin .event-time {
       color: #555;
       /*font-size: 12px;*/
       font-weight: bold;
       margin-bottom: 3px;
     }
 
-    .event-data {
+    .vif-plugin .event-data {
       line-height: 1.4;
       /*font-size: 13px;*/
       color: #222;
     }
 
-    .detection-label {
+    .vif-plugin .detection-label {
       display: inline-block;
       padding: 2px 6px;
       border-radius: 3px;
@@ -503,26 +367,26 @@
       margin-bottom: 3px;
     }
 
-    .detection-label.confidence-high {
+    .vif-plugin .detection-label.confidence-high {
       background: rgba(92,184,92,0.2);
       color: #3c763d;
       border: 1px solid rgba(92,184,92,0.4);
     }
 
-    .detection-label.confidence-medium-high,
-    .detection-label.confidence-medium-low {
+    .vif-plugin .detection-label.confidence-medium-high,
+.vif-plugin .detection-label.confidence-medium-low {
       background: rgba(240,173,78,0.2);
       color: #c87f0a;
       border: 1px solid rgba(240,173,78,0.4);
     }
 
-    .detection-label.confidence-low {
+    .vif-plugin .detection-label.confidence-low {
       background: rgba(217,83,79,0.2);
       color: #a94442;
       border: 1px solid rgba(217,83,79,0.4);
     }
 
-    .detection-reasoning {
+    .vif-plugin .detection-reasoning {
       font-size: 0.85em;
       color: #555;
       font-style: italic;
@@ -531,25 +395,21 @@
       white-space: normal;
     }
 
-    .detection-data {
+    .vif-plugin .detection-data {
       font-size: 0.9em;
       color: #222;
       margin: 2px 0 4px 0;
       word-break: break-word;
     }
 
-    .detection-data-key {
+    .vif-plugin .detection-data-key {
       font-weight: 700;
       color: #555;
     }
 
-    .hidden { display: none; }
+    .vif-plugin .hidden { display: none; }
 
-/*    .navbar-logo { height: 44px; width: 44px; float: left; }
-
-    .navbar-text-wrapper { float: left; padding-left: 10px; }
-*/
-    .placeholder-text {
+    .vif-plugin .placeholder-text {
       color: #777;
       text-align: center;
       padding: 40px 20px;
@@ -557,7 +417,7 @@
 
     @media (min-width: 769px) {
 
-      .controls-section {
+      .vif-plugin .controls-section {
         border-radius: 12px;
         padding: 20px;
         margin-bottom: 20px;
@@ -565,19 +425,13 @@
 
       /*.url-input-group label { font-size: 1rem; }*/
 
-      .url-input-group input[type="text"] {
+      .vif-plugin .url-input-group input[type="text"] {
         border-radius: 8px;
         padding: 12px 16px;
         /*font-size: 0.95rem;*/
       }
-/*
-      .btn {
-        border-radius: 4px;
-        padding: 10px 20px;
-        font-size: 0.95rem;
-      }*/
 
-      .main-grid {
+      .vif-plugin .main-grid {
         grid-template-columns: 1fr 1fr;
         gap: 20px;
         min-height: 0;
@@ -585,42 +439,42 @@
         height: calc(100vh - 230px);
       }
 
-      .card {
+      .vif-plugin .card {
         border-radius: 12px;
         padding: 20px;
         min-height: 0;
         overflow: hidden;
       }
 
-      .card-player {
+      .vif-plugin .card-player {
         border-radius: 12px;
         padding: 20px;
         min-height: 0;
         overflow: hidden;
       }
 
-      .card h2 {
+      .vif-plugin .card h2 {
         /*font-size: 1.25rem;*/
         margin-bottom: 15px;
       }
 
-      .card-player h2 {
+      .vif-plugin .card-player h2 {
         /*font-size: 1.25rem;*/
         margin-bottom: 15px;
       }
-      .badge {
+      .vif-plugin .badge {
         /*font-size: 0.75rem;*/
         padding: 2px 8px;
         border-radius: 12px;
       }
 
-      .event-display { border-radius: 8px; padding: 16px; /*font-size: 0.9rem;*/ }
-      .log-display { border-radius: 8px; padding: 16px; /*font-size: 0.85rem;*/ }
+      .vif-plugin .event-display { border-radius: 8px; padding: 16px; /*font-size: 0.9rem;*/ }
+      .vif-plugin .log-display { border-radius: 8px; padding: 16px; /*font-size: 0.85rem;*/ }
 
-      .log-entry { margin-bottom: 20px; padding-bottom: 20px; }
+      .vif-plugin .log-entry { margin-bottom: 20px; padding-bottom: 20px; }
       /*.log-timestamp { font-size: 0.85rem; }*/
 
-      .event-item {
+      .vif-plugin .event-item {
         margin-bottom: 8px;
         padding: 8px 10px;
         border-left: 3px solid #ff8400;
@@ -629,32 +483,65 @@
 
       /*.event-time { font-size: 0.85rem; }*/
     }
+
+    /* Match stream-config.html's plain "Back to Dashboard" button. That page styles bare <button>
+       elements, but playback's other buttons are .btn/.btn-primary, so this is a dedicated class
+       (see vif.css note on why the bare-button style isn't shared). */
+    .vif-plugin .back-to-dashboard {
+      padding: 0.4em 0.7em;
+      font-family: monospace;
+      font-size: 0.85em;
+      cursor: pointer;
+      background: #2a71ab;
+      border: 1px solid #ccc;
+      color: #ffffff;
+      border-radius: 4px;
+      margin-bottom: 4px;
+    }
+    .vif-plugin .back-to-dashboard:hover { background: #225783; }
+    .vif-plugin .back-to-dashboard:disabled { background-color: #cccccc; color: #666666; cursor: not-allowed; }
+
+    /* Sticky page header with the "VIF Playback" title, matching stream-config.html.
+       (.streams-header / .item-right / h2 come from vif.css.) */
+    .vif-plugin .sticky-page-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: #fff;
+    }
+    .vif-plugin .streams-header {
+      align-items: flex-end;
+      margin-bottom: 10px;
+    }
   </style>
 
 
-  <div class="container-full">
+  <div class="container-full vif-plugin">
+    <div class="sticky-page-header">
+      <div class="streams-header">
+        <h2>VIF Playback</h2>
+        <div class="item-right">
+          <button class="back-to-dashboard" onclick="mainPage()">Back to Dashboard</button>
+        </div>
+      </div>
+    </div>
     <div class="controls-section">
       <div class="url-input-group">
         <label>Stream URL:</label>
         <input type="text" id="playerUrl" value="" placeholder="Enter HLS playlist URL (.m3u8)">
 
-        <div class="control-group">
+        <div class="control-group" id="overlayControlGroup" style="display:none">
           <div class="tooltip-wrap">
-            <label for="minScore" style="margin:0; font-weight:700;">Min score</label>
-            <button type="button" class="tip-btn" data-tip>
-              <i class="fa fa-info-circle" aria-hidden="true"></i>
-              <div class="tip-pop">
-                Only detections with a confidence score greater than or equal to this value will be shown.
-                Lower-confidence detections are hidden.
-              </div>
-            </button>
+            <label for="overlayToggle" style="margin:0; font-weight:700;">Overlay</label>
+            <span class="vif-help-tip" title="Toggles the burned-in detection overlay for the currently playing stream at runtime. This is not saved to the stream's configuration.">?</span>
           </div>
-          <input type="range" id="minScore" min="0" max="1" step="0.01" value="0.90">
-          <span class="control-value" id="minScoreValue">0.90</span>
+          <label class="switch">
+            <input type="checkbox" id="overlayToggle">
+            <span class="slider-switch"></span>
+          </label>
         </div>
 
         <button class="btn btn-primary" id="loadBtn" onclick="createPlayer()">Load <i class="fa fa-arrow-right"></i></button>
-        <button class="btn btn-primary" id="loadBtn" onclick="mainPage()">All Streams <i class="fa fa-arrow-right"></i></button>
       </div>
       <div id="errorMessage" class="error-message hidden"></div>
     </div>
@@ -726,757 +613,8 @@
     </div>
   </div>
 
+  <script src="wse-plugins/server/vif/js/vif-core.js?v=0.17.0"></script>
+  <script src="wse-plugins/server/vif/js/vif-playback.js?v=0.17.0"></script>
   <script>
-    var CONFIG = {
-      EVENT_TYPE_SCENE_DETECTION_POSTIFX: 'detection',
-      EVENT_TYPE_PDT: 'programDateTime',
-      MIN_SCORE_DEFAULT: 0.70,
-
-      CONFIDENCE_THRESHOLDS: {
-        HIGH: 0.75,
-        MEDIUM_HIGH: 0.50,
-        MEDIUM_LOW: 0.25
-      },
-      BADGE_COLORS: {
-        LOADING: '#f0ad4e',
-        READY: '#ff8400',
-        PLAYING: '#5cb85c',
-        PAUSED: '#f0ad4e',
-        ERROR: '#d9534f'
-      },
-
-      FORMATTED_IDLE_PLACEHOLDER_HTML: '<div class="placeholder-text">Waiting for playback to start...<br>Click play to see ID3 metadata events</div>',
-      RAW_IDLE_PLACEHOLDER_HTML: '<div class="placeholder-text">Waiting for playback to start...<br>Click play to see raw ID3 metadata</div>',
-      MAX_HISTORY_ITEMS: 100
-    };
-
-    var elements = {
-      playerUrl: document.getElementById('playerUrl'),
-      minScore: document.getElementById('minScore'),
-      minScoreValue: document.getElementById('minScoreValue'),
-      errorMessage: document.getElementById('errorMessage'),
-      playerElement: document.getElementById('playerElement'),
-      eventDisplay: document.getElementById('eventDisplay'),
-      logDisplay: document.getElementById('logDisplay'),
-      statusBadge: document.getElementById('statusBadge'),
-      formattedView: document.getElementById('formattedView'),
-      rawView: document.getElementById('rawView'),
-      copyStatusFormatted: document.getElementById('copyStatusFormatted'),
-      copyStatusRaw: document.getElementById('copyStatusRaw'),
-      labelTabFormatted: document.getElementById('labelTabFormatted'),
-      labelTabRaw: document.getElementById('labelTabRaw')
-    };
-
-    var myPlayer = null;
-    var playerStartTime = null;
-    var currentLoadingUrl = null;
-
-    var hasUserPressedPlay = false;
-
-    // Pause state (Option A: no hard-freeze)
-    var isPaused = false;
-
-    // Copy timers
-    var copyTimers = { formatted: null, raw: null };
-
-    // PDT anchor state
-    var pdtAnchorIso = null;
-    var pdtAnchorMediaTime = null;
-    var recentEventGuids = [];
-
-    var urlParams = new URLSearchParams(window.location.search);
-	var hashUrl = decodeURIComponent(window.location.hash.slice(1));
-	var hashParamsStr = hashUrl.split('?')[1];
-	var hashParams = new URLSearchParams(hashParamsStr);
-
-	var srcParam = urlParams.get('src') || hashParams.get('src');
-    var minScoreParam = urlParams.get('minScore') || hashParams.get('minScore');
-
-    if (srcParam) elements.playerUrl.value = srcParam;
-
-    function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
-
-    function initControlsFromUrl() {
-      const ms = (minScoreParam !== null && !isNaN(parseFloat(minScoreParam)))
-        ? clamp(parseFloat(minScoreParam), 0, 1)
-        : CONFIG.MIN_SCORE_DEFAULT;
-
-      elements.minScore.value = ms.toFixed(2);
-      elements.minScoreValue.textContent = ms.toFixed(2);
-    }
-
-    initControlsFromUrl();
-
-    elements.minScore.addEventListener('input', () => {
-      elements.minScoreValue.textContent = parseFloat(elements.minScore.value).toFixed(2);
-      //persistParamsToUrl();
-    });
-
-    function getMinScore() {
-      const v = parseFloat(elements.minScore.value);
-      return Number.isFinite(v) ? v : CONFIG.MIN_SCORE_DEFAULT;
-    }
-
-    // function persistParamsToUrl(explicitSrc) {
-    //   const params = new URLSearchParams(window.location.search);
-    //   const src = explicitSrc ?? elements.playerUrl.value.trim();
-
-    //   if (src) params.set('src', src);
-    //   params.set('minScore', getMinScore().toFixed(2));
-
-    //   history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
-    // }
-
-    // --- Time helpers (PDT + timeline) ---
-    function pad2(n) { return String(n).padStart(2, '0'); }
-    function pad3(n) { return String(n).padStart(3, '0'); }
-
-    function formatVideoClock(seconds) {
-      if (!Number.isFinite(seconds) || seconds < 0) return 'n/a';
-      const totalMs = Math.floor(seconds * 1000);
-      const ms = totalMs % 1000;
-      const totalSec = Math.floor(totalMs / 1000);
-      const s = totalSec % 60;
-      const totalMin = Math.floor(totalSec / 60);
-      const m = totalMin % 60;
-      const h = Math.floor(totalMin / 60);
-      return `${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`;
-    }
-
-    function formatWallClock(dt) {
-      const hh = dt.getUTCHours();
-      const mm = dt.getUTCMinutes();
-      const ss = dt.getUTCSeconds();
-      const ms = dt.getUTCMilliseconds();
-      return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}.${pad3(ms)} UTC`;
-    }
-
-    function wallClockForMediaTime(mediaTime) {
-      if (!pdtAnchorIso || typeof pdtAnchorMediaTime !== 'number') return null;
-      const anchorDate = new Date(pdtAnchorIso);
-      if (Number.isNaN(anchorDate.getTime())) return null;
-
-      const deltaMs = (mediaTime - pdtAnchorMediaTime) * 1000;
-      const dt = new Date(anchorDate.getTime() + deltaMs);
-      return formatWallClock(dt);
-    }
-
-    function updatePdtAnchorFromCue(cue) {
-      const iso = cue?.value?.data || cue?.value?.programDateTime || cue?.programDateTime || cue?.text || cue?.value;
-      if (typeof iso === 'string' && iso.includes('T')) {
-        pdtAnchorIso = iso;
-        pdtAnchorMediaTime = cue.startTime;
-      }
-    }
-
-    function formatTimestampForDisplay(cueStartSeconds, videoCurrentSeconds) {
-      const pdt = wallClockForMediaTime(cueStartSeconds);
-      const video = formatVideoClock(videoCurrentSeconds);
-      if (pdt) return `${pdt} (video=${video})`;
-      return `t=${formatVideoClock(cueStartSeconds)} (video=${video})`;
-    }
-
-    // Keeping this for placeholder timing only
-    function formatTime(seconds) {
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-    }
-
-    function getPlayerTime() {
-      if (!playerStartTime) {
-        playerStartTime = Date.now();
-        return '00:00';
-      }
-      const elapsedSeconds = (Date.now() - playerStartTime) / 1000;
-      return formatTime(elapsedSeconds);
-    }
-
-    function switchTab() {
-      const selectedTab = document.querySelector('input[name="eventTab"]:checked').value;
-      elements.formattedView.classList.remove('active');
-      elements.rawView.classList.remove('active');
-      if (selectedTab === 'formatted') elements.formattedView.classList.add('active');
-      else elements.rawView.classList.add('active');
-    }
-
-    function getConfidenceClass(confidence) {
-      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.HIGH) return 'confidence-high';
-      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.MEDIUM_HIGH) return 'confidence-medium-high';
-      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.MEDIUM_LOW) return 'confidence-medium-low';
-      return 'confidence-low';
-    }
-
-    function clearPlaceholder(element) {
-      const placeholder = element.querySelector('.placeholder-text');
-      if (placeholder) element.innerHTML = '';
-    }
-
-    function getFormattedPlaceholderHtml() {
-      if (hasUserPressedPlay) {
-        return `<div class="placeholder-text">Playing... awaiting detections (min score ${getMinScore().toFixed(2)})</div>`;
-      }
-      return CONFIG.FORMATTED_IDLE_PLACEHOLDER_HTML;
-    }
-
-    function getRawPlaceholderHtml() {
-      if (hasUserPressedPlay) {
-        return '<div class="placeholder-text">Playing... awaiting ID3 metadata</div>';
-      }
-      return CONFIG.RAW_IDLE_PLACEHOLDER_HTML;
-    }
-
-    function resetFormattedDisplay() {
-      elements.eventDisplay.innerHTML = getFormattedPlaceholderHtml();
-      elements.eventDisplay.scrollTop = 0;
-    }
-
-    function resetRawDisplay() {
-      elements.logDisplay.innerHTML = getRawPlaceholderHtml();
-      elements.logDisplay.scrollTop = 0;
-    }
-
-    function trimHistory(containerEl, selector, maxItems) {
-      const items = containerEl.querySelectorAll(selector);
-      if (items.length > maxItems) {
-        for (let i = maxItems; i < items.length; i++) items[i].remove();
-      }
-    }
-
-    function displayRawLog(eventType, data, timestamp) {
-      if (eventType.endsWith(CONFIG.EVENT_TYPE_PDT)) return;
-
-      let logContent = '';
-      try {
-        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-        logContent = `<div class="log-entry">
-          <div class="log-timestamp">${timestamp} => ${eventType}</div>
-          <div class="log-json">${escapeHtml(JSON.stringify(parsed, null, 2))}</div>
-        </div>`;
-      } catch (e) {
-        logContent = `<div class="log-entry">
-          <div class="log-timestamp">${timestamp} => ${eventType}</div>
-          <div class="log-json">${escapeHtml(String(data))}</div>
-        </div>`;
-      }
-
-      clearPlaceholder(elements.logDisplay);
-      elements.logDisplay.insertAdjacentHTML('afterbegin', logContent);
-      trimHistory(elements.logDisplay, '.log-entry', CONFIG.MAX_HISTORY_ITEMS);
-      elements.logDisplay.scrollTop = 0;
-    }
-
-    function displayEvent(eventType, data, timestamp) {
-      if (!eventType.endsWith(CONFIG.EVENT_TYPE_SCENE_DETECTION_POSTIFX)) return;
-
-      try {
-        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-
-        // Normalize a raw detection (object / scene / VLM) to the renderer's shape.
-        // confidence may be a rolled-up object ({avg}), a plain number, or absent:
-        // VLM windows carry no confidence (the server omits the null key), so the
-        // .avg access must be guarded or it throws and the whole event is dropped.
-        // A custom-schema VLM window carries only its structured `data` object (no
-        // meaningful class_name); surface that via `data` so it renders its fields
-        // instead of a generic placeholder label.
-        const normalize = (det) => {
-          let confidence = null;
-          if (det.confidence && typeof det.confidence.avg === 'number') confidence = det.confidence.avg;
-          else if (typeof det.confidence === 'number') confidence = det.confidence;
-          return {
-            label: det.class_name ?? det.label ?? null,
-            confidence,
-            reasoning: det.reasoning || null,
-            data: (det.data && typeof det.data === 'object') ? det.data : null,
-          };
-        };
-
-        let detections = [];
-        if (parsed.vif_data && Array.isArray(parsed.vif_data)) {
-          parsed.vif_data.forEach((viEntry) => {
-            if (viEntry.detections && viEntry.detections.length > 0) {
-              viEntry.detections.forEach(det => detections.push(normalize(det)));
-            }
-          });
-        } else if (parsed.detections && Array.isArray(parsed.detections)) {
-          detections = parsed.detections.map(normalize);
-        } else {
-          return;
-        }
-
-        const minScore = getMinScore();
-        detections = detections
-          .filter(d => d.confidence === null || (typeof d.confidence === 'number' && d.confidence >= minScore))
-          .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
-
-        if (detections.length === 0) return;
-
-        const isVlm = eventType === 'vlm-detection';
-        const labels = detections.map(d => {
-          // Custom-schema VLM output: render its structured fields directly — there
-          // is no class to badge and a placeholder label reads as a bogus detection.
-          if (d.data) {
-            const rows = Object.keys(d.data).map(k => {
-              const v = d.data[k];
-              const valStr = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
-              return `<div><span class="detection-data-key">${escapeHtml(k)}:</span> ${escapeHtml(valStr)}</div>`;
-            }).join('');
-            return `<div class="detection-data">${rows}</div>`;
-          }
-          // confidence is absent for VLM (use != null to catch both null and the
-          // omitted/undefined key, else Number(undefined) renders "(NaN)").
-          const confidenceClass = d.confidence != null ? getConfidenceClass(d.confidence) : '';
-          const confidenceStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
-          const reasoningStr = isVlm && d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
-          const labelStr = d.label != null ? escapeHtml(d.label) : '';
-          return `<span class="detection-label ${confidenceClass}">${labelStr}${confidenceStr}</span>${reasoningStr}`;
-        }).join('');
-
-        const content = `
-          <div class="event-item">
-            <div class="event-time">${escapeHtml(timestamp)}</div>
-            <div class="event-data">${labels}</div>
-          </div>
-        `;
-
-        clearPlaceholder(elements.eventDisplay);
-        elements.eventDisplay.insertAdjacentHTML('afterbegin', content);
-        trimHistory(elements.eventDisplay, '.event-item', CONFIG.MAX_HISTORY_ITEMS);
-        elements.eventDisplay.scrollTop = 0;
-      } catch (e) {
-        console.error('Error parsing event data:', e);
-      }
-    }
-
-    function updateStatusBadge(text, color) {
-      elements.statusBadge.textContent = text;
-      elements.statusBadge.style.background = color;
-    }
-
-    function showError(message) {
-      elements.errorMessage.textContent = message;
-      elements.errorMessage.classList.remove('hidden');
-    }
-
-    function hideError() {
-      elements.errorMessage.classList.add('hidden');
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-    }
-
-    // Tooltip behavior: click to open/close, click outside closes, click inside closes
-    function closeAllTips() {
-      document.querySelectorAll('.tip-btn.open').forEach(btn => btn.classList.remove('open'));
-    }
-
-    function isPlaybackMounted() {
-      return !!document.getElementById('playerElement') && !!document.getElementById('playerUrl');
-    }
-
-    document.querySelectorAll('[data-tip]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const wasOpen = btn.classList.contains('open');
-        closeAllTips();
-        if (!wasOpen) btn.classList.add('open');
-      });
-
-      const pop = btn.querySelector('.tip-pop');
-      if (pop) {
-        pop.addEventListener('click', (e) => {
-          e.stopPropagation();
-          btn.classList.remove('open');
-        });
-      }
-    });
-
-    if (!window.__vifPlaybackGlobalBindings) {
-      document.addEventListener('click', () => {
-        if (!isPlaybackMounted()) return;
-        closeAllTips();
-      });
-      document.addEventListener('keydown', (e) => {
-        if (!isPlaybackMounted()) return;
-        if (e.key === 'Escape') closeAllTips();
-      });
-      window.__vifPlaybackGlobalBindings = true;
-    }
-
-    // --- Copy UX helpers (icon hides, status shows for 1 second) ---
-    function setTabCopiedState(which, message) {
-      const labelEl = (which === 'formatted') ? elements.labelTabFormatted : elements.labelTabRaw;
-      const statusEl = (which === 'formatted') ? elements.copyStatusFormatted : elements.copyStatusRaw;
-
-      if (!labelEl || !statusEl) return;
-
-      statusEl.textContent = message || '';
-      labelEl.classList.add('copied');
-
-      if (copyTimers[which]) clearTimeout(copyTimers[which]);
-      copyTimers[which] = setTimeout(() => {
-        labelEl.classList.remove('copied');
-        statusEl.textContent = '';
-        copyTimers[which] = null;
-      }, 1000);
-    }
-
-    // --- Clipboard helpers ---
-    async function copyTextToClipboard(text) {
-      if (navigator.clipboard && window.isSecureContext) {
-        return navigator.clipboard.writeText(text);
-      }
-
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      ta.style.top = '-9999px';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-
-    function buildFormattedPayloadFromDiv() {
-      const items = Array.from(document.querySelectorAll('#eventDisplay .event-item'));
-      const out = items.reverse().map(item => {
-        const timeEl = item.querySelector('.event-time');
-        const labelEls = Array.from(item.querySelectorAll('.detection-label'));
-
-        const detections = labelEls.map(el => {
-          const t = (el.textContent || '').trim(); // "person (0.93)"
-          const m = t.match(/^(.*)\s+\(([-\d.]+)\)\s*$/);
-          if (m) return { label: m[1], confidence: Number(m[2]) };
-          return { label: t, confidence: null };
-        });
-
-        return {
-          timestamp: timeEl ? timeEl.textContent.trim() : null,
-          detections
-        };
-      });
-
-      return {
-        type: 'scene-detection',
-        view: 'formatted',
-        minScore: getMinScore(),
-        events: out
-      };
-    }
-
-    function buildRawPayloadFromDiv() {
-      const entries = Array.from(document.querySelectorAll('#logDisplay .log-entry'));
-      const out = entries.reverse().map(entry => {
-        const tsEl = entry.querySelector('.log-timestamp');
-        const jsonEl = entry.querySelector('.log-json');
-
-        const ts = tsEl ? tsEl.textContent.trim() : null;
-        const rawText = jsonEl ? jsonEl.textContent : '';
-
-        let parsed = null;
-        try { parsed = rawText ? JSON.parse(rawText) : null; } catch (e) {}
-
-        return { timestamp: ts, data: parsed ?? rawText };
-      });
-
-      return {
-        type: 'scene-detection',
-        view: 'raw',
-        events: out
-      };
-    }
-
-    async function copyFormattedDetections() {
-      try {
-        const payloadObj = buildFormattedPayloadFromDiv();
-        const payload = JSON.stringify(payloadObj, null, 2);
-        await copyTextToClipboard(payload);
-        setTabCopiedState('formatted', (payloadObj.events?.length ? 'Copied' : 'Empty'));
-      } catch (e) {
-        console.error('Copy formatted failed:', e);
-        setTabCopiedState('formatted', 'Failed');
-      }
-    }
-
-    async function copyRawDetections() {
-      try {
-        const payloadObj = buildRawPayloadFromDiv();
-        const payload = JSON.stringify(payloadObj, null, 2);
-        await copyTextToClipboard(payload);
-        setTabCopiedState('raw', (payloadObj.events?.length ? 'Copied' : 'Empty'));
-      } catch (e) {
-        console.error('Copy raw failed:', e);
-        setTabCopiedState('raw', 'Failed');
-      }
-    }
-
-    // Wrappers prevent label click from toggling the tab
-    function onCopyFormattedFromTab(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      copyFormattedDetections();
-    }
-
-    function onCopyRawFromTab(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      copyRawDetections();
-    }
-
-    function clearFormattedDetections() {
-      resetFormattedDisplay();
-      setTabCopiedState('formatted', 'Cleared');
-    }
-
-    function clearRawDetections() {
-      resetRawDisplay();
-      setTabCopiedState('raw', 'Cleared');
-    }
-
-    function onClearFormattedFromTab(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      clearFormattedDetections();
-    }
-
-    function onClearRawFromTab(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      clearRawDetections();
-    }
-
-    function clearPlaybackDebugInterval() {
-      if (window.__vifPlaybackDebugInterval) {
-        clearInterval(window.__vifPlaybackDebugInterval);
-        window.__vifPlaybackDebugInterval = null;
-      }
-    }
-
-    function destroyPlaybackSession(options) {
-      const shouldClearPlaybackUrl = !options || options.clearPlaybackUrl !== false;
-
-      clearPlaybackDebugInterval();
-      currentLoadingUrl = null;
-
-      if (myPlayer != null) {
-        try {
-          myPlayer.destroy();
-        } catch (e) {
-          console.error('Error destroying player:', e);
-        } finally {
-          myPlayer = null;
-        }
-      }
-
-      const videoElement = document.querySelector('#playerElement video');
-      if (videoElement) {
-        try {
-          videoElement.pause();
-          videoElement.removeAttribute('src');
-          videoElement.load();
-        } catch (e) {
-          console.error('Error clearing video element:', e);
-        }
-      }
-    }
-
-    window.__vifPlaybackDestroy = destroyPlaybackSession;
-
-    function mainPage()
-    {
-      destroyPlaybackSession();
-      loadAjaxPluginContent("server","vif", "shm.html","");
-    }
-
-	document.addEventListener('visibilitychange', function() {
-		if (document.visibilityState === 'visible') {
-			console.log('Page is visible again, resuming stream loading if paused.');
-		    const videoElement = document.querySelector('#playerElement video');
-			videoElement.currentTime = myPlayer.liveSyncPosition;
-		}
-	});
-
-    // --- Player creation ---
-    function createPlayer() {
-      const url = elements.playerUrl.value.trim();
-      if (!url) {
-        showError('Please enter a stream URL');
-        return;
-      }
-
-      hideError();
-      currentLoadingUrl = url;
-      //persistParamsToUrl(url);
-
-      isPaused = false;
-
-      pdtAnchorIso = null;
-      pdtAnchorMediaTime = null;
-
-      destroyPlaybackSession({ clearPlaybackUrl: false });
-
-      const playerContainer = elements.playerElement.parentNode;
-      const newPlayerElement = document.createElement('div');
-      newPlayerElement.id = 'playerElement';
-      playerContainer.replaceChild(newPlayerElement, elements.playerElement);
-      elements.playerElement = newPlayerElement;
-
-      setTimeout(() => initializeNewPlayer(url), 500);
-    }
-
-    function initializeNewPlayer(url) {
-      playerStartTime = null;
-      hasUserPressedPlay = false;
-
-      resetFormattedDisplay();
-      resetRawDisplay();
-
-      updateStatusBadge('Loading...', CONFIG.BADGE_COLORS.LOADING);
-
-      const video = document.createElement('video');
-      video.controls = true;
-      video.playsInline = true;
-      video.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-      elements.playerElement.appendChild(video);
-
-      function onId3Cue(cue) {
-        if (!hasUserPressedPlay || isPaused) return;
-        const v = cue.value;
-        if (!v) return;
-
-        const eventType = v.info;
-        const eventData = v.data;
-
-        if (eventType === CONFIG.EVENT_TYPE_PDT) {
-          updatePdtAnchorFromCue({ value: v, startTime: cue.startTime });
-          console.log('[pdt] anchor set', { pdtAnchorIso, pdtAnchorMediaTime });
-        } else {
-			try {
-			const parsed = typeof eventData === 'string' ? JSON.parse(eventData) : eventData;
-			const guid = parsed && parsed.guid;
-			if (guid && recentEventGuids.includes(guid)) return;
-			if (guid) {
-				recentEventGuids.push(guid);
-				if (recentEventGuids.length > 25) recentEventGuids.shift();
-			}
-			} catch (e) { /* non-JSON data — no dedup */ }
-	        console.log(`[player] ID3 event: ${eventType}`, eventData);
-		}
-
-        const timestamp = formatTimestampForDisplay(cue.startTime, video.currentTime);
-        displayEvent(eventType, eventData, timestamp);
-        displayRawLog(eventType, eventData, timestamp);
-      }
-
-      video.textTracks.addEventListener('addtrack', (e) => {
-        if (e.track.kind !== 'metadata') return;
-        e.track.mode = 'hidden';
-        e.track.addEventListener('cuechange', () => {
-          const cues = e.track.activeCues;
-          if (!cues) return;
-          for (let i = 0; i < cues.length; i++) onId3Cue(cues[i]);
-        });
-      });
-
-      video.addEventListener('play', () => {
-        hasUserPressedPlay = true;
-        if (!playerStartTime) playerStartTime = Date.now();
-        isPaused = false;
-        updateStatusBadge('Playing', CONFIG.BADGE_COLORS.PLAYING);
-        console.log('[player] play');
-        clearPlaceholder(elements.eventDisplay);
-        clearPlaceholder(elements.logDisplay);
-        if (!elements.eventDisplay.querySelector('.event-item')) resetFormattedDisplay();
-        if (!elements.logDisplay.querySelector('.log-entry')) resetRawDisplay();
-        elements.eventDisplay.scrollTop = 0;
-        elements.logDisplay.scrollTop = 0;
-      });
-
-      video.addEventListener('pause', () => {
-        isPaused = true;
-        updateStatusBadge('Paused', CONFIG.BADGE_COLORS.PAUSED);
-        console.log('[player] pause');
-      });
-
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          liveSyncDurationCount: 0,
-          liveDurationInfinity: true,
-          enableWorker: true,
-          lowLatencyMode: true,
-          backBufferLength: 90
-        });
-        myPlayer = hls;
-        hls.loadSource(url);
-        hls.attachMedia(video);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          updateStatusBadge('Ready', CONFIG.BADGE_COLORS.READY);
-          console.log('[player] ready');
-          video.play().catch(e => console.warn('[player] autoplay blocked:', e));
-        });
-
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          if (!data.fatal) return;
-          console.error('[player] fatal error:', data);
-          if (url !== currentLoadingUrl) return;
-          updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
-          showError('Failed to load stream. Please check the URL format and try again.');
-        });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Native HLS (Safari)
-        myPlayer = { destroy: () => { video.src = ''; } };
-        video.src = url;
-        video.addEventListener('loadedmetadata', () => {
-          updateStatusBadge('Ready', CONFIG.BADGE_COLORS.READY);
-          video.play().catch(e => console.warn('[player] autoplay blocked:', e));
-        });
-        video.addEventListener('error', () => {
-          if (url !== currentLoadingUrl) return;
-          updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
-          showError('Failed to load stream. Please check the URL format and try again.');
-        });
-      } else {
-        showError('HLS playback is not supported in this browser.');
-      }
-    }
-
-    if (srcParam) createPlayer();
-
-    window.addEventListener('pagehide', () => {
-      destroyPlaybackSession();
-    });
-
-    window.addEventListener('beforeunload', () => {
-      destroyPlaybackSession();
-    });
-
-    clearPlaybackDebugInterval();
-    window.__vifPlaybackDebugInterval = setInterval(() => {
-      if (!isPlaybackMounted()) {
-        destroyPlaybackSession({ clearPlaybackUrl: false });
-        return;
-      }
-      const v = document.querySelector('#playerElement video');
-      if (!v) return;
-      const b = v.buffered;
-      if (!b || b.length === 0) return;
-      const end = b.end(b.length - 1);
-      console.log('[dbg] currentTime=', v.currentTime.toFixed(3),
-        'bufferEnd=', end.toFixed(3),
-        'behindLive=', (end - v.currentTime).toFixed(3),
-        'paused=', v.paused);
-    }, 1000);
-
-    console.log("VIF ID3 Metadata Player Loaded");
+    VIF.playback.init();
   </script>

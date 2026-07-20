@@ -1,0 +1,454 @@
+/*
+ * vif.css — shared styles for the VIF Manager UI fragments
+ * (default.html, stream-config.html, playback.html, shm.html).
+ *
+ * Every selector here MUST be scoped under .vif-plugin. Fragments are
+ * jQuery .html()-injected into the WSE Manager DOM, so an unscoped rule
+ * (bare `button`, `h2`, `:root`, etc.) applies to the ENTIRE Manager, not
+ * just the fragment that declared it — confirmed live for the old bare
+ * `button` rule beating Bootstrap's `.btn` Manager-wide. Each fragment's
+ * root element carries the `vif-plugin` class (shm.html additionally
+ * keeps `vif-dashboard` on the same root for its own page-specific rules).
+ *
+ * Only rules that are byte-identical (or identical on a safely-shared
+ * subset of declarations) across two or more fragments AND that do not
+ * collide with unrelated markup in the other fragments live here.
+ * In particular `button`/`button:hover`/`button:disabled` are identical
+ * across default.html, stream-config.html and shm.html but are
+ * intentionally NOT centralized here, because playback.html has real
+ * <button class="btn btn-primary"> elements that would otherwise pick
+ * up this styling for the first time (a visual change).
+ */
+
+.vif-plugin {
+    /* Status color tokens shared by stream-config.html and shm.html
+       (identical values in both). Scoped on .vif-plugin, not :root,
+       so they never leak into the rest of the Manager DOM. */
+    --good-color: #00e676;   /* Green */
+    --alert-color: #ff5252;  /* Red */
+    --alert-bg: #ffe5e5;
+    --warn-color: #cc9900;   /* yellow/amber */
+    --warn-bg: #fff8e5;
+    --accent-color: #00bcd4;
+}
+
+/* Identical in default.html, stream-config.html and shm.html.
+   Safe to share: playback.html has no <h2> elements (its headings are
+   <h3>), so this cannot affect it. */
+.vif-plugin h2 {
+    font-size: 18px;
+    margin: 0;
+}
+
+/* .content-wrapper plays two different structural roles across fragments:
+   it IS the fragment root in default.html/stream-config.html (so it also
+   carries the vif-plugin class directly), but it is a nested descendant
+   of the true root (.vif-dashboard) in shm.html. The selector list below
+   covers both shapes. Only the declarations identical across all owners
+   are here; each page keeps the rest (see each fragment's own <style>). */
+.vif-plugin.content-wrapper,
+.vif-plugin .content-wrapper {
+    box-sizing: border-box;
+    padding: 16px;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Shared subset of .streams-header (default.html, stream-config.html,
+   shm.html). align-items and margin-bottom differ per page and stay
+   page-specific. */
+.vif-plugin .streams-header {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 10px;
+}
+
+/* Identical in stream-config.html and shm.html. Currently dead CSS in
+   both (no element in either fragment's markup carries this class), kept
+   verbatim for zero-behavior-change. */
+.vif-plugin .status-bar {
+    font-size: 0.85em;
+    color: #fff;
+    text-align: right;
+    margin-left: auto;
+    margin: 7px;
+}
+
+/* Shared subset of .host-container (stream-config.html, shm.html). shm.html
+   adds width/max-width/min-width for its responsive grid, kept page-side. */
+.vif-plugin .host-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+/* Identical in stream-config.html and shm.html (shm.html adds flex/max-width
+   for its responsive card layout, kept page-side). */
+.vif-plugin .metric-card {
+    min-width: 120px;
+    background: #fafafa;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid #ccc;
+    transition: all 0.3s ease;
+}
+
+.vif-plugin .metric-label {
+    font-size: 0.85em;
+    color: #444;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+}
+
+.vif-plugin .metric-value {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: #333;
+    word-break: break-all;
+}
+
+.vif-plugin .card-alert {
+    border: 1px solid var(--alert-color);
+    background-color: var(--alert-bg);
+}
+.vif-plugin .card-alert .metric-value {
+    color: var(--alert-color);
+}
+
+.vif-plugin .card-warn {
+    border: 1px solid var(--warn-color);
+    background-color: var(--warn-bg);
+}
+.vif-plugin .card-warn .metric-value {
+    color: var(--warn-color);
+}
+
+.vif-plugin .text-alert { color: var(--alert-color) !important; }
+.vif-plugin .text-warn { color: var(--warn-color) !important; }
+.vif-plugin .text-good { color: var(--good-color) !important; }
+
+/* Identical in stream-config.html and shm.html. */
+.vif-plugin .slider {
+    accent-color: #2a71ab;
+}
+
+/* Shared subset of .switch (default.html, stream-config.html, shm.html).
+   `display` differs (default.html uses inline-flex + flex-shrink: 0,
+   the others use flex) and stays page-specific. */
+.vif-plugin .switch {
+    position: relative;
+    width: 50px;
+    height: 23px;
+}
+
+.vif-plugin .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.vif-plugin .slider-switch {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 25px;
+}
+
+.vif-plugin .slider-switch:before {
+    position: absolute;
+    content: "";
+    height: 15px;
+    width: 15px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.vif-plugin input:checked + .slider-switch {
+    background-color: #2a71ab;
+}
+.vif-plugin input:checked + .slider-switch:before {
+    transform: translateX(24px);
+}
+
+/* Identical in stream-config.html and shm.html. */
+.vif-plugin .item-right {
+    margin-left: auto;
+}
+
+/* Shared subset of .form-wrapper (default.html, stream-config.html).
+   stream-config.html adds width:100%/max-width:100%; default.html sets
+   max-width:700px instead — both kept page-specific. */
+.vif-plugin .form-wrapper {
+    background: #fafafa;
+    border-radius: 12px;
+    border: 1px solid #ccc;
+    padding: 20px;
+}
+
+/* Shared subset of .form-section-title (default.html, stream-config.html).
+   font-size and margin-bottom differ per page and stay page-specific. */
+.vif-plugin .form-section-title {
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #333;
+}
+
+/* Shared subset of .form-group (default.html, stream-config.html).
+   stream-config.html adds overflow:hidden, kept page-side. */
+.vif-plugin .form-group {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Shared subset of ".form-group label:not(.switch)" (default.html,
+   stream-config.html). Resolves --form-label-width from whichever page's
+   own .vif-plugin token definition is in scope (each page defines its own
+   value — see each fragment's <style>). stream-config.html adds
+   overflow-wrap:anywhere, kept page-side. */
+.vif-plugin .form-group label:not(.switch) {
+    flex: 0 0 var(--form-label-width);
+    max-width: var(--form-label-width);
+    font-size: 0.85em;
+    color: #444;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-align: right;
+    line-height: 1.35;
+}
+
+/* Identical in default.html and stream-config.html (byte-for-byte). */
+.vif-plugin .input-with-toggle {
+    display: flex;
+    flex: 1 1 200px;
+    max-width: 320px;
+    gap: 0;
+}
+.vif-plugin .input-with-toggle input {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    border-radius: 4px 0 0 4px;
+    border-right: none;
+}
+.vif-plugin .input-with-toggle button {
+    flex: 0 0 auto;
+    padding: 5px 8px;
+    font-size: 0.8em;
+    border-radius: 0 4px 4px 0;
+    margin-bottom: 0;
+    border: 1px solid #ccc;
+    background: #e8e8e8;
+    color: #333;
+    white-space: nowrap;
+}
+.vif-plugin .input-with-toggle button:hover { background: #d0d0d0; }
+
+.vif-dashboard .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    width: 100%;
+}
+
+.vif-dashboard .metric-group {
+    margin-bottom: 20px;
+}
+
+/* Same size as .metric-label; bold weight alone marks it as the group
+ * heading. */
+.vif-dashboard .metric-group-title {
+    font-size: 0.85em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #444;
+    margin-bottom: 8px;
+}
+
+/* The "WSE Host" group's Card/Driver/CUDA line and each Inference group's
+ * routed-streams line - static values demoted from cards to one muted
+ * line of text (F1/P5-T3). */
+.vif-dashboard .host-info-line {
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 8px;
+    overflow-wrap: anywhere;
+}
+
+/* An Inference group whose instance is unreachable, or has no metrics yet -
+ * "never blank" (P5-T2 contract): a visibly muted card instead of nothing. */
+.vif-dashboard .metric-card-muted {
+    background: #f0f0f0;
+    border-style: dashed;
+}
+.vif-dashboard .metric-card-muted .metric-label,
+.vif-dashboard .metric-card-muted .metric-value {
+    color: #888;
+}
+
+.vif-dashboard .dashboard-banner {
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 0.9em;
+}
+.vif-dashboard .dashboard-banner-info {
+    background: #e8f4fd;
+    border: 1px solid #b8dff5;
+    color: #1a4e6e;
+}
+.vif-dashboard .dashboard-banner-alert {
+    background: var(--alert-bg);
+    border: 1px solid var(--alert-color);
+    color: #7a1f1f;
+}
+
+.vif-dashboard.vif-metrics-compact .metric-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.vif-dashboard.vif-metrics-compact .metric-grid .metric-card {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    min-width: 0;
+}
+.vif-dashboard.vif-metrics-compact .metric-grid .metric-label {
+    margin-bottom: 0;
+}
+.vif-dashboard.vif-metrics-compact .metric-grid .metric-value {
+    font-size: 1em;
+    word-break: normal;
+}
+.vif-dashboard.vif-metrics-compact .metric-group {
+    margin-bottom: 12px;
+}
+.vif-dashboard.vif-metrics-compact .metric-group-title {
+    margin-bottom: 6px;
+}
+.vif-dashboard.vif-metrics-compact .host-info-line {
+    margin-bottom: 6px;
+}
+
+/* Circled "?" help-tip affordance: a small inline circle placed right after a
+ * label whose explanatory text lives on the tip's own `title` (so the tooltip
+ * is discoverable, not hidden on the label). currentColor keeps it legible on
+ * any background - white on the table's black <th>, dark on the light page.
+ * Delete-safe and self-contained; append-only at the end of this file.
+ * Applied on the dashboard only for now (shm.html + vif-dashboard.js). */
+.vif-plugin .vif-help-tip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 5px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font-size: 10px;
+    line-height: 1;
+    font-style: normal;
+    font-weight: normal;
+    vertical-align: middle;
+    cursor: help;
+    opacity: 0.65;
+    flex: 0 0 auto;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.vif-plugin .vif-help-tip:hover {
+    opacity: 1;
+}
+
+/* Per-GPU metrics table (WSE Host + Inference groups) - one row per
+ * GPU, one column per metric, replacing the per-metric multi-line cards /
+ * per-GPU card pairs that sprawled horizontally on multi-GPU machines.
+ * The wrapper keeps the metric-card visual tokens; the second selector
+ * out-specifies the compact chip rule above so the card stays a block, and
+ * grid-column spans the non-compact grid so the table is never squeezed
+ * into one 150px column. */
+.vif-dashboard .metric-card.gpu-table-card,
+.vif-dashboard.vif-metrics-compact .metric-grid .metric-card.gpu-table-card {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 6px 12px;
+    overflow-x: auto;
+    grid-column: 1 / -1;
+}
+
+.vif-dashboard .gpu-table {
+    border-collapse: collapse;
+}
+
+.vif-dashboard .gpu-table th,
+.vif-dashboard .gpu-table td {
+    text-align: left;
+    padding: 3px 16px 3px 0;
+}
+
+.vif-dashboard .gpu-table th:last-child,
+.vif-dashboard .gpu-table td:last-child {
+    padding-right: 0;
+}
+
+/* Header cells share .metric-label's type treatment, value cells the compact
+ * .metric-value's. The device column is an identifier, not a reading -
+ * label treatment, not value. */
+.vif-dashboard .gpu-table th {
+    font-size: 0.85em;
+    font-weight: normal;
+    color: #444;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.vif-dashboard .gpu-table td {
+    font-weight: bold;
+    color: #333;
+}
+
+.vif-dashboard .gpu-table td.gpu-device {
+    font-weight: normal;
+    color: #444;
+}
+
+.vif-dashboard .gpu-table tbody tr + tr td {
+    border-top: 1px solid #e0e0e0;
+}
+
+/* Per-cell warn/alert, same tokens as .card-warn/.card-alert. */
+.vif-dashboard .gpu-table td.gpu-cell-warn {
+    color: var(--warn-color);
+    background: var(--warn-bg);
+}
+.vif-dashboard .gpu-table td.gpu-cell-alert {
+    color: var(--alert-color);
+    background: var(--alert-bg);
+}
+
+/* An Inference group with no CPU card leaves its pills grid empty - don't
+ * let the empty container's margin push the GPU table down. */
+.vif-dashboard .metric-grid:empty {
+    margin-bottom: 0;
+}
