@@ -8,11 +8,14 @@ services:
         profiles: ["", "wse", "wse-only", "default"]
         restart: unless-stopped # Automatically restarts unless manually stopped
         ##### comment deploy section below for non gpu support
-        runtime: nvidia
+        deploy:
+          resources:
+            reservations:
+              devices:
+                - driver: nvidia
+                  capabilities: [video, gpu, compute, utility]
+                  count: all
         environment:
-            # NVIDIA GPU configuration
-            - NVIDIA_VISIBLE_DEVICES=all
-            - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
             - WSE_LICENSE_KEY=${WSE_LICENSE_KEY}
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
