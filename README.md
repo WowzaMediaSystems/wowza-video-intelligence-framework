@@ -1,6 +1,6 @@
 # Wowza Streaming Engine · Video Intelligence Framework
 
-**Docker-based Wowza Streaming Engine with a Video Intelligence add-on for real-time object detection, VLM analysis, scene understanding, and synthetic video detection.**  
+**Docker-based Wowza Streaming Engine with a Video Intelligence add-on for real-time object detection, VLM analysis (including scene understanding), and synthetic video detection.**  
 
 Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-time AI analysis across edge and cloud environments. The stream name determines which type of AI analysis is performed. 
 
@@ -15,8 +15,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 | | |
 |---|---|
 | **What it is** | Ready-to-run WSE configuration with prebuilt plugin JARs for video intelligence workflows |
-| **Primary workflows** | Object detection and VLM analysis |
-| **Experimental workflow** | Scene understanding |
+| **Primary workflows** | Object detection and VLM analysis (including scene understanding) |
 | **Optional workflow** | Synthetic video detection |
 | **How it runs** | `docker compose up` starts `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU). A one-shot `vis-init` helper runs first to prepare VIS mounts. |
 | **Alternative workflow (optional)** | `docker compose --profile wse up` starts only `wse` and `manager` when connecting to a remote VIS endpoint. |
@@ -33,8 +32,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Repository Layout](#repository-layout)
 - [Persistent Volume Mounts](#persistent-volume-mounts)
 - [Running Wowza VIF Locally (Quick Start)](#running-wowza-vif-locally-quick-start)
-- [Testing Object Detection and Scene Understanding](#testing-object-detection-and-scene-understanding)
-- [Testing VLM Analysis (Optional)](#testing-vlm-analysis-optional)
+- [Testing Object Detection and VLM Analysis](#testing-object-detection-and-vlm-analysis)
 - [Default Model Coverage and Configuration](#default-model-coverage-and-configuration)
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
@@ -179,9 +177,11 @@ This persistence makes testing and iteration easier, but after major WSE, VIS, m
 
 If you disable these mounts, WSE and VIS fall back to container filesystem defaults and local changes are not preserved when containers are recreated.
 
-## Testing Object Detection and Scene Understanding
+## Testing Object Detection and VLM Analysis
 
-In the default examples included in this repository, a stream with a name matching `object.*` triggers object detection using an RF-DETR Medium model capable of identifying up to 80 COCO object categories, including people, vehicles, animals, and more. A stream matching `scene.*` triggers scene understanding, which classifies the overall activity or situation visible in the video and is currently experimental.
+In the default examples included in this repository, a stream with a name matching `object.*` triggers object detection using an RF-DETR Medium model capable of identifying up to 80 COCO object categories, including people, vehicles, animals, and more. VLM analysis covers open-vocabulary reasoning and scene-understanding style interpretation for overall activity.
+
+Scene and VLM models are continuously evolving. Expect accuracy and behavior improvements over time as model versions are updated.
 
 Out of the box, VIF renders bounding box overlays on the transcoded `-vi` stream and injects ID3 metadata into the HLS output. Webhook delivery to third-party platforms and local log file events are available. Developers can further customize event handling using [Wowza Streaming Engine modules](https://www.wowza.com/docs/use-wowza-streaming-engine-java-modules).
 
@@ -198,39 +198,24 @@ Out of the box, VIF renders bounding box overlays on the transcoded `-vi` stream
 ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/object_mystream1"
 ```
 
-5. Scene understanding is **experimental**. The underlying models are actively evolving, and results will improve over time. Output quality and behavior may change between releases. The default configuration matches stream names using the `scene.*` regex. If the `scene.*` rule is enabled in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or REST API, publish a stream to the WSE `live` application:
+5. For scene-understanding workflows, publish a stream matching the default `scene.*` rule. If the `scene.*` rule is enabled in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or REST API, publish a stream to the WSE `live` application:
 
 ```bash
 ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/scene_mystream1"
 ```
 
-6. Expected output for streams analyzed by VIF:
+6. For VLM analysis, start the full stack with the VLM sidecar and publish a stream matching the default `vlm.*` rule:
+
+```bash
+docker compose --profile default --profile vlm up -d
+ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
+```
+
+7. Expected output for streams analyzed by VIF:
 
    - The `-vi` rendition includes overlays. For example, publish `object_mystream1`, then play `http://localhost/live/object_mystream1-vi/playlist.m3u8` in an HLS player.
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
-
-## Testing VLM Analysis (Optional)
-
-VLM analysis supports open-vocabulary prompts and returns class-level reasoning or descriptive text per analysis window.
-
-1. Start the full stack with VLM enabled:
-
-```bash
-docker compose --profile default --profile vlm up -d
-```
-
-2. Publish a stream matching the default `vlm.*` rule:
-
-```bash
-ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
-```
-
-3. View VLM output channels:
-
-- Overlays in the `-vi` rendition (for example `http://localhost/live/vlm_mystream1-vi/playlist.m3u8`).
-- ID3 metadata in HLS output.
-- Log records in `./wse/logs/wowzastreamingengine_vi.log` when `LogFiles` is enabled.
 
 See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for VLM modes (`Detect`, `Describe`, and `Custom`), endpoint settings, and GPU tuning.
 
