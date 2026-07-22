@@ -1,6 +1,6 @@
 # Wowza Streaming Engine · Video Intelligence Framework
 
-**Docker-based Wowza Streaming Engine with a Video Intelligence add-on for real-time object detection and scene understanding.**  
+**Docker-based Wowza Streaming Engine with a Video Intelligence add-on for real-time object detection, VLM analysis, scene understanding, and synthetic video detection.**  
 
 Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-time AI analysis across edge and cloud environments. The stream name determines which type of AI analysis is performed. 
 
@@ -15,10 +15,11 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 | | |
 |---|---|
 | **What it is** | Ready-to-run WSE configuration with prebuilt plugin JARs for video intelligence workflows |
-| **Primary workflow** | Object detection |
+| **Primary workflows** | Object detection and VLM analysis |
 | **Experimental workflow** | Scene understanding |
-| **How it runs** | `docker compose up` starts three containers: `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU) |
-| **Alternative workflow (optional)** | `docker compose --profile wse up` starts only `wse` and `manager`. Use this only when connecting to a remote VIS endpoint. |
+| **Optional workflow** | Synthetic video detection |
+| **How it runs** | `docker compose up` starts `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU). A one-shot `vis-init` helper runs first to prepare VIS mounts. |
+| **Alternative workflow (optional)** | `docker compose --profile wse up` starts only `wse` and `manager` when connecting to a remote VIS endpoint. |
 | **VI Service deployment** | Connect to a remote VI Service instance (`wss://`) or run VIF locally via Docker |
 
 ## Prerequisites
@@ -33,6 +34,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Persistent Volume Mounts](#persistent-volume-mounts)
 - [Running Wowza VIF Locally (Quick Start)](#running-wowza-vif-locally-quick-start)
 - [Testing Object Detection and Scene Understanding](#testing-object-detection-and-scene-understanding)
+- [Testing VLM Analysis (Optional)](#testing-vlm-analysis-optional)
 - [Default Model Coverage and Configuration](#default-model-coverage-and-configuration)
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
@@ -67,7 +69,7 @@ Local directories such as `logs/`, `tmp/`, `vis/`, and `wse/` are gitignored. In
 
 - `.env` - license key, admin credentials, player/API keys
 - VIF stream/default configuration - use the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page in WSE Manager, or the WSE REST API
-- `wse/conf.modules/vif/` - if local WSE volume mounts are enabled, advanced users can directly edit files to configure video intelligence routing, service connection settings, and feature behavior
+- `wse/conf.modules/vif/` - if local WSE volume mounts are enabled, advanced users can directly edit VIF config files. `Default.json` defines global defaults and per-stream files (for example `live_objectDotStar.json`) override them.
 
 ## Running Wowza VIF Locally (Quick Start)
 
@@ -75,8 +77,8 @@ Make sure you have a valid [Wowza Streaming Engine key](https://www.wowza.com/fr
 
 Before starting, confirm your machine meets the [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif). The default local workflow runs all three containers (`wse`, `manager`, and `video-intelligence-service-gpu`).
 
-> [!TIP]  
-> To install on an existing installation of Wowza Streaming Engine see instuctions [here](wse.standalone/README.md)
+> [!TIP]
+> To install on an existing installation of Wowza Streaming Engine, see instructions [here](wse.standalone/README.md).
 > 
 #### 1. Create `.env` from the example and edit values:
     
@@ -106,17 +108,17 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
-#### 2. Verify docker and the NVIDIA drivers run the following command:
+#### 2. Verify Docker and NVIDIA driver visibility:
    
    ```
-   docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility  nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+   docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi
    ```
    Check the version:
-   * NVIDIA driver reports a version greaterthan or equal to 570
+   * NVIDIA driver reports a version greater than or equal to 570
    * CUDA version is greater than or equal to 12.8
    
 > [!NOTE]
-> You may need to install the NVIDAI Container Toolkit, instructions can be found here: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
+> You may need to install the NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
 
 #### 3. Start WSE + Manager + VIS:
 
@@ -146,9 +148,9 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    | `8089` | HTTP | REST API docs (if enabled) |
    | `10000` | UDP | SRT |
    
-> [!NOTE]  
-> - The first time Docker Compose is run, the containers may take up to 20 minutes to download all required files. Actual time may vary based on available bandwidth  
-> - Each time the Video Intelligence Service (VIS) container starts, it may take approximately 3 minutes before detections are available
+> [!NOTE]
+> - First startup can take 20+ minutes because VIS may download model weights and compile TensorRT engines for your GPU.
+> - After restart, VIS usually needs about 1 to 3 minutes to become ready.
 
 ### Persistent Volume Mounts
 
@@ -183,8 +185,8 @@ In the default examples included in this repository, a stream with a name matchi
 
 Out of the box, VIF renders bounding box overlays on the transcoded `-vi` stream and injects ID3 metadata into the HLS output. Webhook delivery to third-party platforms and local log file events are available. Developers can further customize event handling using [Wowza Streaming Engine modules](https://www.wowza.com/docs/use-wowza-streaming-engine-java-modules).
 
-> [!NOTE]  
-> - Streams automatically appear in the [VIF dashboard](http://localhost:8088/Home.htm#plugin/server/vif/shm.html) in Wowza Streaming Engine Manager.
+> [!NOTE]
+> - Streams automatically appear in the [VIF dashboard](http://localhost:8088/Home.htm#plugin/server/vif/playback.html) in Wowza Streaming Engine Manager.
 > - Streams can be managed via REST or configured using the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page in Wowza Streaming Engine Manager.
 
 1. [Install FFmpeg](https://www.ffmpeg.org/download.html).
@@ -208,28 +210,51 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
 
+## Testing VLM Analysis (Optional)
+
+VLM analysis supports open-vocabulary prompts and returns class-level reasoning or descriptive text per analysis window.
+
+1. Start the full stack with VLM enabled:
+
+```bash
+docker compose --profile default --profile vlm up -d
+```
+
+2. Publish a stream matching the default `vlm.*` rule:
+
+```bash
+ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
+```
+
+3. View VLM output channels:
+
+- Overlays in the `-vi` rendition (for example `http://localhost/live/vlm_mystream1-vi/playlist.m3u8`).
+- ID3 metadata in HLS output.
+- Log records in `./wse/logs/wowzastreamingengine_vi.log` when `LogFiles` is enabled.
+
+See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for VLM modes (`Detect`, `Describe`, and `Custom`), endpoint settings, and GPU tuning.
+
 ## Default Model Coverage and Configuration
 
-By default, VIF uses a RF-DETR based computer vision model capable of detecting up to 80 object categories defined by the COCO dataset. 
+By default, VIF uses RF-DETR models for object detection (Nano, Small, Medium, Large). The default stream configuration uses RF-DETR Medium and supports up to 80 COCO classes.
 
-The objects to detect and scene descriptions to analyze can be configured in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or through the WSE REST API, allowing you to tailor detection behavior, routing, and scene-understanding workflows to your deployment.
+The objects to detect and scene descriptions to analyze can be configured in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or through the WSE REST API, allowing you to tailor detection behavior, routing, and analysis workflows to your deployment.
 
 VIF also supports importing custom RF-DETR-based object detection models, enabling domain-specific detection beyond the default COCO classes.
 
-To test a custom model, copy your model weights/checkpoint file (`.pth`) into `./vis/models/`, update `checkpoint_path` for the matching stream in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or REST API, and restart the VIS container so the service loads the new model.
+To test a custom model, copy your model weights/checkpoint file (`.pth`) into `./vis/models/`, set `checkpoint_path` for the matching stream in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or REST API, and restart VIS so the service loads the new model.
 
 ## Updating VIF Configuration
 
 You can update VIF defaults and per-stream settings in two ways:
 
-- **WSE Manager UI:** Open the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page to add or update stream rules such as `object.*` and `scene.*`, event listeners, class names, thresholds, and service connection settings.
-- **REST API:** Use the WSE REST API for scripted updates. For example, disable overlays on the active `object_mystream1` stream:
+- **WSE Manager UI:** Open the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page to add or update stream rules such as `object.*`, `scene.*`, `vlm.*`, and `synthetic.*`, including event listeners, class names, thresholds, and service connection settings.
+- **REST API:** Use the WSE REST API for scripted updates to defaults and per-stream overrides.
 
-```bash
-curl -X PUT "http://localhost:8087/v1/server/plugin/vif/applications/live/streams/object_mystream1" \
-  -H "Content-Type: application/json" \
-  -d '{ "vif_event_listeners": { "Overlays": { "methods": ["disabled"] } } }'
-```
+VIF configuration files are stored under `conf.modules/vif/`:
+
+- `Default.json` contains global defaults.
+- Per-stream files (for example `live_objectDotStar.json`) override those defaults.
 
 For the full field reference and additional API examples, see [`README.wse-plugin.md`](docs/README.wse-plugin.md).
 
@@ -237,7 +262,7 @@ For the full field reference and additional API examples, see [`README.wse-plugi
 
 Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configuration guide for the Wowza Streaming Engine (WSE) Video Intelligence plugin.
 
-- Includes field-level options and behavior for VIF settings exposed through the Manager UI, REST API, and the underlying `video-intelligence.json` schema.
+- Includes field-level options and behavior for VIF settings exposed through the Manager UI, REST API, and the underlying `conf.modules/vif` configuration files.
 - Useful when tuning object detection settings (for example `model_name`, `checkpoint_path`, thresholds, and per-stream overrides).
 
 ## Synthetic Video Detection (Optional)
