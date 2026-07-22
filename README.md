@@ -186,7 +186,7 @@ Scene and VLM models are continuously evolving. Expect accuracy and behavior imp
 Out of the box, VIF renders bounding box overlays on the transcoded `-vi` stream and injects ID3 metadata into the HLS output. Webhook delivery to third-party platforms and local log file events are available. Developers can further customize event handling using [Wowza Streaming Engine modules](https://www.wowza.com/docs/use-wowza-streaming-engine-java-modules).
 
 > [!NOTE]
-> - Streams automatically appear in the [VIF dashboard](http://localhost:8088/Home.htm#plugin/server/vif/playback.html) in Wowza Streaming Engine Manager.
+> - Streams automatically appear in the [VIF dashboard](http://localhost:8088/Home.htm#plugin/server/vif/shm.html) in Wowza Streaming Engine Manager.
 > - Streams can be managed via REST or configured using the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page in Wowza Streaming Engine Manager.
 
 1. [Install FFmpeg](https://www.ffmpeg.org/download.html).
@@ -233,8 +233,11 @@ To test a custom model, copy your model weights/checkpoint file (`.pth`) into `.
 
 You can update VIF defaults and per-stream settings in two ways:
 
-- **WSE Manager UI:** Open the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page to add or update stream rules such as `object.*`, `scene.*`, `vlm.*`, and `synthetic.*`, including event listeners, class names, thresholds, and service connection settings.
+- **WSE Manager UI:** Open the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page to add or update stream rules (for example `object.*`, `scene.*`, `vlm.*`, and `synthetic.*`), including event listeners, class names, thresholds, and service connection settings.
 - **REST API:** Use the WSE REST API for scripted updates to defaults and per-stream overrides.
+
+> [!NOTE]
+> You can use any stream naming terms or regex patterns that fit your workflow; these rule names are user-defined and simply control how traffic is matched to each detector type.
 
 VIF configuration files are stored under `conf.modules/vif/`:
 
