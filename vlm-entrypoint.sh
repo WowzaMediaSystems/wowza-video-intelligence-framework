@@ -67,7 +67,7 @@
 set -euo pipefail
 
 # Bump on every edit to this file.
-ENTRYPOINT_REVISION="2026-06-10"
+ENTRYPOINT_REVISION="2026-07-23"
 echo "[vlm-entrypoint] revision ${ENTRYPOINT_REVISION}"
 
 MODEL="${VLM_MODEL:-Qwen/Qwen3-VL-4B-Instruct-FP8}"
@@ -76,8 +76,11 @@ GPU_MEM_UTIL="${VLM_GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_BATCHED_TOKENS="${VLM_MAX_NUM_BATCHED_TOKENS:-8192}"
 MAX_NUM_SEQS="${VLM_MAX_NUM_SEQS:-auto}"
 TENSOR_PARALLEL_SIZE="${VLM_TENSOR_PARALLEL_SIZE:-1}"
-MIN_PIXELS="${VLM_MIN_PIXELS:-3136}"        # 4*28*28
-MAX_PIXELS="${VLM_MAX_PIXELS:-401408}"      # 512*28*28 ~= 512 vision tokens/image
+# Per-image pixel caps are Qwen-style PROCESSOR kwargs -- other processors
+# (e.g. Nemotron's) reject them, so there is no default here; set them in the
+# model's env file when its processor supports them.
+MIN_PIXELS="${VLM_MIN_PIXELS:-}"
+MAX_PIXELS="${VLM_MAX_PIXELS:-}"
 MAX_IMAGES="${VLM_MAX_IMAGES_PER_PROMPT:-8}"
 PORT="${VLM_PORT:-8000}"
 
@@ -124,7 +127,6 @@ if [ -z "${KV_CACHE_DTYPE}" ]; then
 fi
 
 LIMIT_MM="{\"image\": ${MAX_IMAGES}, \"video\": 0}"
-MM_KWARGS="{\"min_pixels\": ${MIN_PIXELS}, \"max_pixels\": ${MAX_PIXELS}}"
 
 ARGS=(
   --port="${PORT}"
@@ -136,8 +138,17 @@ ARGS=(
   --no-enable-prefix-caching
   --mm-processor-cache-gb=0
   "--limit-mm-per-prompt=${LIMIT_MM}"
-  "--mm-processor-kwargs=${MM_KWARGS}"
 )
+
+# Processor kwargs only when the model's env file sets pixel caps.
+if [ -n "${MIN_PIXELS}" ] || [ -n "${MAX_PIXELS}" ]; then
+  MM_KWARGS="{"
+  [ -n "${MIN_PIXELS}" ] && MM_KWARGS="${MM_KWARGS}\"min_pixels\": ${MIN_PIXELS}"
+  [ -n "${MIN_PIXELS}" ] && [ -n "${MAX_PIXELS}" ] && MM_KWARGS="${MM_KWARGS}, "
+  [ -n "${MAX_PIXELS}" ] && MM_KWARGS="${MM_KWARGS}\"max_pixels\": ${MAX_PIXELS}"
+  MM_KWARGS="${MM_KWARGS}}"
+  ARGS+=("--mm-processor-kwargs=${MM_KWARGS}")
+fi
 
 # --max-num-seqs: pin to the value, or omit when "auto" so vLLM sizes it
 # to this GPU's KV capacity.
