@@ -133,25 +133,26 @@ VLM_CONF=nemotron docker compose --profile default --profile vlm up -d  # Nemotr
 | `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
 | `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
 
-Equivalently, each model ships a compose overlay (`docker-compose.vlm-qwen.yaml`, `docker-compose.vlm-nemotron.yaml`) for teams that prefer explicit files over an env var — same `vlm-env/` config underneath, and the overlay wins over `VLM_CONF` when both are given:
+The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model. `VLM_CONF` can also live in `.env` instead of the command line.
+
+### Running two models at the same time
+
+The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`, which adds `vlm-2`:
 
 ```bash
-docker compose -f docker-compose.yaml -f docker-compose.vlm-nemotron.yaml \
-  --profile default --profile vlm up -d
-```
-
-The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model.
-
-### Running more than one model on the same host
-
-The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`:
-
-```bash
+# Qwen + Nemotron (the defaults: VLM_CONF=qwen, VLM_2_CONF=nemotron)
 docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
   --profile default --profile vlm up -d
+
+# Any pair of supported models — assign one per container:
+VLM_CONF=nemotron VLM_2_CONF=cosmos docker compose \
+  -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
+  --profile default --profile vlm up -d
 ```
 
-That starts `vlm` (`VLM_CONF`, default qwen, GPU 0) and `vlm-2` (`VLM_2_CONF`, default nemotron, GPU 1, on `http://vlm-2.docker:8000/v1`). Pick each model with `VLM_CONF` / `VLM_2_CONF` and their GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`. Copy the `vlm-2` block for a third model. To co-locate two on one big GPU, point both at the same card and lower each model file's `VLM_GPU_MEMORY_UTILIZATION` so they sum to under 1.0.
+`vlm` runs `VLM_CONF` on GPU 0 (`http://vlm.docker:8000/v1`) and `vlm-2` runs `VLM_2_CONF` on GPU 1 (`http://vlm-2.docker:8000/v1`); point each stream's endpoint and `model_name` at the container serving its model (the stream config's **Verify** button shows which model an endpoint serves). Override the GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`; to co-locate both on one big GPU, point them at the same card and lower each model file's `VLM_GPU_MEMORY_UTILIZATION` so they sum to under 1.0. Copy the `vlm-2` block for a third simultaneous container.
+
+Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml --profile vlm down`.
 
 ### Adding a supported model
 
@@ -163,17 +164,19 @@ That starts `vlm` (`VLM_CONF`, default qwen, GPU 0) and `vlm-2` (`VLM_2_CONF`, d
 
 ## Configuration reference
 
-### Shared settings (`.env`)
+### Deployment settings (`.env` or the command line)
 
-Only credentials/host settings live in `.env`; they reach the VLM container. A model's flags live in its env file, not here.
+These pick which model(s) run and where; a model's own flags live in its `vlm-env/` file, not here.
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `VLM_CONF` | `qwen` | Model env file the `vlm` container serves (any name in `vlm-env/`, without `.env`) |
+| `VLM_GPU_IDS` | unset (GPU 0) | Pin the `vlm` container to specific card(s), e.g. `1` or `2,3`; indices match `nvidia-smi` |
+| `VLM_2_CONF` | `nemotron` | Model env file for the second container (`vlm-2`, only with `docker-compose.vlm-multi.yaml`) |
+| `VLM_2_GPU_IDS` | `1` | Card(s) for the second container |
 | `VLLM_API_KEY` | unset | Require an API key on the endpoint (set when publishing the port) |
 | `HF_TOKEN` | unset | HuggingFace token for the first-boot weight download (higher rate limits) |
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
-
-`VLM_CONF` picks the model env file (default `qwen`); `VLM_GPU_IDS` pins the card (unset = GPU 0). The multi-VLM override adds `VLM_2_CONF` / `VLM_2_GPU_IDS` for the second container.
 
 ### Model config (`vlm-env/<name>.env`)
 
