@@ -121,12 +121,14 @@ GPU placement is the one thing worth a decision on multi-GPU machines: the VLM r
 
 ## Choosing the model
 
-Each supported model is a small **env file** under `vlm-env/` (e.g. `qwen.env`, `nemotron.env`) holding the model id and its tuned `VLM_*` knobs. The VLM container loads one, picked by `VLM_CONF` (default `qwen`):
+Each supported model is a small **env file** under `vlm-env/` (e.g. `qwen.env`, `nemotron.env`) holding the model id and its tuned `VLM_*` knobs. The VLM container loads one, picked by `VLM_CONF` — set it in `.env` (default `qwen`), then bring the stack up normally:
 
 ```bash
-docker compose --profile default --profile vlm up -d                    # Qwen (default)
-VLM_CONF=nemotron docker compose --profile default --profile vlm up -d  # Nemotron
+# .env:  VLM_CONF=nemotron   (omit for the default, qwen)
+docker compose --profile default --profile vlm up -d
 ```
+
+(A shell-level `VLM_CONF=... docker compose ...` overrides `.env` for a one-off run, but the `.env` entry is the intended home so every later `up` keeps serving the same model.)
 
 | Conf (`VLM_CONF`) | Model | Notes |
 |---|---|---|
@@ -140,13 +142,9 @@ The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to
 The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`, which adds `vlm-2`:
 
 ```bash
-# Qwen + Nemotron (the defaults: VLM_CONF=qwen, VLM_2_CONF=nemotron)
+# .env:  VLM_CONF=<model for vlm>   VLM_2_CONF=<model for vlm-2>
+#        (defaults: qwen + nemotron; any pair of supported models works)
 docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
-  --profile default --profile vlm up -d
-
-# Any pair of supported models — assign one per container:
-VLM_CONF=nemotron VLM_2_CONF=cosmos docker compose \
-  -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
   --profile default --profile vlm up -d
 ```
 
@@ -157,16 +155,16 @@ Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-c
 ### Adding a supported model
 
 1. Add `vlm-env/<name>.env` — `VLM_MODEL=<hf id>` plus any tuned `VLM_*` knobs (copy an existing file; flags with no dedicated knob go in `VLM_EXTRA_ARGS`).
-2. Serve it: `VLM_CONF=<name> docker compose --profile default --profile vlm up -d`.
+2. Serve it: set `VLM_CONF=<name>` in `.env` and `docker compose --profile default --profile vlm up -d`.
 3. Set the stream's `model_name` to the model id.
 
 ---
 
 ## Configuration reference
 
-### Deployment settings (`.env` or the command line)
+### Deployment settings (`.env`)
 
-These pick which model(s) run and where; a model's own flags live in its `vlm-env/` file, not here.
+These pick which model(s) run and where — set them in `.env` (all ship commented in `.env.example`); a model's own flags live in its `vlm-env/` file, not here.
 
 | Variable | Default | Meaning |
 |---|---|---|
