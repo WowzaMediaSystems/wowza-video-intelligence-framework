@@ -4,7 +4,7 @@ The Video Intelligence framework can run a **vision-language model (VLM)** over 
 
 With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
-The VLM is any **OpenAI-compatible HTTP endpoint** — the framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar serving **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly), so everything can run locally on your GPU, or you can point at a hosted provider instead.
+The VLM is any **OpenAI-compatible HTTP endpoint** — the framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar serving **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly), so everything can run locally on your GPU, or you can point at a hosted provider instead. More than one model can run side by side (e.g. Qwen and Nemotron), each in its own container — see [Choosing the model](#choosing-the-model).
 
 ---
 
@@ -115,33 +115,82 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
 | GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
 
-GPU placement is the one thing worth a decision on multi-GPU machines: the sidecar reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) so the detector models still fit.
+GPU placement is the one thing worth a decision on multi-GPU machines: the VLM reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` in the model's env file (e.g. `0.4`–`0.5`) so the detector models still fit.
+
+---
+
+## Choosing the model
+
+Each supported model is a small **env file** under `vlm-env/` (e.g. `qwen.env`, `nemotron.env`) holding the model id and its tuned `VLM_*` knobs. The VLM container loads one, picked by `VLM_CONF` (default `qwen`):
+
+```bash
+docker compose --profile default --profile vlm up -d                    # Qwen (default)
+VLM_CONF=nemotron docker compose --profile default --profile vlm up -d  # Nemotron
+```
+
+| Conf (`VLM_CONF`) | Model | Notes |
+|---|---|---|
+| `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
+| `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
+
+Equivalently, each model ships a compose overlay (`docker-compose.vlm-qwen.yaml`, `docker-compose.vlm-nemotron.yaml`) for teams that prefer explicit files over an env var — same `vlm-env/` config underneath, and the overlay wins over `VLM_CONF` when both are given:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.vlm-nemotron.yaml \
+  --profile default --profile vlm up -d
+```
+
+The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model.
+
+### Running more than one model on the same host
+
+The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
+  --profile default --profile vlm up -d
+```
+
+That starts `vlm` (`VLM_CONF`, default qwen, GPU 0) and `vlm-2` (`VLM_2_CONF`, default nemotron, GPU 1, on `http://vlm-2.docker:8000/v1`). Pick each model with `VLM_CONF` / `VLM_2_CONF` and their GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`. Copy the `vlm-2` block for a third model. To co-locate two on one big GPU, point both at the same card and lower each model file's `VLM_GPU_MEMORY_UTILIZATION` so they sum to under 1.0.
+
+### Adding a supported model
+
+1. Add `vlm-env/<name>.env` — `VLM_MODEL=<hf id>` plus any tuned `VLM_*` knobs (copy an existing file; flags with no dedicated knob go in `VLM_EXTRA_ARGS`).
+2. Serve it: `VLM_CONF=<name> docker compose --profile default --profile vlm up -d`.
+3. Set the stream's `model_name` to the model id.
 
 ---
 
 ## Configuration reference
 
-### Sidecar tuning (`.env`)
+### Shared settings (`.env`)
 
-All knobs are environment variables read by `vis/vlm-entrypoint.sh` (which also documents them in detail — defaults adapt to your hardware, and you should never need to edit the file itself):
+Only credentials/host settings live in `.env`; they reach the VLM container. A model's flags live in its env file, not here.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VLM_MODEL` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Any vLLM-supported vision model |
-| `VLM_GPU_IDS` | unset (first visible GPU) | Pin the sidecar to specific card(s), e.g. `1` or `2,3`; indices match `nvidia-smi` |
-| `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
-| `VLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the GPU vLLM reserves; assumes a dedicated card |
-| `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
-| `VLM_MAX_MODEL_LEN` | `16384` | Context window per request |
-| `VLM_MAX_NUM_SEQS` | `auto` | Concurrency ceiling; `auto` lets vLLM size it to your GPU's KV capacity |
-| `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
-| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | `401408` / `3136` | Per-image resolution cap (≈512 vision tokens/image at the default) |
-| `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
-| `VLM_PORT` | `8000` | Served port; the compose healthcheck follows it |
 | `VLLM_API_KEY` | unset | Require an API key on the endpoint (set when publishing the port) |
 | `HF_TOKEN` | unset | HuggingFace token for the first-boot weight download (higher rate limits) |
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
-| `VLM_EXTRA_ARGS` | unset | Raw passthrough for any other `vllm serve` flag |
+
+`VLM_CONF` picks the model env file (default `qwen`); `VLM_GPU_IDS` pins the card (unset = GPU 0). The multi-VLM override adds `VLM_2_CONF` / `VLM_2_GPU_IDS` for the second container.
+
+### Model config (`vlm-env/<name>.env`)
+
+A model's config lives in a per-model env file, `vlm-env/<name>.env` (`KEY=VALUE`), not `.env`, so it travels with the model and never cross-wires between containers. The entrypoint reads these knobs (all optional; defaults fit Qwen3-VL-4B on a 24 GB card):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VLM_MODEL` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | HuggingFace model id vLLM serves |
+| `VLM_MAX_MODEL_LEN` | `16384` | Context window per request |
+| `VLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the GPU vLLM reserves; lower it to co-locate two models on one card |
+| `VLM_MAX_NUM_SEQS` | `auto` | Concurrency ceiling; `auto` lets vLLM size it to KV capacity |
+| `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
+| `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
+| `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
+| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | `401408` / `3136` | Per-image resolution cap (≈512 vision tokens/image) |
+| `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
+| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`) |
 
 Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
 

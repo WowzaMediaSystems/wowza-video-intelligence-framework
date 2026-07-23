@@ -177,28 +177,23 @@ services:
     # OpenAI-compatible vLLM server backing the standalone `detector_type=vlm`
     # analyzer and the `vlm_verification` overlay on scene/object detectors.
     #
-    # Opt-in via the `vlm` compose profile -- a bare `docker compose up`
-    # never starts it, and the profile gates ONLY the vLLM sidecar;
-    # combine profiles to start it alongside the services it serves:
-    #   docker compose --profile vlm up                        # vLLM sidecar only
-    #   docker compose --profile default --profile vlm up      # full stack + vlm
-    #   docker compose --profile vi-service --profile vlm up   # VIS + vlm pairing
-    # Teardown: a bare `docker compose down` leaves vlm running; use
-    # `docker compose --profile vlm down` to stop it (the sidecar only).
+    # ONE VLM container per host (the common case). The model and its tuned
+    # flags come from a per-model env file in ./vlm-env/, picked by VLM_CONF
+    # (default qwen):
+    #   docker compose --profile default --profile vlm up -d               # Qwen
+    #   VLM_CONF=nemotron docker compose --profile default --profile vlm up -d
+    # To run SEVERAL VLMs on one host, layer the example override
+    # docker-compose.vlm-multi.yaml (see that file).
     #
-    # Start order doesn't matter: VIS connects on demand, so vLLM's
-    # multi-minute model warmup never blocks VIS or scene/object detection.
-    # Streams opt in by setting `endpoint_url: http://vlm.docker:8000/v1` in
-    # their VLM config (the service also resolves as plain `vlm`).
-    #
-    # All VLM_* tuning knobs and the concurrency-sizing procedure are
-    # documented in ./vis/vlm-entrypoint.sh; defaults fit the bundled
-    # Qwen3-VL-4B-Instruct-FP8 model on a dedicated 24 GB-class GPU.
+    # Streams point at `endpoint_url: http://vlm.docker:8000/v1`.
     vlm:
         hostname: vlm.docker
         image: vllm/vllm-openai:v0.21.0
         profiles: ["vlm"]
         restart: unless-stopped
+        # Which model this VLM serves: ./vlm-env/<VLM_CONF>.env (default qwen).
+        env_file:
+          - ./vlm-env/${VLM_CONF:-qwen}.env
         volumes:
           - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
         # Model weights are downloaded here on first boot and reused on later
@@ -217,29 +212,13 @@ services:
         # next boot just recompiles.
           - ./vis/vlm-cache:/root/.cache/vllm
         entrypoint: ["/bin/bash", "/vlm-entrypoint.sh"]
-        # Set any of these in .env (or the shell) to override; defaults and
-        # per-knob docs live in ./vis/vlm-entrypoint.sh. Unlike the other
-        # services, this third-party container does not load the whole .env,
-        # only the variables listed here reach it, and an empty value behaves
-        # the same as unset for every one of them.
         environment:
-          - VLM_MODEL=${VLM_MODEL:-}
-          - VLM_GPU_IDS=${VLM_GPU_IDS:-}                                # pin to specific card(s), e.g. "1" or "2,3"
-          - VLM_TENSOR_PARALLEL_SIZE=${VLM_TENSOR_PARALLEL_SIZE:-}      # shard the model across N GPUs (default 1)
-          - VLM_MAX_MODEL_LEN=${VLM_MAX_MODEL_LEN:-}
-          - VLM_GPU_MEMORY_UTILIZATION=${VLM_GPU_MEMORY_UTILIZATION:-}  # default 0.90; prefer a dedicated GPU for the VLM (see VLM_GPU_IDS)
-          - VLM_MAX_NUM_SEQS=${VLM_MAX_NUM_SEQS:-}                      # integer, or "auto" to let vLLM size it
-          - VLM_MAX_NUM_BATCHED_TOKENS=${VLM_MAX_NUM_BATCHED_TOKENS:-}
-          - VLM_KV_CACHE_DTYPE=${VLM_KV_CACHE_DTYPE:-}                  # unset = probed (fp8 on compute cap >= 8.9, else auto)
-          - VLM_MAX_PIXELS=${VLM_MAX_PIXELS:-}
-          - VLM_MIN_PIXELS=${VLM_MIN_PIXELS:-}
-          - VLM_MAX_IMAGES_PER_PROMPT=${VLM_MAX_IMAGES_PER_PROMPT:-}
-          - VLM_PORT=${VLM_PORT:-}                                      # served port (default 8000); the healthcheck follows it
-          - VLM_EXTRA_ARGS=${VLM_EXTRA_ARGS:-}
-        # Read by vLLM / HuggingFace directly, not by the entrypoint:
-          - VLLM_API_KEY=${VLLM_API_KEY:-}      # require this key on the endpoint (see ports note below)
-          - HF_TOKEN=${HF_TOKEN:-}              # optional HuggingFace token: higher rate limits on the first-boot weight download
-          - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-}  # set to 1 on air-gapped hosts (see weights-cache note above)
+        # GPU placement (deployment, not model config); unset = GPU 0.
+          - VLM_GPU_IDS=${VLM_GPU_IDS:-}
+        # Secrets from the shared .env; read by vLLM / HuggingFace directly:
+          - VLLM_API_KEY=${VLLM_API_KEY:-}
+          - HF_TOKEN=${HF_TOKEN:-}
+          - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-}
         ipc: host   # vLLM workers need large shared memory (esp. tensor parallel)
         # The endpoint is only reachable on the internal compose network by
         # default. To reach it from other machines (e.g. VIS running on a

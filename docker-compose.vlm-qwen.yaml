@@ -1,0 +1,14 @@
+# Model overlay: run the VLM sidecar with Qwen (the default model), pinned
+# explicitly. Alternative to selecting the model with VLM_CONF -- both work;
+# use whichever fits your tooling:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.vlm-qwen.yaml \
+#     --profile default --profile vlm up -d
+#
+# The model config still comes from ./vlm-env/qwen.env. When layered, this
+# file's env_file entry is appended after the base one, and later entries win
+# for duplicate keys -- so the overlay takes precedence over VLM_CONF.
+services:
+    vlm:
+        env_file:
+          - ./vlm-env/qwen.env
