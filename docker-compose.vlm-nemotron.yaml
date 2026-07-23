@@ -5,10 +5,11 @@
 #   docker compose -f docker-compose.yaml -f docker-compose.vlm-nemotron.yaml \
 #     --profile default --profile vlm up -d
 #
-# The model config still comes from ./vlm-env/nemotron.env. When layered, this
-# file's env_file entry is appended after the base one, and later entries win
-# for duplicate keys -- so the overlay takes precedence over VLM_CONF.
+# The model config still comes from ./vlm-env/nemotron.env. The !override tag
+# REPLACES the base env_file list (instead of compose's default append-merge),
+# so no keys from the base's default model file leak through; the overlay also
+# takes precedence over VLM_CONF. Requires docker compose v2.24.4+.
 services:
     vlm:
-        env_file:
+        env_file: !override
           - ./vlm-env/nemotron.env
