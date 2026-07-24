@@ -115,7 +115,7 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
 | GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
 
-GPU placement is the one thing worth a decision on multi-GPU machines: the VLM reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` in the model's env file (e.g. `0.4`–`0.5`) so the detector models still fit.
+GPU placement is the one thing worth a decision on multi-GPU machines: the VLM reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) in a local copy of the model's env file (see [Choosing the model](#choosing-the-model)) so the detector models still fit.
 
 ---
 
@@ -135,7 +135,9 @@ docker compose --profile default --profile vlm up -d
 | `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
 | `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
 
-The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model. `VLM_CONF` can also live in `.env` instead of the command line.
+The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model.
+
+To retune a shipped model, copy its file to a local name instead of editing it in place (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local` in `.env`) — local copies survive framework upgrades untouched.
 
 ### Running two models at the same time
 
@@ -148,7 +150,7 @@ docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
   --profile default --profile vlm up -d
 ```
 
-`vlm` runs `VLM_CONF` on GPU 0 (`http://vlm.docker:8000/v1`) and `vlm-2` runs `VLM_2_CONF` on GPU 1 (`http://vlm-2.docker:8000/v1`); point each stream's endpoint and `model_name` at the container serving its model (the stream config's **Verify** button shows which model an endpoint serves). Override the GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`; to co-locate both on one big GPU, point them at the same card and lower each model file's `VLM_GPU_MEMORY_UTILIZATION` so they sum to under 1.0. Copy the `vlm-2` block for a third simultaneous container.
+`vlm` runs `VLM_CONF` on GPU 0 (`http://vlm.docker:8000/v1`) and `vlm-2` runs `VLM_2_CONF` on GPU 1 (`http://vlm-2.docker:8000/v1`); point each stream's endpoint and `model_name` at the container serving its model (the stream config's **Verify** button shows which model an endpoint serves). Override the GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`; to co-locate both on one big GPU, point them at the same card and lower `VLM_GPU_MEMORY_UTILIZATION` in local copies of each model file so they sum to under 1.0. Copy the `vlm-2` block for a third simultaneous container.
 
 Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml --profile vlm down`.
 
@@ -189,8 +191,9 @@ A model's config lives in a per-model env file, `vlm-env/<name>.env` (`KEY=VALUE
 | `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
 | `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
 | `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
-| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | `401408` / `3136` | Per-image resolution cap (≈512 vision tokens/image) |
+| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | unset | Per-image resolution caps (Qwen-style processor kwargs; some processors reject them). `qwen.env` sets `401408` / `3136` ≈ 512 vision tokens/image |
 | `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
+| `VLM_PORT` | `8000` | Served port; the container healthcheck follows it. If you publish the endpoint, mirror the value in `.env` so the `ports:` mapping matches |
 | `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`) |
 
 Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
