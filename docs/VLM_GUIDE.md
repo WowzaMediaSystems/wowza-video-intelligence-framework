@@ -134,6 +134,7 @@ docker compose --profile default --profile vlm up -d
 |---|---|---|
 | `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
 | `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
+| `gemma` | `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env`; fits a 24 GB card |
 
 The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model.
 
