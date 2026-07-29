@@ -48,16 +48,21 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 |---|---|---|
 | `VIS_PORT` | `5001` | Service listen port |
 | `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
+| `LOG_PATH` | `/logs` | Directory where log files are written. For the compose stack, set `LOG_DIR` in `.env` instead — it feeds both this variable and the `./vis/logs` bind-mount target |
+| `LOG_FILE_RETENTION_DAYS` | `30` | Number of rotated daily log files to keep (minimum 1) |
 | `ENABLE_NETWORK_METRICS_LOGGING` | `false` | Periodic network metrics logging |
-| `VIDEO_FRAME_REQUEST_TIMEOUT_SECONDS` | `2.0` | Timeout for video frame responses (seconds) |
-| `VIS_API_KEY` | — | Shared API key for Engine-to-VIS authentication |
+| `VIDEO_FRAME_REQUEST_TIMEOUT_SECONDS` | `5.0` | Fallback timeout (seconds) for inbound messages from Engine, used only when a stream advertises no window duration — streams sending `duration_seconds > 0` derive the timeout from it (`max(1.0, duration × 1.5)`). After 10 consecutive misses the stream is closed |
+| `VIS_API_KEY` | — | Shared API key for Engine-to-VIS authentication (clients send it as `X-API-Key`). Empty/unset disables authentication — see `SECURE_MODE` |
+| `SECURE_MODE` | `true` | Fail-closed startup guard: VIS refuses to start unless a non-empty `VIS_API_KEY` is set. Set to `false` only for internal-only / air-gapped deployments that consciously accept unauthenticated access. Independent of port publishing: the compose file keeps the VIS `ports:` block commented out (service reachable only on the internal compose network) — if you publish the port for remote-Engine deployments, keep `SECURE_MODE` on with a real `VIS_API_KEY` |
+| `INFERENCE_THREADS_PER_GPU` | `32` | Inference thread pool size per GPU; total threads = `min(128, gpu_count × value)`. Higher values support more concurrent streams at higher memory overhead |
 | `NVIDIA_VISIBLE_DEVICES` | `all` | GPU devices to expose (e.g., `0,1`) |
 | `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` | Required NVIDIA capabilities |
-| `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`) |
+| `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`); default is to scan the `models/` folder |
 | `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
 | `SSL_KEYFILE_PASSWORD` | — | Password for encrypted SSL key |
-| `VIS_LICENSE` | — | License key string (required) |
+| `VIS_LICENSE` | — | License key string (required). Takes precedence over license files |
+| `VIS_LICENSE_DIR` | `licenses` | Directory scanned for license files when `VIS_LICENSE` is unset |
 
 ### Volumes
 
@@ -66,6 +71,10 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `./vis/models` | `/build/models` | Model checkpoints and cached TensorRT engines |
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
+
+### Logging
+
+VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The filename is fixed (`videointelligenceservice.log`) and rotates daily at UTC midnight; rotated files are named `videointelligenceservice.YYYY-MM-DD.log` and pruned to the newest `LOG_FILE_RETENTION_DAYS`. Rotation is safe with multiple workers/processes (file locks coordinate it) and needs no external tools.
 
 > **Non-root user (handled automatically).** The image runs as the non-root
 > `vis` user (uid/gid **1001**). A bundled one-shot `vis-init` service `chown`s

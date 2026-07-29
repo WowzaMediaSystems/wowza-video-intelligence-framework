@@ -25,6 +25,8 @@ docker compose logs -f vlm     # model download + load progress
 docker compose ps              # 'vlm' flips to (healthy) when ready
 ```
 
+> The `vlm` profile is additive and opt-in: a bare `docker compose up` starts everything **except** the sidecar, and `docker compose --profile vlm up` starts VIS + VLM only. Note that a bare `docker compose down` leaves the profile-gated `vlm` container running — include `--profile vlm` on the `down` as well to stop it.
+
 **2. Publish a stream whose name starts with `vlm`** — the default configuration ships a ready-made VLM stream entry matching `vlm.*` on the `live` application:
 
 ```bash
@@ -123,7 +125,7 @@ GPU placement is the one thing worth a decision on multi-GPU machines: the sidec
 
 ### Sidecar tuning (`.env`)
 
-All knobs are environment variables read by `vis/vlm-entrypoint.sh` (which also documents them in detail — defaults adapt to your hardware, and you should never need to edit the file itself):
+All knobs are environment variables read by `vlm-entrypoint.sh` at the repo root (which also documents them in detail — defaults adapt to your hardware, and you should never need to edit the file itself). Unlike the other services, the `vlm` container does not load the whole `.env`: only the variables below (`VLM_*`, `VLLM_API_KEY`, `HF_*`) are passed through, keeping engine/VIS credentials out of the third-party image — and an empty value counts as unset for all of them. Two vLLM flags are pinned in the entrypoint and deliberately not exposed as knobs: `--no-enable-prefix-caching` and `--mm-processor-cache-gb 0` (workload correctness for a stream of ever-changing frames). The entrypoint's first boot-log line is a revision marker (`[vlm-entrypoint] revision <date>`) that identifies which copy of the bind-mounted script a deployment is running.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -144,6 +146,8 @@ All knobs are environment variables read by `vis/vlm-entrypoint.sh` (which also 
 | `VLM_EXTRA_ARGS` | unset | Raw passthrough for any other `vllm serve` flag |
 
 Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
+
+**Air-gapped hosts:** pre-seed the weights on a connected machine — `pip install -U huggingface_hub && HF_HOME=./vis/vlm-models hf download Qwen/Qwen3-VL-4B-Instruct-FP8` — copy `./vis/vlm-models` to the target, and set `HF_HUB_OFFLINE=1` in `.env` so boots skip HuggingFace Hub probes. (Running the stack once on a connected machine and copying the populated directory works too.)
 
 ### Stream configuration (`wse/conf/video-intelligence.json`)
 
