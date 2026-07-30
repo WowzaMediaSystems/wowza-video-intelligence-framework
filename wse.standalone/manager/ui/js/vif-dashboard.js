@@ -529,27 +529,30 @@
                     sts.textContent = `${stream.status}`;
                     sts.className = stream.status.toLowerCase() == 'connected' ? 'text-good' : stream.status.toLowerCase() == 'disabled' || stream.status.toLowerCase() == 'error' ? 'text-alert' : 'text-warn';
 
-                    // Upstream-endpoint health (endpoint_degraded; legacy spelling
-                    // vlm_degraded) for the detectors served by a remote endpoint:
-                    // the VLM server and the synthetic detector's SVD NIM.
+                    // Analysis health (endpoint_degraded; legacy spelling vlm_degraded), reported by
+                    // every detector: an unreachable upstream endpoint (VLM server, SVD NIM) or a
+                    // window the service could not analyze locally. Endpoint-backed rows keep the
+                    // line reserved while healthy so they don't reflow on an outage; local ones
+                    // collapse it until they degrade.
                     vlmHealth = document.getElementById(id+"-vlm-health");
-                    if (stream.detector_type === 'vlm' || stream.detector_type === 'synthetic') {
+                    const endpointBacked = stream.detector_type === 'vlm' || stream.detector_type === 'synthetic';
+                    if (stream.endpoint_degraded === true || stream.vlm_degraded === true) {
                         vlmHealth.style.display = '';
-                        if (stream.endpoint_degraded === true || stream.vlm_degraded === true) {
-                            vlmHealth.textContent = stream.detector_type === 'synthetic'
-                                ? "AI offline — SVD endpoint unreachable"
-                                : "AI offline — VLM endpoint unreachable";
-                            // Full message on hover (it truncates to one reserved
-                            // line); keep the row-status-line slot class.
-                            vlmHealth.title = vlmHealth.textContent;
-                            vlmHealth.className = "row-status-line text-alert";
-                        } else {
-                            vlmHealth.textContent = "";
-                            vlmHealth.title = "";
-                            vlmHealth.className = "row-status-line";
-                        }
+                        vlmHealth.textContent = stream.detector_type === 'synthetic'
+                            ? "AI offline — SVD endpoint unreachable"
+                            : stream.detector_type === 'vlm'
+                            ? "AI offline — VLM endpoint unreachable"
+                            : stream.detector_type === 'scene'
+                            ? "AI offline — scene analysis unavailable"
+                            : stream.detector_type === 'object'
+                            ? "AI offline — object detection unavailable"
+                            : "AI offline";
+                        // Full message on hover (it truncates to one reserved
+                        // line); keep the row-status-line slot class.
+                        vlmHealth.title = vlmHealth.textContent;
+                        vlmHealth.className = "row-status-line text-alert";
                     } else {
-                        vlmHealth.style.display = 'none';
+                        vlmHealth.style.display = endpointBacked ? '' : 'none';
                         vlmHealth.textContent = "";
                         vlmHealth.title = "";
                         vlmHealth.className = "row-status-line";
