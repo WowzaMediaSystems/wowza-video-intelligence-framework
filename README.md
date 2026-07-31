@@ -36,6 +36,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Default Model Coverage and Configuration](#default-model-coverage-and-configuration)
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
+- [Model Chaining](#model-chaining)
 - [Synthetic Video Detection (Optional)](#synthetic-video-detection-optional)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
@@ -252,6 +253,14 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 - Includes field-level options and behavior for VIF settings exposed through the Manager UI, REST API, and the underlying `conf.modules/vif` configuration files.
 - Useful when tuning object detection settings (for example `model_name`, `checkpoint_path`, thresholds, and per-stream overrides).
+
+## Model Chaining
+
+With `detector_type: "chain"`, VIF runs **several detectors over the same frames, in order, on one stream** — object detection, scene classification and VLM analysis composed into a pipeline instead of a stream per detector. One stage's output can **gate** whether the next runs (read plates only when a vehicle was seen) and **focus** what it looks at (a tight crop around each detection, or one representative frame out of a window). Chains run linearly, branch on declarative routing rules evaluated in the service, or are steered per stage from your own Java code.
+
+Nothing extra needs deploying — a chain uses the detectors and endpoints you already have.
+
+See [`docs/MODEL_CHAINING.md`](docs/MODEL_CHAINING.md) for the three modes with worked configurations, crop and frame-selection semantics, the dynamic decision-listener API, and the constraints the service enforces.
 
 ## Synthetic Video Detection (Optional)
 
