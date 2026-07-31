@@ -15,8 +15,6 @@
         FRAMES_ANALYZED_RATE_PCT: { alert: 25, warn: 50 }
     };
 
-    var FRAMES_ROLLING_WINDOW_MS = 60000;
-
     var DASHBOARD_COMPACT_METRICS = true;
 
     VIF.dashboard.init = function () {
@@ -52,13 +50,6 @@
         var liveUpdatesPromise = null;
         var dashboardRenderInFlight = false;
         var activeSkipSliderInteractions = new Set();
-        var framesDetectedHistory = {};
-
-        // Last committed frames-detected display per stream, plus a consecutive-"0 of 0"
-        // counter. A single "0 of 0" reading is normally just the gap between two analysis
-        // bursts, so setFramesDetected() holds the previous reading the first time it appears
-        // and only commits to "0 of 0" once it repeats. Pruned alongside framesDetectedHistory.
-        var framesDetectedDisplay = {};
 
         async function getLiveUpdates() {
             if (liveUpdatesPromise) {
@@ -326,18 +317,6 @@
             return count;
         }
 
-        function pruneFramesDetectedHistory(streams) {
-            const currentIds = Array.isArray(streams)
-                ? streams.map((stream) => stream.app_name + "-" + stream.stream_name)
-                : [];
-            Object.keys(framesDetectedHistory).forEach((id) => {
-                if (currentIds.indexOf(id) === -1) {
-                    delete framesDetectedHistory[id];
-                    delete framesDetectedDisplay[id];
-                }
-            });
-        }
-
         function renderNoActiveStreamsRow(tbody) {
             if (!tbody) return;
             clearElementContent(tbody);
@@ -348,8 +327,6 @@
         }
 
         function renderStreamData(streams) {
-            pruneFramesDetectedHistory(streams);
-
             const tbody = document.getElementById('streams-body');
             const table = document.getElementById('streams-table');
             const tblWrap = document.getElementById('table-wrapper');
@@ -694,95 +671,52 @@
         }
 
 
-        function getFramesDetectedAggregate(streamId, frms, frmsTtl) {
-            const now = Date.now();
-            let history = framesDetectedHistory[streamId];
-            if (!history) {
-                history = [];
-                framesDetectedHistory[streamId] = history;
-            }
-            history.push({ t: now, frms: frms, frmsTtl: frmsTtl });
-            while (history.length > 0 && now - history[0].t > FRAMES_ROLLING_WINDOW_MS) {
-                history.shift();
-            }
-            let best = history[0];
-            for (let i = 1; i < history.length; i++) {
-                if (history[i].frmsTtl >= best.frmsTtl) {
-                    best = history[i];
-                }
-            }
-            return best;
-        }
-
         function setFramesDetected(frameDetectId, stream) {
             const frame_detect2 = document.getElementById(frameDetectId);
-            const streamId = stream.app_name + "-" + stream.stream_name;
             if(!stream.active) {
                 frame_detect2.textContent = `-`;
                 frame_detect2.className = '';
-                // Start clean the next time this stream goes active, instead
-                // of momentarily showing a burst reading from before it was
-                // toggled off.
-                delete framesDetectedHistory[streamId];
-                delete framesDetectedDisplay[streamId];
             }
             else {
-                let frms = 0;
-                let frms_ttl = 0;
+                // frames_detected / video_frames_ttl arrive as rolling 10s totals
+                // (StreamStats.FRAMES_ANALYZED_SPAN_SECONDS ROLLING_SUM stores), so
+                // they can be shown directly - no client-side history,
+                // sample-picking, or zero-gap holding. Any single-sample pick was
+                // wrong in one direction or the other, because the two counters are
+                // written at different instants (capture vs response): max-captured
+                // pinned "0 of X", max-analyzed showed "20 of 10" when responses
+                // bunched into one bucket.
                 const perf = stream.performance;
-                if(perf.video_frames_ttl > 0) {
-					frms = perf.frames_detected;
-					frms_ttl = perf.video_frames_ttl;
-                }
+                const frmsTtl = Math.round(perf.video_frames_ttl || 0);
+                // The analyzed total can transiently exceed the captured total when a
+                // response's capture buckets age past the span horizon before it does;
+                // more-than-captured is always a reading artifact, so clamp it.
+                const frms = Math.min(Math.round(perf.frames_detected || 0), frmsTtl);
+                const v = frmsTtl > 0 ? Math.min((frms / frmsTtl) * 100.0, 100.0) : 0;
 
-                const aggregate = getFramesDetectedAggregate(streamId, frms, frms_ttl);
-                const aggFrms = aggregate.frms;
-                const aggFrmsTtl = aggregate.frmsTtl;
-                const v = aggFrmsTtl > 0 ? Math.min((aggFrms / aggFrmsTtl) * 100.0, 100.0) : 0;
+                // The cell shows only the keep-up rate - raw frame counts confused
+                // more than they informed. The counts stay in the hover tooltip.
+                const text = `${Number(v).toFixed(0)}%`;
+                const title = frmsTtl > 0
+                    ? `${frms} of the ${frmsTtl} frames WSE captured in the last 10 seconds were analyzed by VIS (${Number(v).toFixed(0)}% keep-up)`
+                    : `No frames were captured from this stream in the last 10 seconds`;
 
-                const text = `${aggFrms} of ${aggFrmsTtl} frames (${Number(v).toFixed(0)}%)`;
-                const title = `${aggFrms} of the ${aggFrmsTtl} frames WSE recently captured were analyzed by VIS (${Number(v).toFixed(0)}% keep-up)`;
-
-                // Red/alert only for a genuine stall: connected AND zero
-                // analyzed frames anywhere in the rolling window - never
-                // merely because this poll landed in the gap between two
-                // bursts. When not connected, the stream-status cell already
-                // carries its own alert; don't stack a second one here on
-                // top of the zero reading that naturally follows.
+                // Zero captures while connected is a stall (or, for a window-based
+                // detector, a response cadence longer than the 10s span - operators
+                // should size duration within it). When not connected, the
+                // stream-status cell already carries its own alert; don't stack a
+                // second one here.
                 const isConnected = String(stream.status).toLowerCase() === 'connected';
                 let cls;
-                if (aggFrmsTtl === 0) {
+                if (frmsTtl === 0) {
                     cls = isConnected ? 'text-alert' : '';
                 } else {
                     cls = v < DASHBOARD_THRESHOLDS.FRAMES_ANALYZED_RATE_PCT.alert ? 'text-alert' : v < DASHBOARD_THRESHOLDS.FRAMES_ANALYZED_RATE_PCT.warn ? 'text-warn' : 'text-good';
                 }
 
-                // A lone "0 of 0" reading is normally just the gap between two analysis
-                // bursts, not a real stall. Hold the previous reading the first time it
-                // appears; only commit to "0 of 0" once it repeats on a later poll.
-                let display = framesDetectedDisplay[streamId];
-                if (!display) {
-                    display = { text: null, title: null, cls: null, zeroStreak: 0 };
-                    framesDetectedDisplay[streamId] = display;
-                }
-                if (aggFrmsTtl === 0) {
-                    display.zeroStreak++;
-                    if (display.zeroStreak === 1 && display.text !== null) {
-                        frame_detect2.textContent = display.text;
-                        frame_detect2.title = display.title;
-                        frame_detect2.className = display.cls;
-                        return;
-                    }
-                } else {
-                    display.zeroStreak = 0;
-                }
-
                 frame_detect2.textContent = text;
                 frame_detect2.title = title;
                 frame_detect2.className = cls;
-                display.text = text;
-                display.title = title;
-                display.cls = cls;
             }
         }
 
