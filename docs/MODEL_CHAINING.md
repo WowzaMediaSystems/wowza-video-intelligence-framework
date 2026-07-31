@@ -664,9 +664,14 @@ Each rule:
 | `min_confidence` | `0.0` | Minimum confidence (inclusive) for a detection to count |
 | `min_count` | `1` | How many qualifying detections the rule needs to fire |
 
-> **You can't route off a VLM stage.** VLM results carry no per-detection class, so a
-> `routing` block on a VLM stage always takes `on_no_match`. Route off the object or scene
-> stage instead, or use dynamic mode.
+> **Routing off a VLM stage requires structured output.** When the VLM stage runs in
+> Detect mode (with `class_names`), uses a reasoning preset, or has a custom
+> `response_schema`, each returned class projects into routing just like an object or
+> scene detection. Free-text VLM output (Describe mode or a custom prompt with no
+> schema) carries no per-detection class, so routing on it always takes `on_no_match`.
+> One caveat: the built-in Detect schema has no confidence field, so those classes
+> route with confidence 1.0 — a `min_confidence` rule only discriminates when a custom
+> schema returns a numeric `confidence` per entry.
 
 ### The `crop` block
 
@@ -799,11 +804,14 @@ that confidence, and check `crop.classes` (case-insensitive; unset means all cla
 **I only see the last stage's detections.** That is `result_mode: "final"`, the default.
 Set `"result_mode": "combined"`.
 
-**My conditional route never fires.** If the routing block is on a VLM stage, it can't —
-VLM results carry no per-detection class, so routing always takes `on_no_match`. Route off
-the object or scene stage instead. Otherwise check that `min_confidence` and `min_count`
-are actually reachable for your scene, and remember class matching is case-insensitive but
-must otherwise be exact.
+**My conditional route never fires.** If the routing block is on a VLM stage, the stage
+must produce structured output (Detect mode with `class_names`, a reasoning preset, or a
+custom `response_schema`) — free-text VLM output carries no per-detection class, so
+routing on it always takes `on_no_match`. On the built-in Detect schema every class
+routes with confidence 1.0, so a `min_confidence` rule above 1.0 can never fire and any
+value at or below 1.0 always passes. Otherwise check that `min_confidence` and
+`min_count` are actually reachable for your scene, and remember class matching is
+case-insensitive but must otherwise be exact.
 
 **My dynamic chain stops after one ring.** Either no decision listener loaded (check the
 WSE error log for a class-loading warning, and confirm the jar is on the WSE classpath and
