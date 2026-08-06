@@ -200,8 +200,12 @@ volumes:
 mkdir -p certs
 openssl req -x509 -newkey rsa:4096 -nodes \
   -keyout certs/server-key.pem -out certs/server-cert.pem \
-  -days 365 -subj "/CN=localhost"
+  -days 365 -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
+
+A self-signed cert also has to be trusted on the Engine side — see
+[Self-signed certs end to end](#self-signed-certs-end-to-end-vis--engine).
 
 For production, use certificates from a CA (e.g., Let's Encrypt) or handle TLS at a reverse proxy in front of VIS (recommended — see below).
 
@@ -250,7 +254,79 @@ Troubleshooting `wss`:
   plaintext endpoint; it's still pointing at VIS `:5001`. Point it at the proxy `:5443`.
 - Certificate/`valid certification path` error — the cert isn't trusted by
   Engine's Java or its name doesn't match `VIS_HOST`. Use a CA-issued cert whose
-  name equals `VIS_HOST` (a self-signed cert would need importing into Engine's truststore).
+  name equals `VIS_HOST`, or follow
+  [Self-signed certs end to end](#self-signed-certs-end-to-end-vis--engine) to
+  trust a self-signed one.
+
+### Self-signed certs end to end (VIS + Engine)
+
+Serve the certificate on the VIS side, then trust it on the Engine side.
+
+**1. Create the certificate (VIS host)**
+
+`VIS_HOST` must appear in the cert's `subjectAltName`:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:4096 -nodes \
+  -keyout certs/server-key.pem -out certs/server-cert.pem \
+  -days 365 -subj "/CN=vis.internal.example" \
+  -addext "subjectAltName=DNS:vis.internal.example"
+```
+
+**2. Serve it — pick one**
+
+- *Via the TLS proxy* (same layout as above): leave the cert at
+  `./certs/server-cert.pem` + `./certs/server-key.pem` and start the stack with
+  the `docker-compose.tls-proxy.yaml` overlay. Engine then uses `VIS_PORT=5443`.
+- *Directly in VIS*: uncomment `SSL_CERTFILE`/`SSL_KEYFILE` and the
+  `./certs:/certs:ro` volume in the VIS service, and publish `VIS_PORT` (5001).
+
+**3. Build a truststore for Engine**
+
+Copy Engine's JDK truststore and add the cert to the copy:
+
+```bash
+docker run --rm -v "$PWD/certs:/certs" eclipse-temurin:21-jre sh -c '
+  cp /opt/java/openjdk/lib/security/cacerts /certs/vis-truststore.jks &&
+  keytool -importcert -noprompt -alias vis-self-signed \
+    -file /certs/server-cert.pem -keystore /certs/vis-truststore.jks \
+    -storepass changeit'
+```
+
+The store password is `changeit`. If VIS and Engine are on separate machines,
+copy `certs/vis-truststore.jks` (or just `server-cert.pem`, and run the command
+above) on the Engine host.
+
+**4. Point Engine at that truststore**
+
+Mount the certs directory into the `wse` service in `docker-compose.yaml`:
+
+```yaml
+    wse:
+        volumes:
+             - ./certs:/certs:ro
+```
+
+Add these options to the `<VMOptions>` block in `wse/conf/Tune.xml`:
+
+```xml
+<VMOption>-Djavax.net.ssl.trustStore=/certs/vis-truststore.jks</VMOption>
+<VMOption>-Djavax.net.ssl.trustStorePassword=changeit</VMOption>
+```
+
+Set `VIS_PROTOCOL=wss` plus the matching `VIS_HOST`/`VIS_PORT` in Engine's
+`.env`, then restart Engine: `docker compose restart wse`.
+
+**5. Verify**
+
+```bash
+# From the Engine host: the served cert and its SAN
+openssl s_client -connect "$VIS_HOST:$VIS_PORT" -servername "$VIS_HOST" </dev/null \
+  | openssl x509 -noout -subject -ext subjectAltName
+```
+
+Then check Engine's log for a successful VIS connection.
 
 ## Managing the Service
 
