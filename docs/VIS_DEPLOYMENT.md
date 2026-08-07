@@ -328,8 +328,10 @@ Set `VIS_PROTOCOL=wss` plus the matching `VIS_HOST`/`VIS_PORT` in Engine's
 **5. Verify**
 
 ```bash
-# From the Engine host: the served cert and its SAN
-openssl s_client -connect "$VIS_HOST:$VIS_PORT" -servername "$VIS_HOST" </dev/null \
+# From the Engine host: the served cert and its SAN.
+# Replace <vis-host> and <vis-port> with the VIS_HOST / VIS_PORT values
+# set in Engine's .env (e.g. vis.internal.example and 5443).
+openssl s_client -connect <vis-host>:<vis-port> -servername <vis-host> </dev/null \
   | openssl x509 -noout -subject -ext subjectAltName
 ```
 
