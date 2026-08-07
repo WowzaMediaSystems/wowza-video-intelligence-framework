@@ -274,13 +274,20 @@ openssl req -x509 -newkey rsa:4096 -nodes \
   -addext "subjectAltName=DNS:vis.internal.example"
 ```
 
+Replace `vis.internal.example` with the exact value Engine will use as
+`VIS_HOST` — the DNS name of the VIS host, or its IP address. For an IP, use
+the `IP:` form in the SAN (`-subj "/CN=10.0.0.9" -addext "subjectAltName=IP:10.0.0.9"`).
+
 **2. Serve it — pick one**
 
 - *Via the TLS proxy* (same layout as above): leave the cert at
   `./certs/server-cert.pem` + `./certs/server-key.pem` and start the stack with
   the `docker-compose.tls-proxy.yaml` overlay. Engine then uses `VIS_PORT=5443`.
+  The proxy terminates TLS, so VIS's own `SSL_CERTFILE`/`SSL_KEYFILE`/
+  `SSL_KEYFILE_PASSWORD` stay commented out — they are only for the option below.
 - *Directly in VIS*: uncomment `SSL_CERTFILE`/`SSL_KEYFILE` and the
   `./certs:/certs:ro` volume in the VIS service, and publish `VIS_PORT` (5001).
+  Don't use the TLS proxy overlay in this case.
 
 **3. Build a truststore for Engine**
 
@@ -327,6 +334,21 @@ openssl s_client -connect "$VIS_HOST:$VIS_PORT" -servername "$VIS_HOST" </dev/nu
 ```
 
 Then check Engine's log for a successful VIS connection.
+
+**Several VIS hosts**
+
+One Engine can target several VIS instances by overriding `vi_service_url` per
+stream — see [One engine, many VIS](VLM_GUIDE.md#3-one-engine-many-vis). Repeat
+steps 1–2 on each VIS host, then import every certificate into the *same*
+truststore under its own alias:
+
+```bash
+keytool -importcert -noprompt -alias vis-b \
+  -file vis-b-cert.pem -keystore certs/vis-truststore.jks -storepass changeit
+```
+
+Each certificate's SAN must match the host used in its own `vi_service_url`.
+Step 4 stays the same — a single truststore covers all of them.
 
 ## Managing the Service
 
