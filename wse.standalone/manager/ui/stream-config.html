@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.1">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.2">
     <style>
         .vif-plugin {
             --form-label-width: 240px;
@@ -227,6 +227,7 @@
         /* Connection fields (VLM model / endpoint URL / API key, VI service URL / API key) hold long
            values — fill the column instead of the 300px cap. ID selectors outrank the shared input rule. */
         .vif-plugin #cfg-vlm-model-name,
+        .vif-plugin #cfg-vlm-model-name-other,
         .vif-plugin #cfg-vlm-endpoint-url,
         .vif-plugin #cfg-vi-service-url,
         .vif-plugin #cfg-synthetic-endpoint,
@@ -246,10 +247,12 @@
             gap: 8px;
             align-items: center;
         }
-        /* ID selectors so these outrank `.form-group input[type="password"]` (which caps at 300px). */
+        /* ID selectors so these outrank `.form-group input[type="password"]` (which caps at 300px).
+           #cfg-vlm-endpoint-url shares its row with a Verify button, so it lays out as a flex child too. */
         .vif-plugin #cfg-vi-service-api-key,
         .vif-plugin #cfg-synthetic-api-key,
-        .vif-plugin #cfg-vlm-api-key {
+        .vif-plugin #cfg-vlm-api-key,
+        .vif-plugin #cfg-vlm-endpoint-url {
             flex: 1 1 auto;
             min-width: 0;
             width: auto;
@@ -264,6 +267,19 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+
+        /* Endpoint connectivity-test result line, aligned under the field like .field-help. */
+        .vif-plugin .endpoint-test-result {
+            flex-basis: 100%;
+            margin-left: calc(var(--form-label-width) + 10px);
+            margin-top: 2px;
+            font-size: 0.8em;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+        .vif-plugin .endpoint-test-result.ok    { color: #2e7d32; }
+        .vif-plugin .endpoint-test-result.warn  { color: var(--warn-color); }
+        .vif-plugin .endpoint-test-result.error { color: var(--alert-color); }
 
         /* VLM Custom-mode text areas hold long prompts / schemas — let them fill the
            column rather than the 300px field cap, with a touch more inner padding. */
@@ -1315,14 +1331,22 @@
 
                 <div class="form-group" id="cfg-vlm-model-name-group">
                     <label>Model Name</label>
-                    <input type="text" id="cfg-vlm-model-name" readonly placeholder="No default configured">
-                    <div class="field-help">Set globally in Default.json (vlm_defaults). Per-stream override is not supported.</div>
+                    <select id="cfg-vlm-model-name" onchange="toggleVlmModelNameOther()">
+                        <!-- Supported-model options are populated from VLM_MODEL_OPTIONS in vif-stream-config.js. -->
+                        <option value="__other__">Other&hellip;</option>
+                    </select>
+                    <input type="text" id="cfg-vlm-model-name-other" placeholder="Custom model name" style="display:none; margin-top:6px;">
+                    <div class="field-help">Model served by the VLM endpoint. Pick a supported model, or choose &ldquo;Other&hellip;&rdquo; to enter a custom name. Must match a model the endpoint actually serves.</div>
                 </div>
 
                 <div class="form-group">
-                    <label>Endpoint URL</label>
-                    <input type="text" id="cfg-vlm-endpoint-url" placeholder="https://api.example.com/v1/chat/completions">
-                    <div class="field-help">URL of the VLM API endpoint. Leave empty to use the default for the model.</div>
+                    <label>VLM Server</label>
+                    <div class="input-with-toggle">
+                        <input type="text" id="cfg-vlm-endpoint-url" placeholder="vlm.docker:8000">
+                        <button type="button" id="cfg-vlm-endpoint-test" onclick="testVlmEndpoint()" title="Verify the VLM server and that it serves the configured model">Verify</button>
+                    </div>
+                    <div class="field-help">Address of the VLM server (e.g. <em>vlm.docker:8000</em>). If omitted, <code>http://</code> and the <code>/v1</code> path are added on save; an explicit scheme or path is kept as typed. Leave empty to use the default.</div>
+                    <div id="cfg-vlm-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
                 </div>
 
                 <div class="form-group">
@@ -1723,10 +1747,10 @@
 
     </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.1"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.0.1"></script>
-<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.0.1"></script>
-<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.0.1"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.2"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.0.2"></script>
+<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.0.2"></script>
+<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.0.2"></script>
 <script>
     VIF.streamConfig.init();
 </script>
