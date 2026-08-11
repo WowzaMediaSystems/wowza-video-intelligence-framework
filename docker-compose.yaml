@@ -2,7 +2,7 @@
 services:
     wse:
         hostname: wse.docker
-        image: wowza/wowza-streaming-engine:vif-1.0.1
+        image: wowza/wowza-streaming-engine:vif-1.0.2
         pull_policy: always
         #platform: linux/arm64
         profiles: ["", "wse", "wse-only", "default"]
@@ -53,7 +53,7 @@ services:
 
     manager:
         hostname: wsem.docker
-        image: wowza/wowza-streaming-engine-manager:vif-1.0.1
+        image: wowza/wowza-streaming-engine-manager:vif-1.0.2
         pull_policy: always
         #platform: linux/arm64
         profiles: ["", "wse", "wsem", "default"]
