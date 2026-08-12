@@ -22,7 +22,7 @@
 services:
     vlm-2:
         hostname: vlm-2.docker
-        image: vllm/vllm-openai:v0.21.0
+        image: vllm/vllm-openai:v0.26.0
         # `vlm` profile too, so `--profile vlm` brings up both containers.
         profiles: ["vlm", "vlm-2"]
         restart: unless-stopped
