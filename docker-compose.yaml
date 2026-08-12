@@ -188,7 +188,7 @@ services:
     # Streams point at `endpoint_url: http://vlm.docker:8000/v1`.
     vlm:
         hostname: vlm.docker
-        image: vllm/vllm-openai:v0.21.0
+        image: vllm/vllm-openai:v0.26.0
         profiles: ["vlm"]
         restart: unless-stopped
         # Which model this VLM serves: ./vlm-env/<VLM_CONF>.env (default qwen).
@@ -196,6 +196,9 @@ services:
           - ./vlm-env/${VLM_CONF:-qwen}.env
         volumes:
           - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
+        # Cosmos3-Edge fix for the v0.26.0 image (vLLM PR #49190 cherry-pick,
+        # see the file's header); inert for other models. Remove on a fixed release.
+          - ./vlm-patches/cosmos3_edge.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/cosmos3_edge.py:ro
         # Model weights are downloaded here on first boot and reused on later
         # boots. For air-gapped deployments, pre-seed it on a machine with
         # internet access:
