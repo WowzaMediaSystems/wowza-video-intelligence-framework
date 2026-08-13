@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 #
 # Entrypoint for the bundled vLLM VLM sidecar (the `vlm` service in
-# docker-compose.yaml). Runs unchanged on any supported GPU: defaults
-# adapt to the hardware at startup, and everything else is tunable through
-# VLM_* variables in .env -- you should not need to edit this file.
+# docker-compose.yaml). Runs unchanged on any supported GPU and model:
+# defaults adapt to the hardware at startup, and everything else is
+# tunable through VLM_* variables -- you should not need to edit this
+# file. Model knobs come from the model's env file (vlm-env/<name>.env,
+# picked by VLM_CONF in .env); GPU placement (VLM_GPU_IDS) and secrets
+# come from .env via the compose service.
 #
 # FIXED flags (not overridable) are tuned to the VIS workload -- unique,
 # non-repeating video frames with short structured responses:
@@ -20,13 +23,15 @@
 #                                A10G/A100. Set VLM_KV_CACHE_DTYPE to
 #                                override.
 #
-# TUNABLE via .env (defaults fit Qwen3-VL-4B-Instruct-FP8 on a DEDICATED
-# 24 GB-class GPU):
-#   VLM_GPU_IDS                  Pin the sidecar to specific GPU(s), e.g.
-#                                "1" or "2,3". Indices match `nvidia-smi`
-#                                order. Unset = first visible GPU (GPU 0),
-#                                which WSE and VIS also use -- pin this on
-#                                multi-GPU hosts so they don't contend.
+# TUNABLE (defaults fit Qwen3-VL-4B-Instruct-FP8 on a DEDICATED
+# 24 GB-class GPU). All of these live in the model's env file, except
+# VLM_GPU_IDS which is deployment placement and lives in .env:
+#   VLM_GPU_IDS                  (.env) Pin the sidecar to specific GPU(s),
+#                                e.g. "1" or "2,3". Indices match
+#                                `nvidia-smi` order. Unset = first visible
+#                                GPU (GPU 0), which WSE and VIS also use --
+#                                pin this on multi-GPU hosts so they don't
+#                                contend.
 #   VLM_TENSOR_PARALLEL_SIZE     Shard the model across N GPUs (default 1).
 #   VLM_GPU_MEMORY_UTILIZATION   Fraction of the GPU vLLM reserves
 #                                (default 0.90). Best practice: give the
@@ -40,14 +45,14 @@
 #                                healthcheck follows it; point your
 #                                streams' `endpoint_url` at the same port.
 # plus VLM_MODEL, VLM_MAX_MODEL_LEN, VLM_MAX_NUM_SEQS, VLM_KV_CACHE_DTYPE,
-# VLM_MAX_NUM_BATCHED_TOKENS, VLM_MAX_PIXELS / VLM_MIN_PIXELS,
+# VLM_MAX_NUM_BATCHED_TOKENS, VLM_MAX_PIXELS / VLM_MIN_PIXELS (Qwen-style
+# processor kwargs; no default -- some processors reject them),
 # VLM_MAX_IMAGES_PER_PROMPT, and VLM_EXTRA_ARGS (raw passthrough).
 #
 # HF_TOKEN (higher rate limits on the first-boot weight download) and
 # HF_HUB_OFFLINE=1 (skip Hub probes on air-gapped hosts with pre-seeded
 # weights) are read by vLLM/HuggingFace directly, not by this script;
-# set them in .env like the VLM_* knobs (see the `vlm` service in
-# docker-compose.yaml).
+# set them in .env (see the `vlm` service in docker-compose.yaml).
 #
 # SIZING CONCURRENCY: there is no universal "right" --max-num-seqs; vLLM
 # computes the real ceiling for your GPU at startup and prints it. Watch
@@ -67,7 +72,7 @@
 set -euo pipefail
 
 # Bump on every edit to this file.
-ENTRYPOINT_REVISION="2026-06-10"
+ENTRYPOINT_REVISION="2026-07-24"
 echo "[vlm-entrypoint] revision ${ENTRYPOINT_REVISION}"
 
 MODEL="${VLM_MODEL:-Qwen/Qwen3-VL-4B-Instruct-FP8}"
@@ -76,8 +81,11 @@ GPU_MEM_UTIL="${VLM_GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_BATCHED_TOKENS="${VLM_MAX_NUM_BATCHED_TOKENS:-8192}"
 MAX_NUM_SEQS="${VLM_MAX_NUM_SEQS:-auto}"
 TENSOR_PARALLEL_SIZE="${VLM_TENSOR_PARALLEL_SIZE:-1}"
-MIN_PIXELS="${VLM_MIN_PIXELS:-3136}"        # 4*28*28
-MAX_PIXELS="${VLM_MAX_PIXELS:-401408}"      # 512*28*28 ~= 512 vision tokens/image
+# Per-image pixel caps are Qwen-style PROCESSOR kwargs -- other processors
+# (e.g. Nemotron's) reject them, so there is no default here; set them in the
+# model's env file when its processor supports them.
+MIN_PIXELS="${VLM_MIN_PIXELS:-}"
+MAX_PIXELS="${VLM_MAX_PIXELS:-}"
 MAX_IMAGES="${VLM_MAX_IMAGES_PER_PROMPT:-8}"
 PORT="${VLM_PORT:-8000}"
 
@@ -124,7 +132,6 @@ if [ -z "${KV_CACHE_DTYPE}" ]; then
 fi
 
 LIMIT_MM="{\"image\": ${MAX_IMAGES}, \"video\": 0}"
-MM_KWARGS="{\"min_pixels\": ${MIN_PIXELS}, \"max_pixels\": ${MAX_PIXELS}}"
 
 ARGS=(
   --port="${PORT}"
@@ -136,8 +143,17 @@ ARGS=(
   --no-enable-prefix-caching
   --mm-processor-cache-gb=0
   "--limit-mm-per-prompt=${LIMIT_MM}"
-  "--mm-processor-kwargs=${MM_KWARGS}"
 )
+
+# Processor kwargs only when the model's env file sets pixel caps.
+if [ -n "${MIN_PIXELS}" ] || [ -n "${MAX_PIXELS}" ]; then
+  MM_KWARGS="{"
+  [ -n "${MIN_PIXELS}" ] && MM_KWARGS="${MM_KWARGS}\"min_pixels\": ${MIN_PIXELS}"
+  [ -n "${MIN_PIXELS}" ] && [ -n "${MAX_PIXELS}" ] && MM_KWARGS="${MM_KWARGS}, "
+  [ -n "${MAX_PIXELS}" ] && MM_KWARGS="${MM_KWARGS}\"max_pixels\": ${MAX_PIXELS}"
+  MM_KWARGS="${MM_KWARGS}}"
+  ARGS+=("--mm-processor-kwargs=${MM_KWARGS}")
+fi
 
 # --max-num-seqs: pin to the value, or omit when "auto" so vLLM sizes it
 # to this GPU's KV capacity.

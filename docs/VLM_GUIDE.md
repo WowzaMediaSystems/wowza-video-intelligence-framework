@@ -4,7 +4,7 @@ The Video Intelligence framework can run a **vision-language model (VLM)** over 
 
 With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
-The VLM is any **OpenAI-compatible HTTP endpoint** — the framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar serving **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly), so everything can run locally on your GPU, or you can point at a hosted provider instead.
+The VLM is any multi-modal model behind an **OpenAI-compatible HTTP endpoint** — one that reads the stream's frames alongside your text prompts. The framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar so everything can run locally on your GPU, or you can point at a hosted provider instead. More than one model can run side by side, each in its own container — see [Choosing the model](#choosing-the-model); the bundled default is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
 
 ---
 
@@ -117,33 +117,89 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
 | GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
 
-GPU placement is the one thing worth a decision on multi-GPU machines: the sidecar reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) so the detector models still fit.
+GPU placement is the one thing worth a decision on multi-GPU machines, because the VLM and the detection models claim memory differently: detection models (object detection, scene detection, …) are allocated lazily, as streams start using them, while the VLM is eager — vLLM reserves 90% of one card the moment the container starts. Give the VLM a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detection models use the rest. To run detection models on the same card as the VLM (e.g. a single-GPU machine that must run everything), lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) in a local copy of the model's env file (see [Choosing the model](#choosing-the-model)) so they still fit.
+
+---
+
+## Choosing the model
+
+Each supported model is a small **env file** under `vlm-env/` (e.g. `qwen.env`, `nemotron.env`) holding the model id and its tuned `VLM_*` knobs. The VLM container loads one, picked by `VLM_CONF` — set it in `.env` (default `qwen`), then bring the stack up normally:
+
+```bash
+# .env:  VLM_CONF=nemotron   (omit for the default, qwen)
+docker compose --profile default --profile vlm up -d
+```
+
+(A shell-level `VLM_CONF=... docker compose ...` overrides `.env` for a one-off run, but the `.env` entry is the intended home so every later `up` keeps serving the same model.)
+
+| Conf (`VLM_CONF`) | Model | Notes |
+|---|---|---|
+| `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
+| `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
+| `gemma` | `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env`; fits a 24 GB card |
+| `cosmos-edge` | `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load, fits an 8 GB card. Needs the `v0.26.0` sidecar image + bundled patch mount, both already wired in `docker-compose.yaml` |
+| `cosmos-nano` | `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B, ~32 GB of BF16 weights); needs a 40 GB+ card, or two 24 GB cards with `VLM_TENSOR_PARALLEL_SIZE=2` |
+
+The VLM serves on `http://vlm.docker:8000/v1`; each stream's `model_name` must match the served model. The Manager UI's **Verify** button handles this for you: it queries the endpoint for the models it actually serves (a `GET /models` issued server-side by the Engine, so compose-internal hostnames work) and adopts the served model into the stream's config automatically.
+
+To tune the settings of one of the models we provide, copy its file to a local name instead of editing it in place (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local` in `.env`) — local copies survive framework upgrades untouched.
+
+### Running two models at the same time
+
+The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`, which adds `vlm-2`:
+
+```bash
+# .env:  VLM_CONF=<model for vlm>   VLM_2_CONF=<model for vlm-2>
+#        (defaults: qwen + nemotron; any pair of supported models works)
+docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
+  --profile default --profile vlm up -d
+```
+
+`vlm` runs `VLM_CONF` on GPU 0 (`http://vlm.docker:8000/v1`) and `vlm-2` runs `VLM_2_CONF` on GPU 1 (`http://vlm-2.docker:8000/v1`); point each stream's endpoint and `model_name` at the container serving its model (the stream config's **Verify** button shows which model an endpoint serves). Override the GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`; to co-locate both on one big GPU, point them at the same card and lower `VLM_GPU_MEMORY_UTILIZATION` in local copies of each model file so they sum to under 1.0. Copy the `vlm-2` block for a third simultaneous container.
+
+Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml --profile vlm down`.
+
+### Adding a supported model
+
+1. Add `vlm-env/<name>.env` — `VLM_MODEL=<hf id>` plus any tuned `VLM_*` knobs (copy an existing file; flags with no dedicated knob go in `VLM_EXTRA_ARGS`).
+2. Serve it: set `VLM_CONF=<name>` in `.env` and `docker compose --profile default --profile vlm up -d`.
+3. Set the stream's `model_name` to the model id.
 
 ---
 
 ## Configuration reference
 
-### Sidecar tuning (`.env`)
+### Deployment settings (`.env`)
 
 All knobs are environment variables read by `vlm-entrypoint.sh` at the repo root (which also documents them in detail — defaults adapt to your hardware, and you should never need to edit the file itself). Unlike the other services, the `vlm` container does not load the whole `.env`: only the variables below (`VLM_*`, `VLLM_API_KEY`, `HF_*`) are passed through, keeping engine/VIS credentials out of the third-party image — and an empty value counts as unset for all of them. Two vLLM flags are pinned in the entrypoint and deliberately not exposed as knobs: `--no-enable-prefix-caching` and `--mm-processor-cache-gb 0` (workload correctness for a stream of ever-changing frames). The entrypoint's first boot-log line is a revision marker (`[vlm-entrypoint] revision <date>`) that identifies which copy of the bind-mounted script a deployment is running.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VLM_MODEL` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Any vLLM-supported vision model |
-| `VLM_GPU_IDS` | unset (first visible GPU) | Pin the sidecar to specific card(s), e.g. `1` or `2,3`; indices match `nvidia-smi` |
-| `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
-| `VLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the GPU vLLM reserves; assumes a dedicated card |
-| `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
-| `VLM_MAX_MODEL_LEN` | `16384` | Context window per request |
-| `VLM_MAX_NUM_SEQS` | `auto` | Concurrency ceiling; `auto` lets vLLM size it to your GPU's KV capacity |
-| `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
-| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | `401408` / `3136` | Per-image resolution cap (≈512 vision tokens/image at the default) |
-| `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
-| `VLM_PORT` | `8000` | Served port; the compose healthcheck follows it |
+| `VLM_CONF` | `qwen` | Model env file the `vlm` container serves (any name in `vlm-env/`, without `.env`) |
+| `VLM_GPU_IDS` | unset (GPU 0) | Pin the `vlm` container to specific card(s), e.g. `1` or `2,3`; indices match `nvidia-smi` |
+| `VLM_2_CONF` | `nemotron` | Model env file for the second container (`vlm-2`, only with `docker-compose.vlm-multi.yaml`) |
+| `VLM_2_GPU_IDS` | `1` | Card(s) for the second container |
 | `VLLM_API_KEY` | unset | Require an API key on the endpoint (set when publishing the port) |
 | `HF_TOKEN` | unset | HuggingFace token for the first-boot weight download (higher rate limits) |
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
-| `VLM_EXTRA_ARGS` | unset | Raw passthrough for any other `vllm serve` flag |
+
+### Model config (`vlm-env/<name>.env`)
+
+A model's config lives in a per-model env file, `vlm-env/<name>.env` (`KEY=VALUE`), not `.env`, so it travels with the model and never cross-wires between containers. The entrypoint reads these knobs (all optional; defaults fit Qwen3-VL-4B on a 24 GB card):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VLM_MODEL` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | HuggingFace model id vLLM serves |
+| `VLM_MAX_MODEL_LEN` | `16384` | Context window per request |
+| `VLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the GPU vLLM reserves; lower it to co-locate two models on one card |
+| `VLM_MAX_NUM_SEQS` | `auto` | Concurrency ceiling; `auto` lets vLLM size it to KV capacity |
+| `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
+| `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
+| `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
+| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | unset | Per-image resolution caps (Qwen-style processor kwargs; some processors reject them). `qwen.env` sets `401408` / `3136` ≈ 512 vision tokens/image |
+| `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
+| `VLM_PORT` | `8000` | Served port; the container healthcheck follows it. If you publish the endpoint, mirror the value in `.env` so the `ports:` mapping matches |
+| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`) |
 
 Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
 

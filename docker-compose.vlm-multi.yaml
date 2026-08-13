@@ -1,0 +1,60 @@
+# Example override: run a SECOND VLM on the same host.
+#
+# The base docker-compose.yaml runs ONE VLM container (`vlm`). Layer this file
+# to add a second (`vlm-2`); copy the `vlm-2` block for a third, etc. Each is a
+# separate container on its own GPU -- vLLM serves one model per process. Run
+# it with both files (this brings up BOTH, since vlm-2 also has the `vlm`
+# profile):
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
+#     --profile default --profile vlm up -d
+#
+# Each container's model is a per-model env file in ./vlm-env/, picked by
+# VLM_CONF (vlm, default qwen) and VLM_2_CONF (vlm-2, default nemotron); its GPU
+# by VLM_GPU_IDS / VLM_2_GPU_IDS (defaults 0 / 1). e.g.:
+#
+#   VLM_CONF=qwen VLM_2_CONF=nemotron docker compose \
+#     -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
+#     --profile default --profile vlm up -d
+#
+# Two models on ONE big GPU: set VLM_GPU_IDS and VLM_2_GPU_IDS to the same card
+# and lower each model file's VLM_GPU_MEMORY_UTILIZATION so they sum to < 1.
+services:
+    vlm-2:
+        hostname: vlm-2.docker
+        image: vllm/vllm-openai:v0.26.0
+        # `vlm` profile too, so `--profile vlm` brings up both containers.
+        profiles: ["vlm", "vlm-2"]
+        restart: unless-stopped
+        env_file:
+          - ./vlm-env/${VLM_2_CONF:-nemotron}.env
+        volumes:
+          - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
+          - ./vis/vlm-models:/root/.cache/huggingface
+          - ./vis/vlm-cache:/root/.cache/vllm
+        entrypoint: ["/bin/bash", "/vlm-entrypoint.sh"]
+        environment:
+          - VLM_GPU_IDS=${VLM_2_GPU_IDS:-1}   # its own card (vlm defaults to GPU 0)
+          - VLLM_API_KEY=${VLLM_API_KEY:-}
+          - HF_TOKEN=${HF_TOKEN:-}
+          - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-}
+        ipc: host
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        # Publish only to reach it from another host; the host port must differ
+        # from vlm's (e.g. "8001:8000").
+        # ports:
+        #   - "8001:8000"
+        healthcheck:
+          test: ["CMD-SHELL", "curl -fsS http://localhost:$${VLM_PORT:-8000}/health"]
+          interval: 30s
+          timeout: 10s
+          retries: 5
+          start_period: 1800s
+        deploy:
+          resources:
+            reservations:
+              devices:
+                - driver: nvidia
+                  capabilities: [gpu, compute, utility]
+                  count: all
