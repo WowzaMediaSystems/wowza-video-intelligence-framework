@@ -4,7 +4,7 @@ The Video Intelligence framework can run a **vision-language model (VLM)** over 
 
 With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
-The VLM is any **OpenAI-compatible HTTP endpoint** — the framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar serving **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly), so everything can run locally on your GPU, or you can point at a hosted provider instead. More than one model can run side by side (e.g. Qwen and Nemotron), each in its own container — see [Choosing the model](#choosing-the-model).
+The VLM is any multi-modal model behind an **OpenAI-compatible HTTP endpoint** — one that reads the stream's frames alongside your text prompts. The framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar so everything can run locally on your GPU, or you can point at a hosted provider instead. More than one model can run side by side, each in its own container — see [Choosing the model](#choosing-the-model); the bundled default is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
 
 ---
 
@@ -117,7 +117,7 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
 | GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
 
-GPU placement is the one thing worth a decision on multi-GPU machines: the VLM reserves 90% of one card by default, so give it a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detectors use the rest. On a single-GPU machine that must run everything, lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) in a local copy of the model's env file (see [Choosing the model](#choosing-the-model)) so the detector models still fit.
+GPU placement is the one thing worth a decision on multi-GPU machines, because the VLM and the detection models claim memory differently: detection models (object detection, scene detection, …) are allocated lazily, as streams start using them, while the VLM is eager — vLLM reserves 90% of one card the moment the container starts. Give the VLM a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detection models use the rest. To run detection models on the same card as the VLM (e.g. a single-GPU machine that must run everything), lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) in a local copy of the model's env file (see [Choosing the model](#choosing-the-model)) so they still fit.
 
 ---
 
@@ -137,10 +137,12 @@ docker compose --profile default --profile vlm up -d
 | `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
 | `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
 | `gemma` | `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env`; fits a 24 GB card |
+| `cosmos-edge` | `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load, fits an 8 GB card. Needs the `v0.26.0` sidecar image + bundled patch mount, both already wired in `docker-compose.yaml` |
+| `cosmos-nano` | `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B, ~32 GB of BF16 weights); needs a 40 GB+ card, or two 24 GB cards with `VLM_TENSOR_PARALLEL_SIZE=2` |
 
-The VLM serves on `http://vlm.docker:8000/v1`; set each stream's `model_name` to match the model.
+The VLM serves on `http://vlm.docker:8000/v1`; each stream's `model_name` must match the served model. The Manager UI's **Verify** button handles this for you: it queries the endpoint for the models it actually serves (a `GET /models` issued server-side by the Engine, so compose-internal hostnames work) and adopts the served model into the stream's config automatically.
 
-To retune a shipped model, copy its file to a local name instead of editing it in place (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local` in `.env`) — local copies survive framework upgrades untouched.
+To tune the settings of one of the models we provide, copy its file to a local name instead of editing it in place (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local` in `.env`) — local copies survive framework upgrades untouched.
 
 ### Running two models at the same time
 
