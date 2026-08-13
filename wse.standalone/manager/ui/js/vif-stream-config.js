@@ -34,6 +34,18 @@
             model_name: 'Qwen/Qwen3-VL-4B-Instruct-FP8',
             endpoint_url: 'http://vlm.docker:8000/v1'
         };
+        // Models offered as explicit options in the VLM Model Name dropdown; the <select>
+        // options are populated from this list at init (stream-config.html only carries the
+        // fixed "Other…" entry). A stored model_name outside this set loads into the "Other"
+        // custom text input.
+        var VLM_MODEL_OPTIONS = [
+            { value: 'Qwen/Qwen3-VL-4B-Instruct-FP8', label: 'Qwen3-VL-4B (Qwen)' },
+            { value: 'nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8', label: 'Nemotron Nano 12B VL (NVIDIA)' },
+            { value: 'google/gemma-3-4b-it', label: 'Gemma 3 4B (Google)' }
+        ];
+        var VLM_KNOWN_MODELS = VLM_MODEL_OPTIONS.map(function(o) { return o.value; });
+        // Sentinel <option> value that reveals the custom model-name text input.
+        var VLM_MODEL_OTHER = '__other__';
         var VLM_TYPICAL_ENDPOINT_IMAGE_CAP = VIF.fieldRegistry.VLM_TYPICAL_ENDPOINT_IMAGE_CAP;
         // Suggested inference_fps for new VLM streams. The global inference_fps default
         // (-1 = match source) would push a 25-30fps stream far past the endpoint's typical
@@ -956,6 +968,169 @@
             return Math.min(4096, 256 + classCount * 128);
         }
 
+        // Reveal the custom model-name input only when the "Other" option is selected.
+        function toggleVlmModelNameOther() {
+            const isOther = document.getElementById('cfg-vlm-model-name').value === VLM_MODEL_OTHER;
+            document.getElementById('cfg-vlm-model-name-other').style.display = isOther ? 'block' : 'none';
+            markDirty();
+        }
+
+        // Effective model_name from the dropdown, or the custom text when "Other" is chosen.
+        // Empty custom -> null so the stream inherits the global default.
+        function readVlmModelName() {
+            const select = document.getElementById('cfg-vlm-model-name');
+            if (select.value === VLM_MODEL_OTHER) {
+                return document.getElementById('cfg-vlm-model-name-other').value.trim() || null;
+            }
+            return select.value || null;
+        }
+
+        // Select the option matching modelName; an unknown value loads into "Other" + custom input.
+        function setVlmModelName(modelName) {
+            const select = document.getElementById('cfg-vlm-model-name');
+            const other = document.getElementById('cfg-vlm-model-name-other');
+            if (modelName && VLM_KNOWN_MODELS.indexOf(modelName) === -1) {
+                select.value = VLM_MODEL_OTHER;
+                other.value = modelName;
+            } else {
+                select.value = modelName || VLM_KNOWN_MODELS[0];
+                other.value = '';
+            }
+            toggleVlmModelNameOther();
+        }
+
+        // The VLM Server field takes a lenient address: on save, a missing scheme
+        // gets http:// and a missing path gets /v1; an explicit scheme (https) or
+        // path (/v1, /random) is kept as typed. A saved value is shown verbatim;
+        // only the placeholder (unset field) is reduced — and only by stripping what
+        // save re-adds, so it round-trips back through save even for https or non-/v1
+        // endpoints.
+        function vlmEndpointPlaceholder(endpointUrl) {
+            if (!endpointUrl) return '';
+            let s = String(endpointUrl).trim();
+            s = s.replace(/^http:\/\//, '');
+            s = s.replace(/\/v1\/?$/, '');
+            return s;
+        }
+
+        // Build the stored endpoint_url from the field. Empty -> null so the
+        // stream inherits the global default.
+        function buildVlmEndpointUrl() {
+            let s = document.getElementById('cfg-vlm-endpoint-url').value.trim();
+            if (!s) return null;
+            if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) s = 'http://' + s;
+            // No path after host:port (a lone trailing / counts as none) -> append /v1.
+            const rest = s.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+            if (!/\/./.test(rest)) s = s.replace(/\/$/, '') + '/v1';
+            return s;
+        }
+
+        // Endpoint the Verify button probes: the field (normalized to a full URL), else the
+        // effective global default layered the same way the load block does.
+        function effectiveVlmEndpointForTest() {
+            const fromField = buildVlmEndpointUrl();
+            if (fromField) return fromField;
+            const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
+            return globalVa.endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url || null;
+        }
+
+        // Bumped on every clear so an in-flight probe knows its result is stale.
+        var vlmEndpointTestSeq = 0;
+
+        function clearVlmEndpointTestResult() {
+            vlmEndpointTestSeq++;
+            const el = document.getElementById('cfg-vlm-endpoint-test-result');
+            if (!el) return;
+            el.style.display = 'none';
+            el.className = 'endpoint-test-result';
+            el.textContent = '';
+        }
+
+        function showVlmEndpointTestResult(cls) {
+            const el = document.getElementById('cfg-vlm-endpoint-test-result');
+            el.className = 'endpoint-test-result ' + cls;
+            el.style.display = '';
+            return el;
+        }
+
+        // Server-side connectivity probe: the browser can't reach compose-internal
+        // hostnames, so the Engine plugin issues GET <endpoint>/models on our behalf.
+        async function testVlmEndpoint() {
+            const btn = document.getElementById('cfg-vlm-endpoint-test');
+            const endpoint = effectiveVlmEndpointForTest();
+            if (!endpoint) {
+                showVlmEndpointTestResult('error').textContent = '✗ No VLM endpoint configured';
+                return;
+            }
+            // Layer the key like the endpoint: the per-stream field, else the global default.
+            const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
+            const apiKey = document.getElementById('cfg-vlm-api-key').value || globalVa.api_key || '';
+
+            const original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Verifying…';
+            showVlmEndpointTestResult('').textContent = 'Verifying…';
+            const seq = ++vlmEndpointTestSeq;
+
+            try {
+                // POST body (not query params) so the api_key stays out of logged URLs.
+                const payload = { endpoint_url: endpoint };
+                if (apiKey) payload.api_key = apiKey;
+                const response = await fetch(`${serverUrl}/v1/server/plugin/vif/vlm/test`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${encodedCredentials}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const result = await response.json();
+                if (seq !== vlmEndpointTestSeq) return; // field edited mid-flight; result is stale
+                renderVlmEndpointTestOutcome(result);
+            } catch (error) {
+                if (seq !== vlmEndpointTestSeq) return;
+                showVlmEndpointTestResult('error').textContent = `✗ ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = original;
+            }
+        }
+
+        function renderVlmEndpointTestOutcome(result) {
+            const models = Array.isArray(result.models) ? result.models : [];
+            if (result.reachable && models.length) {
+                // Compare against the model the stream would actually use (field,
+                // else the global default). A single served model that differs is
+                // adopted right away — the note reports the change; save persists it.
+                const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
+                const configured = readVlmModelName() || globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name;
+                const matches = models.indexOf(configured) !== -1;
+                if (matches) {
+                    showVlmEndpointTestResult('ok').textContent =
+                        `✓ Reachable — serving: ${models.join(', ')} (matches the configured model)`;
+                } else if (models.length === 1) {
+                    setVlmModelName(models[0]);
+                    markDirty();
+                    showVlmEndpointTestResult('warn').textContent =
+                        `⚠ Reachable — serving: ${models[0]}; the configured model (${configured}) did not match, so it was updated. Save to keep it.`;
+                } else {
+                    showVlmEndpointTestResult('warn').textContent =
+                        `⚠ Reachable — serving: ${models.join(', ')}, which does not match the configured model (${configured}). Pick one of the served models.`;
+                }
+                return;
+            }
+            if (result.reachable) {
+                // Reachable but no usable model list: auth rejection, redirect, or
+                // a model listing too large/odd to read.
+                showVlmEndpointTestResult('warn').textContent = `⚠ ${result.error || 'Endpoint reachable but returned no models'}`;
+                return;
+            }
+            showVlmEndpointTestResult('error').textContent = `✗ ${result.error || 'Endpoint unreachable'}`;
+        }
+
         function toggleVlmMode() {
             const mode = getVlmMode();
             document.getElementById('vlm-mode-detect').style.display = mode === 'detect' ? 'block' : 'none';
@@ -1287,8 +1462,8 @@
                 // are added per active mode below and ONLY for that mode, so VIS's
                 // field-presence mode inference stays unambiguous (mode-bleed guard).
                 const vlm = {
-                    model_name: document.getElementById('cfg-vlm-model-name').value || null,
-                    endpoint_url: document.getElementById('cfg-vlm-endpoint-url').value || null,
+                    model_name: readVlmModelName(),
+                    endpoint_url: buildVlmEndpointUrl(),
                     api_key: document.getElementById('cfg-vlm-api-key').value || null,
                     request_timeout_seconds: readNumericInputValue('cfg-vlm-request-timeout', false),
                     temperature: readNumericInputValue('cfg-vlm-temperature', false),
@@ -1427,6 +1602,21 @@
                 errors.push('Temperature must be between 0 and 2.');
             }
 
+            // VLM Endpoint URL: blank is legal and inherits the global vlm_analysis default
+            // (the placeholder shows what will be used). A typed value has to be something VIS
+            // can give the OpenAI SDK — it validates scheme + host (validate_http_endpoint_url)
+            // and a rejection kills the stream at publish, so fail here instead. ${ENV_VAR}
+            // templates resolve server-side, same carve-out as vi_service_url below.
+            if (config.vlm_analysis && config.vlm_analysis.endpoint_url
+                && config.vlm_analysis.endpoint_url.indexOf('${') === -1) {
+                let parsedEndpoint = null;
+                try { parsedEndpoint = new URL(config.vlm_analysis.endpoint_url); } catch (e) { /* invalid */ }
+                if (!parsedEndpoint || !parsedEndpoint.hostname
+                    || (parsedEndpoint.protocol !== 'http:' && parsedEndpoint.protocol !== 'https:')) {
+                    errors.push('Endpoint URL must be an http or https URL including a host, e.g. http://vlm.docker:8000/v1, or left blank to inherit the default.');
+                }
+            }
+
             // Only literal values are checked - ${ENV_VAR} templates resolve
             // server-side. A hostless parse ("host:5001/..." reads the host as
             // the scheme) is as unusable as an unparseable one.
@@ -1539,7 +1729,9 @@
 
             if (config.detector_type === 'vlm') {
                 const va = config.vlm_analysis || {};
-                if (!va.model_name) errors.push('No VLM model is configured. Set vlm_defaults.model in Default.json on the Engine host.');
+                const effectiveModel = va.model_name
+                    || (defaultConfig && defaultConfig.vlm_analysis && defaultConfig.vlm_analysis.model_name);
+                if (!effectiveModel) errors.push('No VLM model is configured. Select a model, or set vlm_defaults.model in Default.json on the Engine host.');
                 if (config.duration !== undefined && config.duration !== null
                     && (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > 5)) {
                     errors.push('Duration must be between 0 and 5 for VLM detection.');
@@ -1716,10 +1908,11 @@
             document.getElementById('cfg-scene-confidence-threshold').value = '';
 
             // VLM analysis
-            document.getElementById('cfg-vlm-model-name').value = '';
+            setVlmModelName(VLM_KNOWN_MODELS[0]);
             document.getElementById('cfg-vlm-endpoint-url').value = '';
             document.getElementById('cfg-vlm-api-key').value = '';
             syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+            clearVlmEndpointTestResult();
             document.getElementById('cfg-vlm-detect-classes').innerHTML = '';
             document.getElementById('cfg-vlm-custom-classes').innerHTML = '';
             document.getElementById('cfg-vlm-system-prompt').value = '';
@@ -1911,13 +2104,13 @@
                 const va = config.vlm_analysis || {};
                 const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
 
-                document.getElementById('cfg-vlm-model-name').value =
-                    va.model_name || globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name;
+                setVlmModelName(va.model_name || globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name);
 
                 const endpointInput = document.getElementById('cfg-vlm-endpoint-url');
                 if (va.endpoint_url) endpointInput.value = va.endpoint_url;
                 const effectiveEndpoint = globalVa.endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url;
-                if (effectiveEndpoint) endpointInput.placeholder = effectiveEndpoint;
+                if (effectiveEndpoint) endpointInput.placeholder = vlmEndpointPlaceholder(effectiveEndpoint);
+                clearVlmEndpointTestResult();
 
                 if (va.api_key) {
                     document.getElementById('cfg-vlm-api-key').value = va.api_key;
@@ -2212,6 +2405,27 @@
         });
         syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
 
+        // A stale probe result no longer describes an edited endpoint, model, or API
+        // key — clear it (which also invalidates any in-flight probe).
+        document.getElementById('cfg-vlm-endpoint-url').addEventListener('input', clearVlmEndpointTestResult);
+        document.getElementById('cfg-vlm-model-name').addEventListener('change', clearVlmEndpointTestResult);
+        document.getElementById('cfg-vlm-model-name-other').addEventListener('input', clearVlmEndpointTestResult);
+        document.getElementById('cfg-vlm-api-key').addEventListener('input', clearVlmEndpointTestResult);
+
+        // Populate the model dropdown from VLM_MODEL_OPTIONS, ahead of the fixed "Other…"
+        // option (guarded in case the script re-evaluates over an already-populated DOM).
+        (function() {
+            const select = document.getElementById('cfg-vlm-model-name');
+            if (select.querySelector('option[value="' + VLM_MODEL_OPTIONS[0].value + '"]')) return;
+            const otherOption = select.querySelector('option[value="' + VLM_MODEL_OTHER + '"]');
+            VLM_MODEL_OPTIONS.forEach(function(o) {
+                const option = document.createElement('option');
+                option.value = o.value;
+                option.textContent = o.label;
+                select.insertBefore(option, otherOption);
+            });
+        })();
+
         document.getElementById('cfg-detector-type').addEventListener('change', async function() {
             syncListenerFields();
             const previousDetectorType = this.dataset.previousValue || '';
@@ -2458,6 +2672,8 @@
         window.toggleVisServiceApiKeyVisibility = toggleVisServiceApiKeyVisibility;
         window.toggleSyntheticApiKeyVisibility = toggleSyntheticApiKeyVisibility;
         window.toggleVlmApiKeyVisibility = toggleVlmApiKeyVisibility;
+        window.toggleVlmModelNameOther = toggleVlmModelNameOther;
+        window.testVlmEndpoint = testVlmEndpoint;
 
         // (c) cross-file: exposed because vif-listeners.js's applyTextRuleToInput()/
         //     renderScalarField() and the vlm-*.js modules (markDirty from both

@@ -8,7 +8,7 @@
     // workflow - see the comment there), used below to version the
     // dynamically-constructed listeners/<ClassName>.js script URLs
     // (ensureListenerScriptLoaded).
-    var UI_VERSION = '0.17.0';
+    var UI_VERSION = '1.0.2';
 
     VIF.listeners.init = function () {
         var NEW_LISTENER_PRESET_TYPES = ['OverlayEvent', 'Id3Event', 'LogFileEvent', 'WebhookEvent2', 'ObjectTracking'];
