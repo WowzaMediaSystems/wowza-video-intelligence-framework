@@ -8,7 +8,7 @@
     // workflow - see the comment there), used below to version the
     // dynamically-constructed listeners/<ClassName>.js script URLs
     // (ensureListenerScriptLoaded).
-    var UI_VERSION = '1.0.2';
+    var UI_VERSION = '1.0.3';
 
     VIF.listeners.init = function () {
         var NEW_LISTENER_PRESET_TYPES = ['OverlayEvent', 'Id3Event', 'LogFileEvent', 'WebhookEvent2', 'ObjectTracking'];
@@ -86,14 +86,11 @@
             const shouldReplaceValue = currentValue === '' || currentValue === previousSuggestedValue || nameInput.dataset.userEdited !== 'true';
 
             if (!selected) {
-                nameInput.style.display = 'none';
                 nameInput.value = '';
                 nameInput.dataset.suggestedValue = '';
                 nameInput.dataset.userEdited = 'false';
                 return;
             }
-
-            nameInput.style.display = '';
 
             if (shouldReplaceValue) {
                 nameInput.value = suggestedValue;
@@ -165,12 +162,55 @@
             return (shortName || 'Listener') + ' v' + version;
         }
 
+        function getListenerMethod(name) {
+            const data = eventListenersData[name] || {};
+            return String(data.methods || 'disabled').toLowerCase();
+        }
+
+        function buildListenerOptionLabel(name) {
+            const data = eventListenersData[name] || {};
+            const typeName = resolveClassName(data.class_name || '') || 'No type';
+            return name + '  (' + typeName + '): ' + formatEventMethodLabel(getListenerMethod(name));
+        }
+
+        // The picker is a list box (size > 1), so every configured listener stays visible with
+        // its type and method rather than hiding behind a closed dropdown.
+        function renderListenerList() {
+            const select = document.getElementById('evt-listener-select');
+            if (!select) return;
+            const names = Object.keys(eventListenersData).sort(function(a, b) { return a.localeCompare(b); });
+            const previous = select.value;
+            select.innerHTML = '';
+            if (names.length === 0) {
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '<none>';
+                placeholder.disabled = true;
+                placeholder.className = 'listener-empty';
+                select.appendChild(placeholder);
+            }
+            names.forEach(function(name) {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = buildListenerOptionLabel(name);
+                if (getListenerMethod(name) === 'disabled') option.className = 'listener-disabled';
+                select.appendChild(option);
+            });
+            select.size = Math.min(Math.max(names.length, 3), 10);
+            if (names.includes(previous)) {
+                select.value = previous;
+            } else {
+                clearListenerSelection(select);
+            }
+        }
+
         function updateListenerSelectOptionLabel(name) {
             const select = document.getElementById('evt-listener-select');
             if (!select || !name || !eventListenersData[name]) return;
             const option = select.querySelector('option[value="' + CSS.escape(name) + '"]');
             if (!option) return;
-            option.textContent = name;
+            option.textContent = buildListenerOptionLabel(name);
+            option.classList.toggle('listener-disabled', getListenerMethod(name) === 'disabled');
         }
 
         function updateSelectedListenerTypeDisplay(name) {
@@ -244,83 +284,33 @@
             }
         }
 
-        function updateActiveListenerSummary() {
-            const summary = document.getElementById('evt-active-summary');
-            if (!summary) return;
-            updateSyntheticOverlayWarning();
-
-            const listenerNames = Object.keys(eventListenersData || {});
-            if (listenerNames.length === 0) {
-                summary.style.display = 'none';
-                summary.innerHTML = '';
-                return;
-            }
-
-            const activeNames = listenerNames
-                .slice()
-                .sort(function(a, b) { return a.localeCompare(b); })
-                .filter(function(name) {
-                    const listener = eventListenersData[name] || {};
-                    const method = (listener.methods || 'disabled').toLowerCase();
-                    return method !== 'disabled';
-                })
-                .map(function(name) {
-                    const method = eventListenersData[name] ? eventListenersData[name].methods : 'disabled';
-                    return `${name} (${formatEventMethodLabel(method)})`;
-                });
-
-            summary.innerHTML = '';
-            const label = document.createElement('strong');
-            label.textContent = 'Active listeners:';
-            summary.appendChild(label);
-            summary.appendChild(document.createTextNode(
-                activeNames.length > 0
-                    ? ` ${activeNames.join(', ')}.`
-                    : ' None. All configured event listeners are currently disabled.'
-            ));
-            summary.style.display = 'block';
-        }
-
-        function setExistingListenerRowVisibility(visible) {
+        // The list is always on screen - with no listeners configured it renders a single
+        // inert <none> row - so only Create New Listener (which lives in the same row)
+        // toggles, hiding while its own form is open.
+        function refreshListenerRowVisibility() {
             const row = document.getElementById('evt-existing-listener-row');
             const newBtn = document.getElementById('evt-show-new-listener-btn');
-            if (!row) return;
-            const shouldShow = visible && !isAddingNewListener;
-            row.style.display = shouldShow ? 'flex' : 'none';
-            if (newBtn) newBtn.style.display = visible && !isAddingNewListener ? '' : 'none';
-            if (!shouldShow) {
-                updateSelectedListenerTypeDisplay('');
-            }
+            if (row) row.style.display = 'flex';
+            if (newBtn) newBtn.style.display = isAddingNewListener ? 'none' : '';
         }
 
-        function ensureListenerSelectPromptOption(select, labelText) {
-            if (!select) return null;
-            let prompt = select.querySelector('option[value=""]');
-            if (!prompt) {
-                prompt = document.createElement('option');
-                prompt.value = '';
-                select.insertBefore(prompt, select.firstChild);
-            }
-            prompt.textContent = labelText || 'Select listener to edit...';
-            return prompt;
+        // A list box has no prompt row to fall back on, so "nothing selected" is selectedIndex -1.
+        function clearListenerSelection(select) {
+            if (!select) return;
+            select.selectedIndex = -1;
         }
 
         function cancelListenerSelection() {
             const select = document.getElementById('evt-listener-select');
             if (!select) return;
-            ensureListenerSelectPromptOption(select, 'Select listener to edit...');
-            select.value = '';
+            clearListenerSelection(select);
             activeListenerName = null;
             onListenerSelected();
         }
 
         function cancelNewListenerForm() {
             isAddingNewListener = false;
-            const select = document.getElementById('evt-listener-select');
-            if (select) {
-                ensureListenerSelectPromptOption(select, 'Select listener to edit...');
-                select.value = '';
-            }
+            clearListenerSelection(document.getElementById('evt-listener-select'));
             onListenerSelected();
         }
 
@@ -332,27 +322,22 @@
             const cancelNewBtn = document.getElementById('evt-cancel-new-listener-btn');
             const select = document.getElementById('evt-listener-select');
             const nameInput = document.getElementById('evt-new-listener-name');
-            const hasListeners = Object.keys(eventListenersData).length > 0;
 
             syncListenerFields();
 
             isAddingNewListener = true;
             activeListenerName = null;
-            setExistingListenerRowVisibility(hasListeners);
-            if (hasListeners) {
-                ensureListenerSelectPromptOption(select, 'Select listener to edit...');
-                select.value = '';
-            }
+            refreshListenerRowVisibility();
+            clearListenerSelection(select);
             fields.style.display = 'none';
             document.getElementById('evt-properties-section').style.display = 'none';
             newNameGroup.style.display = 'flex';
             removeBtn.style.display = 'none';
             if (cancelBtn) cancelBtn.style.display = 'none';
-            if (cancelNewBtn) cancelNewBtn.style.display = hasListeners ? 'inline-block' : 'none';
+            if (cancelNewBtn) cancelNewBtn.style.display = 'inline-block';
             showListenerWarning('');
             updateListenerTip('', '');
             if (nameInput) {
-                nameInput.style.display = 'none';
                 nameInput.value = '';
                 nameInput.placeholder = '';
                 nameInput.dataset.userEdited = 'false';
@@ -542,32 +527,15 @@
                 }
             }
 
-            updateActiveListenerSummary();
-
-            // Populate dropdown
-            select.innerHTML = '';
+            updateSyntheticOverlayWarning();
 
             activeListenerName = null;
-            if (Object.keys(eventListenersData).length > 0) {
-                refreshNewListenerTemplateOptions();
-                ensureListenerSelectPromptOption(select, 'Select listener to edit...');
-                for (const name of Object.keys(eventListenersData).sort((a, b) => a.localeCompare(b))) {
-                    const opt = document.createElement('option');
-                    opt.value = name;
-                    opt.textContent = name;
-                    select.appendChild(opt);
-                }
-                isAddingNewListener = false;
-                setExistingListenerRowVisibility(true);
-                select.value = '';
-                onListenerSelected();
-            } else {
-                refreshNewListenerTemplateOptions();
-                ensureListenerSelectPromptOption(select, 'No listeners yet');
-                select.value = '';
-                setExistingListenerRowVisibility(false);
-                openNewListenerForm();
-            }
+            renderListenerList();
+            refreshNewListenerTemplateOptions();
+            isAddingNewListener = false;
+            refreshListenerRowVisibility();
+            clearListenerSelection(select);
+            onListenerSelected();
         }
 
         function addNewListener() {
@@ -596,28 +564,14 @@
                 properties: {},
                 type_locked: true
             };
-            updateActiveListenerSummary();
+            updateSyntheticOverlayWarning();
 
-            // Add the new listener to the existing-listener dropdown
+            // Add the new listener to the list and select it
             var select = document.getElementById('evt-listener-select');
-            ensureListenerSelectPromptOption(select, 'Select listener to edit...');
-            var opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            var inserted = false;
-            for (var i = 1; i < select.options.length; i++) {
-                if (name.localeCompare(select.options[i].value) < 0) {
-                    select.insertBefore(opt, select.options[i]);
-                    inserted = true;
-                    break;
-                }
-            }
-            if (!inserted) select.appendChild(opt);
-
-            // Select the new listener
+            renderListenerList();
             select.value = name;
             isAddingNewListener = false;
-            setExistingListenerRowVisibility(true);
+            refreshListenerRowVisibility();
             refreshNewListenerTemplateOptions();
             onListenerSelected();
             markDirty();
@@ -639,7 +593,7 @@
             if (cancelNewBtn) cancelNewBtn.style.display = 'none';
             isAddingNewListener = false;
             activeListenerName = name;
-            setExistingListenerRowVisibility(Object.keys(eventListenersData).length > 0);
+            refreshListenerRowVisibility();
 
             if (!name || !eventListenersData[name]) {
                 fields.style.display = 'none';
@@ -649,9 +603,6 @@
                 updateSelectedListenerTypeDisplay('');
                 showListenerWarning('');
                 updateListenerTip('', '');
-                if (Object.keys(eventListenersData).length === 0) {
-                    openNewListenerForm();
-                }
                 return;
             }
 
@@ -684,29 +635,16 @@
 
             delete eventListenersData[name];
             activeListenerName = null;
-            updateActiveListenerSummary();
+            updateSyntheticOverlayWarning();
 
-            // Remove option from dropdown
+            // Drop it from the list and fall back to a neutral selection
             var select = document.getElementById('evt-listener-select');
-            var opt = select.querySelector('option[value="' + CSS.escape(name) + '"]');
-            if (opt) opt.remove();
-
-            // Return to a neutral selector state or reopen the add form
-            if (Object.keys(eventListenersData).length > 0) {
-                ensureListenerSelectPromptOption(select, 'Select listener to edit...');
-                select.value = '';
-                isAddingNewListener = false;
-                setExistingListenerRowVisibility(true);
-                refreshNewListenerTemplateOptions();
-                onListenerSelected();
-            } else {
-                select.innerHTML = '';
-                refreshNewListenerTemplateOptions();
-                ensureListenerSelectPromptOption(select, 'No listeners yet');
-                select.value = '';
-                setExistingListenerRowVisibility(false);
-                openNewListenerForm();
-            }
+            renderListenerList();
+            clearListenerSelection(select);
+            refreshNewListenerTemplateOptions();
+            isAddingNewListener = false;
+            refreshListenerRowVisibility();
+            onListenerSelected();
             markDirty();
         }
 
@@ -1434,7 +1372,7 @@
             data.suppress_empty_detections = nextSupresEmptyDetections;
             updateListenerSelectOptionLabel(name);
             updateSelectedListenerTypeDisplay(name);
-            updateActiveListenerSummary();
+            updateSyntheticOverlayWarning();
 
             if (changed) {
                 markDirty();

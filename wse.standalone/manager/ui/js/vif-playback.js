@@ -472,6 +472,33 @@
       elements.errorMessage.classList.remove('hidden');
     }
 
+    // hls.js buries the useful part of a failure in the error payload, so a 404 on the manifest,
+    // a CORS rejection and a parse error all look alike unless it is unpacked.
+    function describeHlsError(data) {
+      const parts = [];
+      if (data.details) parts.push(data.details);
+      if (data.response && data.response.code) {
+        parts.push('HTTP ' + data.response.code + (data.response.text ? ' ' + data.response.text : ''));
+      }
+      const reason = data.reason || (data.error && data.error.message);
+      if (reason) parts.push(reason);
+      const target = (data.response && data.response.url) || data.url;
+      if (target) parts.push(target);
+      return parts.join(' - ') || (data.type || 'unknown error');
+    }
+
+    function describeMediaError(mediaError) {
+      if (!mediaError) return 'unknown error';
+      const codes = {
+        1: 'playback aborted',
+        2: 'network error',
+        3: 'decode error',
+        4: 'source not supported (wrong URL, or the stream is not publishing)'
+      };
+      const label = codes[mediaError.code] || ('media error ' + mediaError.code);
+      return mediaError.message ? label + ' - ' + mediaError.message : label;
+    }
+
     function hideError() {
       elements.errorMessage.classList.add('hidden');
     }
@@ -690,7 +717,9 @@
       const shouldClearPlaybackUrl = !options || options.clearPlaybackUrl !== false;
 
       clearPlaybackDebugInterval();
-      currentLoadingUrl = null;
+      if (shouldClearPlaybackUrl) {
+        currentLoadingUrl = null;
+      }
 
       if (myPlayer != null) {
         try {
@@ -858,7 +887,7 @@
           console.error('[player] fatal error:', data);
           if (url !== currentLoadingUrl) return;
           updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
-          showError('Failed to load stream. Please check the URL format and try again.');
+          showError('Failed to load stream: ' + describeHlsError(data));
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Native HLS (Safari)
@@ -869,9 +898,10 @@
           video.play().catch(e => console.warn('[player] autoplay blocked:', e));
         });
         video.addEventListener('error', () => {
+          console.error('[player] fatal error:', video.error);
           if (url !== currentLoadingUrl) return;
           updateStatusBadge('Error', CONFIG.BADGE_COLORS.ERROR);
-          showError('Failed to load stream. Please check the URL format and try again.');
+          showError('Failed to load stream: ' + describeMediaError(video.error) + ' (' + url + ')');
         });
       } else {
         showError('HLS playback is not supported in this browser.');

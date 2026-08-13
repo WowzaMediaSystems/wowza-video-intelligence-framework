@@ -41,7 +41,9 @@
         var VLM_MODEL_OPTIONS = [
             { value: 'Qwen/Qwen3-VL-4B-Instruct-FP8', label: 'Qwen3-VL-4B (Qwen)' },
             { value: 'nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8', label: 'Nemotron Nano 12B VL (NVIDIA)' },
-            { value: 'google/gemma-3-4b-it', label: 'Gemma 3 4B (Google)' }
+            { value: 'google/gemma-3-4b-it', label: 'Gemma 3 4B (Google)' },
+            { value: 'nvidia/Cosmos3-Edge', label: 'Cosmos3 Edge (NVIDIA)' },
+            { value: 'nvidia/Cosmos3-Nano', label: 'Cosmos3 Nano (NVIDIA)' }
         ];
         var VLM_KNOWN_MODELS = VLM_MODEL_OPTIONS.map(function(o) { return o.value; });
         // Sentinel <option> value that reveals the custom model-name text input.
@@ -64,6 +66,9 @@
         suppressDirtyTracking = false;
         var statusHideTimer = null;
         var statusClearTimer = null;
+        // Pre-save validation errors stay up until the next save attempt, a change of
+        // stream selection, or another status message replaces them - never on a timer.
+        var statusIsSticky = false;
         var STREAM_CONFIG_SELECTION_STORAGE_KEY = `vif.stream-config.selected-stream.${window.location.host}`;
         FIELD_RULES = VIF.fieldRegistry.deriveFieldRules();
         function formatRuleGuidance(rule) {
@@ -861,6 +866,7 @@
         }
 
         function onStreamSelected() {
+            hideStatus();
             const newFields = document.getElementById('new-stream-fields');
             const deleteBtnTop = document.getElementById('btn-delete-top');
             const cloneBtnTop = document.getElementById('btn-clone-top');
@@ -1336,7 +1342,7 @@
                     const missingFields = [];
                     if (!appName) missingFields.push('Application is required.');
                     if (!streamName) missingFields.push('Stream Name is required.');
-                    showStatus(missingFields.join(' '), true);
+                    showStatus(missingFields.join(' '), true, true);
                     return null;
                 }
             } else {
@@ -1602,6 +1608,11 @@
                 errors.push('Temperature must be between 0 and 2.');
             }
 
+            if (config.vlm_analysis && config.vlm_analysis.max_tokens !== undefined && config.vlm_analysis.max_tokens !== null
+                && (!Number.isFinite(config.vlm_analysis.max_tokens) || !Number.isInteger(config.vlm_analysis.max_tokens)
+                    || config.vlm_analysis.max_tokens < 1 || config.vlm_analysis.max_tokens > 4096)) {
+                errors.push('Max Tokens must be a whole number between 1 and 4096.');
+            }
             // VLM Endpoint URL: blank is legal and inherits the global vlm_analysis default
             // (the placeholder shows what will be used). A typed value has to be something VIS
             // can give the OpenAI SDK — it validates scheme + host (validate_http_endpoint_url)
@@ -2469,13 +2480,15 @@
             document.getElementById('cfg-use-transcoder-warning').style.display = 'block';
         });
 
-        function showStatus(message, isError) {
+        function showStatus(message, isError, sticky) {
             const el = document.getElementById('status-message');
             if (!el) return;
             if (statusHideTimer) clearTimeout(statusHideTimer);
             if (statusClearTimer) clearTimeout(statusClearTimer);
             el.textContent = message;
             el.className = `visible ${isError ? 'error' : 'success'}`;
+            statusIsSticky = !!sticky;
+            if (statusIsSticky) return;
             statusHideTimer = setTimeout(() => {
                 el.classList.remove('visible');
                 statusClearTimer = setTimeout(() => {
@@ -2483,6 +2496,19 @@
                     el.textContent = '';
                 }, 240);
             }, 3000);
+        }
+
+        function hideStatus() {
+            const el = document.getElementById('status-message');
+            statusIsSticky = false;
+            if (!el) return;
+            if (statusHideTimer) clearTimeout(statusHideTimer);
+            if (statusClearTimer) clearTimeout(statusClearTimer);
+            el.classList.remove('visible');
+            statusClearTimer = setTimeout(() => {
+                el.className = '';
+                el.textContent = '';
+            }, 240);
         }
 
         async function getConfig() {
@@ -2522,9 +2548,12 @@
             if (!config) return;
             const validationErrors = collectValidationErrors(config);
             if (validationErrors.length > 0) {
-                showStatus(validationErrors.join(' '), true);
+                showStatus(validationErrors.join(' '), true, true);
                 return;
             }
+            // Only another save attempt clears a sticky validation error, so drop it here
+            // rather than waiting for this save's own status message.
+            hideStatus();
 
             const isNew = isNewStream();
             const apiUrl = isNew

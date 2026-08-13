@@ -1,6 +1,6 @@
-  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.0.2"></script>
+  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.0.3"></script>
 
-  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.2">
+  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.3">
   <style>
     @media (max-width: 767px) {
       .vif-plugin .hidden-xs { display: none !important; }
@@ -24,6 +24,8 @@
       padding: 10px 15px;
       margin-top: 10px;
       color: #a94442;
+      /* Messages carry the failing URL, which has no break opportunities of its own. */
+      overflow-wrap: anywhere;
     }
 
     .vif-plugin .url-input-group {
@@ -613,8 +615,8 @@
     </div>
   </div>
 
-  <script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.2"></script>
-  <script src="wse-plugins/server/vif/js/vif-playback.js?v=1.0.2"></script>
+  <script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.3"></script>
+  <script src="wse-plugins/server/vif/js/vif-playback.js?v=1.0.3"></script>
   <script>
     VIF.playback.init();
   </script>
