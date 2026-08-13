@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.2">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.3">
     <style>
         .vif-plugin {
             --form-label-width: 240px;
@@ -437,22 +437,6 @@
             line-height: 1.4;
         }
 
-        .vif-plugin .event-listener-summary {
-            display: none;
-            font-size: 0.85em;
-            color: #3d4a57;
-            background: #f4f8fc;
-            border: 1px solid #d5e1ef;
-            border-radius: 6px;
-            padding: 8px 10px;
-            margin-bottom: 12px;
-            line-height: 1.45;
-        }
-
-        .vif-plugin .event-listener-summary strong {
-            color: #234f8c;
-        }
-
         .vif-plugin .info-trigger {
             width: 26px;
             height: 26px;
@@ -630,6 +614,61 @@
             line-height: 1.4;
         }
 
+        /* Listener picker is a sized list box, not a dropdown, but keeps the standard
+           two-column row: label left, list in the value column, actions beneath it. */
+        .vif-plugin .listener-list-group {
+            align-items: flex-start;
+        }
+
+        /* Align the label with the list's first row rather than its vertical middle. */
+        .vif-plugin .listener-list-group > label:not(.switch) {
+            padding-top: 7px;
+        }
+
+        .vif-plugin .form-group select.listener-list {
+            flex: 1 1 auto;
+            min-width: 0;
+            max-width: none;
+            box-sizing: border-box;
+            height: auto;
+            padding: 4px;
+            overflow-y: auto;
+        }
+
+        .vif-plugin .listener-list option {
+            padding: 5px 8px;
+            border-radius: 3px;
+            line-height: 1.45;
+        }
+
+        .vif-plugin .listener-list option.listener-disabled {
+            color: #8a8a8a;
+        }
+
+        /* Inert placeholder shown when no listeners are configured. */
+        .vif-plugin .listener-list option.listener-empty {
+            color: #8a8a8a;
+            font-style: italic;
+        }
+
+        .vif-plugin .listener-list-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            flex-basis: 100%;
+            margin-left: calc(var(--form-label-width) + 10px);
+        }
+
+        .vif-plugin .listener-list-actions button {
+            margin-bottom: 0;
+        }
+
+        /* Create sits at the right edge of the row, apart from the selection actions. */
+        .vif-plugin .listener-list-actions #evt-show-new-listener-btn {
+            margin-left: auto;
+        }
+
         .vif-plugin .listener-create-template {
             flex: 0 1 190px;
             min-width: 150px;
@@ -644,12 +683,26 @@
             box-sizing: border-box;
         }
 
+        /* Create form stacks its own labelled rows, so it is a column rather than a form-group row. */
+        .vif-plugin .listener-create-group {
+            flex-direction: column;
+            align-items: stretch;
+            margin-bottom: 12px;
+        }
+
+        /* The UA's auto inline margins would collapse this rule to nothing as a flex item. */
+        .vif-plugin .listener-create-group > hr {
+            width: 100%;
+            margin: 8px 0 12px;
+        }
+
         .vif-plugin .listener-create-actions {
             display: inline-flex;
             align-items: center;
             gap: 8px;
             flex: 0 0 auto;
             white-space: nowrap;
+            margin-left: calc(var(--form-label-width) + 10px);
         }
 
         .vif-plugin .listener-create-actions button {
@@ -752,8 +805,19 @@
                 max-width: none;
             }
 
-            .vif-plugin .field-help {
+            .vif-plugin .field-help,
+.vif-plugin .listener-list-actions,
+.vif-plugin .listener-create-actions {
                 margin-left: 0;
+            }
+
+            /* The single-column fallback stacks label/list/actions full width. */
+            .vif-plugin .listener-list-group {
+                align-items: stretch;
+            }
+
+            .vif-plugin .listener-list-group > label:not(.switch) {
+                padding-top: 0;
             }
 
             .vif-plugin .top-config-toolbar-main {
@@ -1501,7 +1565,7 @@
                     </div>
                     <div class="form-group">
                         <label>Max Tokens</label>
-                        <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" step="1">
+                        <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" max="4096" step="1">
                         <div class="field-help">Maximum number of tokens in the VLM response.</div>
                     </div>
                 </div>
@@ -1660,39 +1724,44 @@
                 Event Listeners
             </div>
             <div class="collapsible-body">
-            <div style="display:flex; align-items:center; margin-bottom:10px;">
-                <div class="section-help" style="margin-bottom:0; flex:1;">
-                    Event listeners are triggered by detections. Use Select Listener to Edit for an existing listener or Create New Listener to add another one. Listener type stays fixed after creation.
-                </div>
-                <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()" style="flex-shrink:0; margin-left:12px;">Create New Listener</button>
+            <div class="section-help">
+                Event listeners are triggered by detections. Pick one from the Configured Listeners list to edit it, or Create New Listener to add another one. Listener type stays fixed after creation.
             </div>
-            <div id="evt-active-summary" class="event-listener-summary" aria-live="polite"></div>
             <div id="evt-synthetic-overlay-warning" class="inline-warning" style="display:none;"></div>
             <div class="form-group" id="cfg-rollup-batch-interval-group">
                 <label>Rollup/Batch Time</label>
                 <input type="number" id="cfg-rollup-batch-interval" value="" placeholder="2" min="0" max="30" step="0.1">
                 <div class="field-help">Time in seconds to trigger event listeners with a method of rollup or batch.</div>
             </div>
-            <div id="evt-existing-listener-row" class="form-group" style="display:none;">
-                <label style="min-width:auto; text-align:left;">Select Listener to Edit</label>
-                <select id="evt-listener-select" onchange="onListenerSelected()" style="flex:1; font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #ccc; border-radius:4px; background:#fff;">
-                    <option value="">Select listener to edit...</option>
-                </select>
-                <button id="evt-cancel-listener-btn" type="button" class="btn-secondary" onclick="cancelListenerSelection()" style="display:none;">Cancel</button>
-                <button id="evt-remove-listener-btn" class="btn-danger" onclick="removeListener()" style="display:none;">Remove</button>
+            <div id="evt-existing-listener-row" class="form-group listener-list-group" style="display:none;">
+                <label>Configured Listeners</label>
+                <select id="evt-listener-select" class="listener-list" size="6" onchange="onListenerSelected()"></select>
+                <div class="listener-list-actions">
+                    <button id="evt-cancel-listener-btn" type="button" class="btn-secondary" onclick="cancelListenerSelection()" style="display:none;">Cancel</button>
+                    <button id="evt-remove-listener-btn" class="btn-danger" onclick="removeListener()" style="display:none;">Remove</button>
+                    <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()">Create New Listener</button>
+                </div>
             </div>
             <div id="evt-warning-message" class="inline-warning" style="display:none;"></div>
-            <div id="evt-new-listener-name-group" class="form-group" style="display:none;">
-                <label style="min-width:auto; text-align:left;">Create New Listener</label>
-                <select id="evt-new-listener-template" class="listener-create-template">
-                    <option value="">Select listener type...</option>
-                </select>
-                <input type="text" id="evt-new-listener-name" class="listener-create-name-field" style="display:none;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <div id="evt-new-listener-name-group" class="listener-create-group" style="display:none;">
+                <hr>
+                <div class="form-section-title">Create New Listener</div>
+                <div class="form-group">
+                    <label>Listener Type</label>
+                    <select id="evt-new-listener-template" class="listener-create-template">
+                        <option value="">Select listener type...</option>
+                    </select>
+                    <div class="field-help">The type stays fixed after creation.</div>
+                </div>
+                <div class="form-group" id="evt-new-listener-name-row">
+                    <label>Listener Name</label>
+                    <input type="text" id="evt-new-listener-name" class="listener-create-name-field" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <div class="field-help">Must be unqiue. Edit the suggested name before creating if you want a different one.</div>
+                </div>
                 <div class="listener-create-actions">
                     <button id="evt-add-listener-btn" onclick="addNewListener()">Create</button>
                     <button id="evt-cancel-new-listener-btn" type="button" class="btn-secondary" onclick="cancelNewListenerForm()" style="display:none;">Cancel</button>
                 </div>
-                <div class="field-help" style="margin-left:0;">Choose a listener type, then create it with a unique name. You can edit the suggested name before creating.</div>
             </div>
             <hr>
             <div id="evt-listener-fields" style="display:none;">
@@ -1747,10 +1816,10 @@
 
     </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.2"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.0.2"></script>
-<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.0.2"></script>
-<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.0.2"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.3"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.0.3"></script>
+<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.0.3"></script>
+<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.0.3"></script>
 <script>
     VIF.streamConfig.init();
 </script>

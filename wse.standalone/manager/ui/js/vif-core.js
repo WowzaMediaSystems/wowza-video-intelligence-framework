@@ -7,7 +7,7 @@
     // automatically by the CI version-bump workflow (see
     // .github/workflows/reusable-update-version-file.yml) in the same
     // commit that bumps VERSION.
-    var UI_VERSION = '1.0.2';
+    var UI_VERSION = '1.0.3';
 
     // ── credential / serverUrl resolution ───────────────────────────────────
     // Consolidates the near-identical boilerplate previously duplicated at

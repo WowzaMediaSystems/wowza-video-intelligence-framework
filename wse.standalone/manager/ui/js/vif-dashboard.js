@@ -3,15 +3,9 @@
     var VIF = window.VIF;
     VIF.dashboard = VIF.dashboard || {};
 
-    // Single source of truth for the dashboard's warn/alert color
-    // thresholds (metric cards, GPU-table cells, and setFramesDetected's
-    // "frames analyzed rate" coloring).
+    // Thresholds for setFramesDetected's "frames analyzed rate" coloring. CPU and
+    // GPU readings are reported without threshold shading.
     var DASHBOARD_THRESHOLDS = {
-        CPU_PCT: { warn: 50, alert: 70 },
-        GPU_UTIL_PCT: { warn: 50, alert: 70 },
-        GPU_MEMORY_PCT: { warn: 40, alert: 70 },
-        GPU_ENCODE_PCT: { warn: 50, alert: 70 },
-        GPU_DECODE_PCT: { warn: 50, alert: 70 },
         FRAMES_ANALYZED_RATE_PCT: { alert: 25, warn: 50 }
     };
 
@@ -44,7 +38,9 @@
 
         jsonData = null;
         var lastStreamCount=0;
-        var thumbnailsOn = false;
+        // Host-scoped so separate Engines the same browser talks to keep their own preference.
+        var THUMBNAILS_STORAGE_KEY = `vif.dashboard.thumbnails.${window.location.host}`;
+        var thumbnailsOn = getStoredThumbnailsOn();
         var skipStatusUpdate = 0;
         var dashboardMutationInFlight = false;
         var liveUpdatesPromise = null;
@@ -272,7 +268,7 @@
                             : 'Connecting to Engine&hellip;',
                         isOffline ? 'alert' : 'info'
                     );
-                    renderHostCard('host-display', "WSE", jsonData.host.wse_version, undefined, "a","e");
+                    renderHostCard('host-display', "WSE", jsonData.host.wse_version);
                     renderInferenceGroups([]);
                     const tbody = document.getElementById('streams-body');
                     const thumbnailDisplay = document.getElementById('thumbnail-display');
@@ -779,11 +775,6 @@
                     td.setAttribute('data-metric', col.key);
                     if (cell.value != null) {
                         td.textContent = `${Number(cell.value).toFixed(0)}${cell.unit || ''}`;
-                        if (col.alert != null && cell.value > col.alert) {
-                            td.classList.add('gpu-cell-alert');
-                        } else if (col.warn != null && cell.value > col.warn) {
-                            td.classList.add('gpu-cell-warn');
-                        }
                     } else {
                         td.textContent = '-';
                     }
@@ -799,24 +790,16 @@
             return card;
         }
 
-        function renderHostCard(container, label, value, unit, yellow, red)
+        function renderHostCard(container, label, value, unit)
         {
             const hostContainer = document.getElementById(container);
 
-            // // Alert Logic for Host
-            let alertClass = '';
-            if (value > yellow) {
-                alertClass = 'card-warn';
-            }
-            if (value > red) {
-                alertClass = 'card-alert';
-            }
             if(unit === undefined) {
                 unit = '';
             }
 
             const card = document.createElement('div');
-            card.className = `metric-card ${alertClass}`;
+            card.className = 'metric-card';
             card.innerHTML = `
                 <div class="metric-label">${label}</div>
                 <div class="metric-value">${value}${unit}</div>
@@ -829,8 +812,7 @@
         {
             renderHostCard('host-display', "WSE", jsonData.host.wse_version);
             renderHostCard('host-display', "WSE VIF Module", jsonData.host.vif_module_version);
-            renderHostCard('host-display', "CPU", Number(jsonData.host.cpu_avg).toFixed(0), "%",
-                DASHBOARD_THRESHOLDS.CPU_PCT.warn, DASHBOARD_THRESHOLDS.CPU_PCT.alert);
+            renderHostCard('host-display', "CPU", Number(jsonData.host.cpu_avg).toFixed(0), "%");
 
             const infoLine = document.getElementById('host-nvidia');
             if(jsonData.host.nvidia_gpu_type != 'unknown')
@@ -856,20 +838,16 @@
                 if (gpuIds.length > 0) {
                     const pct = (map, id) => (map && map[id] != null) ? Number(map[id]) : null;
                     renderGpuTableCard(document.getElementById('host-stats'), 'host-gpu-table', [
-                        { key: 'utilization', label: 'Utilization',
-                            warn: DASHBOARD_THRESHOLDS.GPU_UTIL_PCT.warn, alert: DASHBOARD_THRESHOLDS.GPU_UTIL_PCT.alert },
+                        { key: 'utilization', label: 'Utilization' },
                         // nvidia-smi's memory-CONTROLLER utilization (how busy
                         // the memory bus was), NOT VRAM in use - labeled "Mem
                         // Bandwidth" to distinguish it from the Inference
                         // groups' "Memory" column, which does show real VRAM
                         // used/total. Honest label + tooltip.
                         { key: 'mem_bandwidth', label: 'Mem Bandwidth',
-                            tip: "Percent of time the GPU's memory controller was busy — not VRAM in use.",
-                            warn: DASHBOARD_THRESHOLDS.GPU_MEMORY_PCT.warn, alert: DASHBOARD_THRESHOLDS.GPU_MEMORY_PCT.alert },
-                        { key: 'encode', label: 'Encode',
-                            warn: DASHBOARD_THRESHOLDS.GPU_ENCODE_PCT.warn, alert: DASHBOARD_THRESHOLDS.GPU_ENCODE_PCT.alert },
-                        { key: 'decode', label: 'Decode',
-                            warn: DASHBOARD_THRESHOLDS.GPU_DECODE_PCT.warn, alert: DASHBOARD_THRESHOLDS.GPU_DECODE_PCT.alert },
+                            tip: "Percent of time the GPU's memory controller was busy — not VRAM in use." },
+                        { key: 'encode', label: 'Encode' },
+                        { key: 'decode', label: 'Decode' },
                     ], gpuIds.map((id) => ({
                         device: id,
                         cells: metricMaps.map((map) => ({ value: pct(map, id), unit: '%' })),
@@ -905,10 +883,15 @@
 
                 const title = document.createElement('div');
                 title.className = 'metric-group-title';
-                title.textContent = instance.version
+                // The tooltip belongs on an inline span, not the full-width row: a title
+                // on the <div> fires anywhere across the empty space beside the heading.
+                const titleText = document.createElement('span');
+                titleText.className = 'metric-group-title-text';
+                titleText.textContent = instance.version
                     ? `Inference — ${instance.host} (${instance.version})`
                     : `Inference — ${instance.host}`;
-                title.title = 'If the Inference Service runs on the same machine as WSE, this may be the same physical GPU shown under WSE Host.';
+                titleText.title = 'If the Inference Service runs on the same machine as WSE, this may be the same physical GPU shown under WSE Host.';
+                title.appendChild(titleText);
                 group.appendChild(title);
 
                 const streamList = Array.isArray(instance.streams) ? instance.streams : [];
@@ -944,17 +927,14 @@
                 // cpu_pct is null (not 0) on older VIS builds with no CPU gauge -
                 // omit the card entirely rather than show a misleading "0%"/"-".
                 if (instance.cpu_pct != null) {
-                    renderHostCard(grid.id, "CPU", Number(instance.cpu_pct).toFixed(0), "%",
-                        DASHBOARD_THRESHOLDS.CPU_PCT.warn, DASHBOARD_THRESHOLDS.CPU_PCT.alert);
+                    renderHostCard(grid.id, "CPU", Number(instance.cpu_pct).toFixed(0), "%");
                 }
 
                 const gpus = Array.isArray(instance.gpus) ? instance.gpus : [];
                 if (gpus.length > 0) {
                     renderGpuTableCard(group, `vis-instance-${index}-gpu-table`, [
-                        { key: 'utilization', label: 'Utilization',
-                            warn: DASHBOARD_THRESHOLDS.GPU_UTIL_PCT.warn, alert: DASHBOARD_THRESHOLDS.GPU_UTIL_PCT.alert },
-                        { key: 'memory', label: 'Memory',
-                            warn: DASHBOARD_THRESHOLDS.GPU_MEMORY_PCT.warn, alert: DASHBOARD_THRESHOLDS.GPU_MEMORY_PCT.alert },
+                        { key: 'utilization', label: 'Utilization' },
+                        { key: 'memory', label: 'Memory' },
                     ], gpus.map((gpu, gpuIndex) => {
                         const hasMemTotals = gpu.memory_used_bytes != null && gpu.memory_total_bytes;
                         const memPct = hasMemTotals ? (gpu.memory_used_bytes / gpu.memory_total_bytes) * 100 : null;
@@ -981,9 +961,29 @@
             });
         }
 
+        function getStoredThumbnailsOn()
+        {
+            try {
+                return window.localStorage.getItem(THUMBNAILS_STORAGE_KEY) === 'true';
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function storeThumbnailsOn(isOn)
+        {
+            try {
+                window.localStorage.setItem(THUMBNAILS_STORAGE_KEY, isOn ? 'true' : 'false');
+            } catch (error) {
+                // Ignore storage issues and keep the page working normally.
+            }
+        }
+
         function updateThumbnail()
         {
-            thumbnailsOn = !thumbnailsOn;
+            const toggle = document.getElementById('thumbnailToggle');
+            thumbnailsOn = toggle ? toggle.checked : !thumbnailsOn;
+            storeThumbnailsOn(thumbnailsOn);
             lastStreamCount = 0;
             renderDashboard();
         }
@@ -1262,6 +1262,7 @@
         initJson();
         renderDashboard();
         thumbnails = document.getElementById('thumbnailToggle');
+        thumbnails.checked = thumbnailsOn;
         thumbnails.addEventListener('change', updateThumbnail.bind());
 
         renderdashboardId = setInterval(renderDashboard, 1000);

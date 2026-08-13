@@ -112,22 +112,6 @@
     word-break: break-all;
 }
 
-.vif-plugin .card-alert {
-    border: 1px solid var(--alert-color);
-    background-color: var(--alert-bg);
-}
-.vif-plugin .card-alert .metric-value {
-    color: var(--alert-color);
-}
-
-.vif-plugin .card-warn {
-    border: 1px solid var(--warn-color);
-    background-color: var(--warn-bg);
-}
-.vif-plugin .card-warn .metric-value {
-    color: var(--warn-color);
-}
-
 .vif-plugin .text-alert { color: var(--alert-color) !important; }
 .vif-plugin .text-warn { color: var(--warn-color) !important; }
 .vif-plugin .text-good { color: var(--good-color) !important; }
@@ -437,18 +421,14 @@
     border-top: 1px solid #e0e0e0;
 }
 
-/* Per-cell warn/alert, same tokens as .card-warn/.card-alert. */
-.vif-dashboard .gpu-table td.gpu-cell-warn {
-    color: var(--warn-color);
-    background: var(--warn-bg);
-}
-.vif-dashboard .gpu-table td.gpu-cell-alert {
-    color: var(--alert-color);
-    background: var(--alert-bg);
-}
-
 /* An Inference group with no CPU card leaves its pills grid empty - don't
  * let the empty container's margin push the GPU table down. */
 .vif-dashboard .metric-grid:empty {
     margin-bottom: 0;
+}
+
+/* The Inference group heading's tooltip lives on this inline span so it only
+ * triggers over the text, not the full width of the block-level title row. */
+.vif-dashboard .metric-group-title-text[title] {
+    cursor: help;
 }
