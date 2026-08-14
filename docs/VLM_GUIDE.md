@@ -117,6 +117,8 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
 | GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
 
+> **On a 40 GB+ GPU, read [The shipped model files are tuned for small GPUs](#the-shipped-model-files-are-tuned-for-small-gpus--undo-that-on-a-big-card) first.** The files under `vlm-env/` cap CUDA graph capture (and, for two models, disable it) so each model boots on the smallest card it fits on. That trade costs throughput on a large card and is not auto-detected — remove the caps yourself.
+
 GPU placement is the one thing worth a decision on multi-GPU machines, because the VLM and the detection models claim memory differently: detection models (object detection, scene detection, …) are allocated lazily, as streams start using them, while the VLM is eager — vLLM reserves 90% of one card the moment the container starts. Give the VLM a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detection models use the rest. To run detection models on the same card as the VLM (e.g. a single-GPU machine that must run everything), lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) in a local copy of the model's env file (see [Choosing the model](#choosing-the-model)) so they still fit.
 
 ---
@@ -143,6 +145,17 @@ docker compose --profile default --profile vlm up -d
 The VLM serves on `http://vlm.docker:8000/v1`; each stream's `model_name` must match the served model. The Manager UI's **Verify** button handles this for you: it queries the endpoint for the models it actually serves (a `GET /models` issued server-side by the Engine, so compose-internal hostnames work) and adopts the served model into the stream's config automatically.
 
 To tune the settings of one of the models we provide, copy its file to a local name instead of editing it in place (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local` in `.env`) — local copies survive framework upgrades untouched.
+
+### The shipped model files are tuned for small GPUs — undo that on a big card
+
+**Every file in `vlm-env/` is tuned to _boot_ on the smallest card its model fits on, not to run _fastest_ on the largest.** If you have a 40 GB+ GPU, the two CUDA-graph flags below leave performance on the table: both trade throughput for VRAM, and the container has no way to detect that you don't need the trade.
+
+| Flag, as shipped | Why it's there | On a 40 GB+ card |
+|---|---|---|
+| `--max-cudagraph-capture-size=64` in `VLM_EXTRA_ARGS` (all files except `cosmos-nano`) | vLLM captures CUDA graphs for batch sizes up to 512 by default, costing extra VRAM and startup time. Capping capture at batch 64 buys that memory back so the model fits at all | **Remove it.** With the cap in place, any batch above 64 runs on the slower eager path instead of a captured graph — a throughput ceiling you're paying for nothing |
+| `--enforce-eager` in `VLM_EXTRA_ARGS` (`nemotron`, `cosmos-nano`) | Disables CUDA graph capture outright — the last resort for models whose weights leave no room even for capped capture | **Remove it.** This costs per-request latency on *every* request, not just large batches. It also makes `--max-cudagraph-capture-size` a no-op, so the two flags are never both useful |
+
+To undo them, edit the model file you serve — `vlm-env/<VLM_CONF>.env`, so `vlm-env/qwen.env` by default — and delete the flag from `VLM_EXTRA_ARGS`. If it was the only flag on the line, drop the whole line; then recreate the container (`docker compose --profile default --profile vlm up -d`) so vLLM restarts with the new arguments.
 
 ### Running two models at the same time
 
@@ -199,7 +212,7 @@ A model's config lives in a per-model env file, `vlm-env/<name>.env` (`KEY=VALUE
 | `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | unset | Per-image resolution caps (Qwen-style processor kwargs; some processors reject them). `qwen.env` sets `401408` / `3136` ≈ 512 vision tokens/image |
 | `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
 | `VLM_PORT` | `8000` | Served port; the container healthcheck follows it. If you publish the endpoint, mirror the value in `.env` so the `ports:` mapping matches |
-| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`) |
+| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`). The shipped files put their small-GPU CUDA-graph caps here — [drop them on a big GPU](#the-shipped-model-files-are-tuned-for-small-gpus--undo-that-on-a-big-card) |
 
 Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
 
