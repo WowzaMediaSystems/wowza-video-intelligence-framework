@@ -34,6 +34,7 @@ services:
              - ./wse/conf:/usr/local/WowzaStreamingEngine/conf
              - ./wse/conf.modules:/usr/local/WowzaStreamingEngine/conf.modules
              - ./wse/content:/usr/local/WowzaStreamingEngine/content
+             - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
 
