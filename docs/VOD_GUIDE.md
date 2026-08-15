@@ -195,7 +195,7 @@ The manifest records what was submitted either way, so "which configuration prod
 - **Audio** is ignored; only the video track is analyzed.
 
 > [!NOTE]
-> Frame-decoded detector types (`object`, `scene`, `vlm`) decode the file with **ffmpeg**, which must be available on the Engine's `PATH`. Clip-based jobs (`synthetic`) relay encoded H.264 and do not need it.
+> Frame-decoded detector types (`object`, `scene`, `vlm`) decode the file with **ffmpeg**, which must be available on the Engine's `PATH`. Framework Engine images with the VOD feature ship a static build; a bring-your-own (standalone) Engine must have ffmpeg installed. Clip-based jobs (`synthetic`) relay encoded H.264 and do not need it.
 
 The `GET /vod/files` endpoint lists what is currently analyzable (newest first, up to 500 entries, up to 6 directory levels deep) with sizes and modification times.
 
@@ -258,7 +258,7 @@ If the Manager is served over HTTPS, browsers block plain-HTTP media: point the 
 
 ## On-disk layout
 
-Everything a job leaves behind lives under one directory (`vod.jobs_dir`, default `vif-vod-jobs/` under the Engine install directory):
+Everything a job leaves behind lives under one directory (`vod.jobs_dir`, default `vif-vod-jobs/` under the Engine install directory — the compose file bind-mounts it to `./wse/vif-vod-jobs` so job history survives container recreation):
 
 ```text
 vif-vod-jobs/
