@@ -74,7 +74,22 @@ Add  `--help` to the above commands to see all the options available.
 			<Value>authorized</Value>
 			<Type>String</Type>
 		</Property>
+
+		<Property>
+			<Name>restUserHTTPHeaders</Name>
+			<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag</Value>
+			<Type>String</Type>
+		</Property>
 	```
+
+	The `restUserHTTPHeaders` property is the CORS policy for the Engine REST API. The
+	Manager UI calls the API cross-origin (the Manager and the Engine REST interface run
+	on different ports), and the VIF v2 API's concurrency handshake needs `If-Match`
+	allowed on requests and `ETag` exposed on responses — without them, every
+	configuration save from the browser fails its CORS preflight or cannot read the
+	revision it has to quote, which looks like the Engine being unreachable while plain
+	reads keep working. The Docker images ship this policy; an Engine provisioned by
+	hand (or one whose `Server.xml` predates it) needs the property above.
 
 ### Application.xml
 * add application Modules to each Application.xml that VIF will run under.
