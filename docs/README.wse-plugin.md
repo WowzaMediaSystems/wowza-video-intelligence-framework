@@ -76,6 +76,22 @@ Add  `--help` to the above commands to see all the options available.
 		</Property>
 	```
 
+* add the REST API CORS policy to the `<Properties>` block inside `<RESTInterface>` in Server.xml
+	```xml
+	<RESTInterface>
+		...
+		<Properties>
+			<Property>
+				<Name>restUserHTTPHeaders</Name>
+				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag</Value>
+				<Type>String</Type>
+			</Property>
+		</Properties>
+	</RESTInterface>
+	```
+
+	The Manager UI calls the Engine REST API cross-origin (Manager on 8088, Engine REST on 8087), and the v2 API's concurrency handshake needs `If-Match` allowed on requests and `ETag` exposed on responses. Without this property reads still work but every save from the Manager fails, which is easy to mistake for a Manager bug. The compose stack's `Server.xml` already carries it; an existing Engine's stock `Server.xml` does not.
+
 ### Application.xml
 * add application Modules to each Application.xml that VIF will run under.
 	```xml
