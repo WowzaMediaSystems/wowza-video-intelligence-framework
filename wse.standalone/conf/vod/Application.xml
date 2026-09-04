@@ -269,6 +269,16 @@
 				<Name>amfToID3ConversionVerboseMaximum</Name>
 				<Value>0</Value>
 			</Property>
+			<Property>
+				<Name>OverlayInitTransparentOverlay</Name>
+				<Value>false</Value>
+				<Type>Boolean</Type>
+			</Property>
+			<Property>
+				<Name>OverlayDebugLogs</Name>
+				<Value>false</Value>
+				<Type>Boolean</Type>
+			</Property>
 		</Properties>
 	</Application>
 </Root>
