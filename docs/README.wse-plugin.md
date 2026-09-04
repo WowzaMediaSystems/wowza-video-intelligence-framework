@@ -93,6 +93,13 @@ Add  `--help` to the above commands to see all the options available.
 	The Manager UI calls the Engine REST API cross-origin (Manager on 8088, Engine REST on 8087), and the v2 API's concurrency handshake needs `If-Match` allowed on requests and `ETag` exposed on responses. Without this property reads still work but every save from the Manager fails, which is easy to mistake for a Manager bug. The compose stack's `Server.xml` already carries it; an existing Engine's stock `Server.xml` does not.
 
 ### Application.xml
+
+Both `live` and `vod` need these changes, and the installer applies them to both by
+default. `live` is where a stream is analysed; `vod` is where an analysed file is
+played back, and the overlays and ID3 an analysis produces reach a viewer only
+through the application serving that playback. An install that configures `live`
+alone analyses correctly and then has nowhere to watch the result.
+
 * add application Modules to each Application.xml that VIF will run under.
 	```xml
 	<Modules>

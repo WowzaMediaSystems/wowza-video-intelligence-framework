@@ -41,7 +41,7 @@ The following folders contain examples of the changes required for the WSE XML f
 	sudo cp -r wse.standalone/transcoder /usr/local/WowzaStreamingEngine/
 	```
 
-2. Apply the required changes to `Server.xml` and `Application.xml`. See [`Server.xml`](../docs/README.wse-plugin.md#serverxml) and [`Application.xml`](../docs/README.wse-plugin.md#applicationxml) for the full XML snippets (ServerListeners, Server Properties, Application Modules, Application Properties, and Transcoder Templates).
+2. Apply the required changes to `Server.xml` and `Application.xml` — to **both** the `live` and the `vod` application. `conf/live/Application.xml` and `conf/vod/Application.xml` here are the two finished examples: `live` analyses a stream, `vod` serves the playback an analysis is watched through. See [`Server.xml`](../docs/README.wse-plugin.md#serverxml) and [`Application.xml`](../docs/README.wse-plugin.md#applicationxml) for the full XML snippets (ServerListeners, Server Properties, Application Modules, Application Properties, and Transcoder Templates).
 
 3. Copy `WMSManager.war` to the `manager` and `manager/lib` directory of your WSE install. This replaces the WSE Manager UI with the VIF-enabled version.
 	```shell
