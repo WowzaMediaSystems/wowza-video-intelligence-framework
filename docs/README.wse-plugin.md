@@ -95,10 +95,10 @@ Add  `--help` to the above commands to see all the options available.
 ### Application.xml
 
 Both `live` and `vod` need these changes, and the installer applies them to both by
-default. `live` is where a stream is analysed; `vod` is where an analysed file is
-played back, and the overlays and ID3 an analysis produces reach a viewer only
-through the application serving that playback. An install that configures `live`
-alone analyses correctly and then has nowhere to watch the result.
+default. `live` is where a stream is analysed; `vod` is the application that serves
+the files under the content directory, which is where a VOD job's source lives. An
+install that configures `live` alone analyses those files correctly and then has
+nothing to serve them back.
 
 * add application Modules to each Application.xml that VIF will run under.
 	```xml
