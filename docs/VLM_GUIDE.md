@@ -157,13 +157,6 @@ To tune the settings of one of the models we provide, copy its file to a local n
 
 To undo them, edit the model file you serve — `vlm-env/<VLM_CONF>.env`, so `vlm-env/qwen.env` by default — and delete the flag from `VLM_EXTRA_ARGS`. If it was the only flag on the line, drop the whole line; then recreate the container (`docker compose --profile default --profile vlm up -d`) so vLLM restarts with the new arguments.
 
-### Structured output
-
-Every shipped model file also carries `--structured-outputs-config {"backend":"xgrammar","disable_any_whitespace":true}` in `VLM_EXTRA_ARGS`, and a file you add should keep it. It only affects requests that carry a JSON schema (VIS's class-based detection and verification, any stream `response_schema`), and it does two things:
-
-- **No free whitespace between JSON tokens.** By default the grammar lets the model emit any amount of spaces and newlines between tokens, and small models can fall into padding an answer with spaces until `max_tokens` runs out — the answer arrives truncated, fails to parse, and the window counts as unanswered. Compact JSON removes that failure mode, saves tokens and speeds requests up (measured: a fifth of Cosmos3-Edge's answers truncated with the default grammar, none without, at three times the throughput; Qwen3-VL unchanged in quality).
-- **The xgrammar backend, named explicitly.** vLLM requires a named backend for the whitespace setting. xgrammar compiles every schema the Manager UI's schema builder can produce and every schema VIS generates. A hand-written schema that uses `multipleOf`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `patternProperties`, `propertyNames`, or an unusual string `format` is rejected by the endpoint instead of silently routed to another backend; VIS reports the window as degraded. If you need one of those features, drop the setting from your model file.
-
 ### Running two models at the same time
 
 The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`, which adds `vlm-2`:
@@ -181,7 +174,7 @@ Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-c
 
 ### Adding a supported model
 
-1. Add `vlm-env/<name>.env` — `VLM_MODEL=<hf id>` plus any tuned `VLM_*` knobs (copy an existing file; flags with no dedicated knob go in `VLM_EXTRA_ARGS`, and keep the shipped `--structured-outputs-config` there — see [Structured output](#structured-output)).
+1. Add `vlm-env/<name>.env` — `VLM_MODEL=<hf id>` plus any tuned `VLM_*` knobs (copy an existing file; flags with no dedicated knob go in `VLM_EXTRA_ARGS`).
 2. Serve it: set `VLM_CONF=<name>` in `.env` and `docker compose --profile default --profile vlm up -d`.
 3. Set the stream's `model_name` to the model id.
 
@@ -219,7 +212,7 @@ A model's config lives in a per-model env file, `vlm-env/<name>.env` (`KEY=VALUE
 | `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | unset | Per-image resolution caps (Qwen-style processor kwargs; some processors reject them). `qwen.env` sets `401408` / `3136` ≈ 512 vision tokens/image |
 | `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
 | `VLM_PORT` | `8000` | Served port; the container healthcheck follows it. If you publish the endpoint, mirror the value in `.env` so the `ports:` mapping matches |
-| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`). The shipped files put their small-GPU CUDA-graph caps here — [drop them on a big GPU](#the-shipped-model-files-are-tuned-for-small-gpus--undo-that-on-a-big-card) — and the [structured output](#structured-output) setting, which stays |
+| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`). The shipped files put their small-GPU CUDA-graph caps here — [drop them on a big GPU](#the-shipped-model-files-are-tuned-for-small-gpus--undo-that-on-a-big-card) |
 
 Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
 
