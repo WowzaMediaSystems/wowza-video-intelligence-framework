@@ -220,9 +220,6 @@ What the job resolved to is recorded on it either way, so "which configuration p
 - **Location:** files are named **relative to the content directory** (the VOD settings' `content_dir`, by default the Engine's `content/` folder — `./wse/content` in a compose checkout). Subdirectories work (`archive/cam3/monday.mp4`); paths that resolve outside the content root are refused.
 - **Audio** is ignored; only the video track is analyzed.
 
-> [!NOTE]
-> Frame-decoded detector types (`object`, `scene`, `vlm`) decode the file **in process**, with the MainConcept decoder the Engine ships — there is nothing to install and no external tool to put on the `PATH`. An Engine whose installation is missing that decoder library fails such a job with the reason rather than falling back to something else. Clip-based jobs (`synthetic`) relay encoded H.264 and never decode a frame.
-
 `GET /vod/files` lists what is currently analyzable (newest first, up to 500 entries, up to 6 directory levels deep) with sizes and modification times; `POST /vod/files?file=<relative path>` puts one there, the raw bytes as the body; `DELETE /vod/files?file=<relative path>` removes one, refused with `409` while a queued or running job is using it.
 
 ## Outputs
