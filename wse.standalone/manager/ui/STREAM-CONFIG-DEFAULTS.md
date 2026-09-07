@@ -4,7 +4,7 @@ This page is a quick reference for how defaults are handled by the VIF Stream Co
 
 ## Config-Driven Defaults
 
-These values are loaded from the VIF config API (`/v1/server/plugin/vif/config`), stored in `defaultConfig`, and applied when `+ New Stream Config...` is selected.
+These values are loaded from the VIF v2 API (the default config at `/v2/vif/persist/configs/default`, plus the model catalog and listener types), flattened into `defaultConfig`, and applied when `+ New Stream Config...` is selected.
 
 Changes to the top-level defaults in [Default.json](/docker/conf.modules/vif/Default.json) should flow through to new stream configs for:
 
@@ -80,6 +80,19 @@ These are defined inline under `window.VIF_LISTENER_PROPERTIES`:
 - `ObjectTracking.overlays`
 - `ObjectTracking.untracked_object_color`
 - ROI defaults like `name`, `x`, `y`, `x2`, `y2`, `triggers`, `count_max`, etc.
+
+### Listener Requirements
+
+Each `listeners/<Type>.js` descriptor carries a `requires` entry mirroring that sink's Java
+`IVifEventListener.requires()` declaration, as enum-name strings (`LIVE_STREAM`, `APP_INSTANCE`,
+`RENDER_TARGET`, `WALL_CLOCK`, `JOB_INFO`, `MEDIA_TIMELINE`). It is read-only and nothing in the UI
+consumes it yet: a host runs a sink only where it offers everything the sink requires, so this is
+what a host-aware view would grey a sink by. Update it whenever the Java declaration changes.
+
+- `LogFileEvent`, `WebhookEvent2`: `[]` — run anywhere
+- `Id3Event`: `['LIVE_STREAM']`
+- `OverlayEvent`: `['RENDER_TARGET']`
+- `ObjectTracking`: `['LIVE_STREAM']` — declares nothing of its own, so this is the interface default
 
 ### Validation Rules
 

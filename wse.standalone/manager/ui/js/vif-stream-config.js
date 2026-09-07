@@ -4,10 +4,6 @@
     VIF.streamConfig = VIF.streamConfig || {};
 
     VIF.streamConfig.init = async function () {
-        var resolvedServer = VIF.core.resolveServer();
-        var serverUrl = resolvedServer.serverUrl;
-        var encodedCredentials = resolvedServer.encodedCredentials;
-
         var COCO_CLASSES = ['airplane', 'apple', 'backpack', 'banana', 'baseball bat', 'baseball glove', 'bear', 'bed', 'bench', 'bicycle', 'bird', 'boat', 'book', 'bottle', 'bowl', 'broccoli', 'bus', 'cake', 'car', 'carrot', 'cat', 'cell phone', 'chair', 'clock', 'couch', 'cow', 'cup', 'dining table', 'dog', 'donut', 'elephant', 'fire hydrant', 'fork', 'frisbee', 'giraffe', 'hair drier', 'handbag', 'horse', 'hot dog', 'keyboard', 'kite', 'knife', 'laptop', 'microwave', 'motorcycle', 'mouse', 'orange', 'oven', 'parking meter', 'person', 'pizza', 'potted plant', 'refrigerator', 'remote', 'sandwich', 'scissors', 'sheep', 'sink', 'skateboard', 'skis', 'snowboard', 'spoon', 'sports ball', 'stop sign', 'suitcase', 'surfboard', 'teddy bear', 'tennis racket', 'tie', 'toaster', 'toilet', 'toothbrush', 'traffic light', 'train', 'truck', 'tv', 'umbrella', 'vase', 'wine glass', 'zebra'];
 
         function loadVlmModules() {
@@ -23,6 +19,11 @@
         var vlmModulesPromise = loadVlmModules();
 
         var streamsList = [];
+        // The resource each dropdown entry addresses, keyed by its option value:
+        // {kind: 'group'|'override', name?, app, stream}. A group config addresses a
+        // pattern; an override addresses one literal stream, and the two have their
+        // own routes.
+        var streamRegistry = {};
         defaultConfig = {};
         // Built-in VLM fallbacks matching the vLLM sidecar bundled with the Video Intelligence
         // framework (docker compose --profile vlm). Used to prefill the VLM fields only when
@@ -37,14 +38,8 @@
         // Models offered as explicit options in the VLM Model Name dropdown; the <select>
         // options are populated from this list at init (stream-config.html only carries the
         // fixed "Other…" entry). A stored model_name outside this set loads into the "Other"
-        // custom text input.
-        var VLM_MODEL_OPTIONS = [
-            { value: 'Qwen/Qwen3-VL-4B-Instruct-FP8', label: 'Qwen3-VL-4B (Qwen)' },
-            { value: 'nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8', label: 'Nemotron Nano 12B VL (NVIDIA)' },
-            { value: 'google/gemma-3-4b-it', label: 'Gemma 3 4B (Google)' },
-            { value: 'nvidia/Cosmos3-Edge', label: 'Cosmos3 Edge (NVIDIA)' },
-            { value: 'nvidia/Cosmos3-Nano', label: 'Cosmos3 Nano (NVIDIA)' }
-        ];
+        // custom text input. The list itself is shared with the VOD inline editor.
+        var VLM_MODEL_OPTIONS = VIF.fieldRegistry.VLM_MODEL_OPTIONS;
         var VLM_KNOWN_MODELS = VLM_MODEL_OPTIONS.map(function(o) { return o.value; });
         // Sentinel <option> value that reveals the custom model-name text input.
         var VLM_MODEL_OTHER = '__other__';
@@ -476,6 +471,14 @@
                 : null;
 
             return {
+                // No fallback and no default value to show: the placeholder already reads
+                // "inherited from default config", and what this entry is for is
+                // collectUnsetFields() — a blanked VIS URL has to travel as the null that
+                // clears it, or the stored one survives a save that cleared the field.
+                'cfg-vi-service-url': {
+                    path: 'vi_service_url', fallback: '',
+                    value: (defaultConfig && defaultConfig.vi_service_url) || null
+                },
                 'cfg-inference-fps': {
                     path: 'inference_fps', fallback: '-1',
                     value: Number.isFinite(defaultConfig && defaultConfig.inference_fps) ? defaultConfig.inference_fps : null
@@ -774,6 +777,27 @@
 
         // Disable an API-key Show/Hide toggle when its field is empty (nothing to reveal), and
         // snap the field back to masked so it can never be left showing an empty value.
+        // A stored key is never echoed, so its input is blank on every load and the
+        // save cannot tell "leave it alone" from "clear it" by looking at the field.
+        // This is the explicit way to say the second one: it marks the input as typed
+        // in, which is what resolves the secret to the empty string the API reads as
+        // a clear. Without it the only way through was to type a character and delete
+        // it again.
+        //
+        // "Disable" means this stream stops carrying a key of its own and inherits the
+        // default config's. It is not a way to reach VIS with no key at all -- an
+        // unset key resolves to the layer below, and the root falls back to the
+        // VIS_API_KEY environment template.
+        function clearVisServiceApiKey() {
+            var input = document.getElementById('cfg-vi-service-api-key');
+            if (!input) return;
+            input.value = '';
+            touchedSecrets['vi_service_api_key'] = true;
+            syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
+            markDirty();
+            updateSaveButtonState();
+        }
+
         function syncApiKeyToggleState(inputId, toggleId) {
             const input = document.getElementById(inputId);
             const btn   = document.getElementById(toggleId);
@@ -792,10 +816,112 @@
             syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
         }
 
-        function getApiUrl() {
-            const stream = getSelectedStream();
-            if (!stream) return null;
-            return `${serverUrl}/v1/server/plugin/vif/applications/${encodeURIComponent(stream.appName)}/streams/${encodeURIComponent(stream.streamName)}/config`;
+        // The credential inputs, by the flat path a save names each one under.
+        var SECRET_INPUTS = {
+            'vi_service_api_key': 'cfg-vi-service-api-key',
+            'vlm_analysis.api_key': 'cfg-vlm-api-key',
+            'synthetic_analysis.api_key': 'cfg-synthetic-api-key',
+            'synthetic_analysis.tls_client_key': 'cfg-synthetic-tls-client-key'
+        };
+
+        // A credential is never echoed back, so a blank input is ambiguous on its own:
+        // it means "leave the stored one alone" until the operator types in it, and
+        // "clear it" once they have. Typing during this session is the whole signal,
+        // and it is forgotten whenever the form is repopulated.
+        var touchedSecrets = {};
+
+        function watchSecretInputs() {
+            Object.keys(SECRET_INPUTS).forEach(function(path) {
+                const input = document.getElementById(SECRET_INPUTS[path]);
+                if (input) input.addEventListener('input', function() { touchedSecrets[path] = true; });
+            });
+        }
+
+        // The tri-state each credential resolves to at save time, from the value the
+        // flat body carries and whether the operator typed it. A path with nothing to
+        // say is left out, so an unset_fields entry for it still clears it.
+        function collectSecrets(config) {
+            const secrets = {};
+            Object.keys(SECRET_INPUTS).forEach(function(path) {
+                const value = VIF.v2map.secretValue(
+                    !!touchedSecrets[path], getConfigValueAtPath(config, path));
+                if (value !== undefined) secrets[path] = value;
+            });
+            return secrets;
+        }
+
+        // The resource the selected dropdown entry addresses; null while
+        // '+ New Stream Config...' is selected.
+        function getSelectedResource() {
+            const select = document.getElementById('cfg-stream-select');
+            return streamRegistry[select.value] || null;
+        }
+
+        /**
+         * Warns, while a NEW config's rule is typed, when it can claim the same
+         * streams as an existing group. Regex intersection in general is
+         * undecidable, so this tests the practical case both ways: one rule's
+         * pattern, read as a literal stream name, matching the other's regex.
+         * That catches exact-vs-pattern overlaps (synth_ vs synth.*) and
+         * outright duplicates.
+         */
+        function updateMatchOverlapNote() {
+            const note = document.getElementById('match-overlap-note');
+            if (!note) return;
+            if (!isNewStream()) { note.style.display = 'none'; return; }
+            const appInput = document.getElementById('cfg-new-app-name');
+            const app = (appInput.value || appInput.placeholder || '').trim();
+            const pattern = document.getElementById('cfg-new-stream-name').value.trim();
+            if (!pattern) { note.style.display = 'none'; return; }
+            const asWholeRegex = function (p) {
+                try { return new RegExp('^(?:' + p + ')$'); } catch (e) { return null; }
+            };
+            const mineRe = asWholeRegex(pattern);
+            const hits = [];
+            Object.keys(streamRegistry).forEach(function (key) {
+                const r = streamRegistry[key];
+                if (r.kind !== 'group' || r.app !== app) return;
+                const theirsRe = asWholeRegex(r.stream);
+                if ((theirsRe && theirsRe.test(pattern)) || (mineRe && mineRe.test(r.stream))) {
+                    hits.push(r.app + ' / ' + r.stream);
+                }
+            });
+            if (!hits.length) { note.style.display = 'none'; return; }
+            note.textContent = '';
+            const icon = document.createElement('span');
+            icon.textContent = '!';
+            icon.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;'
+                + 'width:14px;height:14px;border-radius:50%;background:#e09600;color:#fff;'
+                + 'font-weight:700;font-size:10px;line-height:1;flex:none;';
+            note.appendChild(icon);
+            note.appendChild(document.createTextNode(
+                'A stream config already matches this pattern: ' + hits.join(' and ')));
+            note.style.display = 'flex';
+        }
+
+        // The selected entry's own stored document, flattened to the shape the form
+        // reads. Sparse in, sparse out: an unset member stays absent, so it renders
+        // blank over its effective-default placeholder rather than inheriting a value.
+        async function readConfig(resource) {
+            const persist = VIF.core.client().persist;
+            if (resource.kind === 'override') {
+                const override = await persist.streams.get(resource.app, resource.stream);
+                // The facade answers null for an override that is gone; the dropdown
+                // listed it, so here that is an error to show, not a layer to inherit.
+                if (override === null) {
+                    throw new VIF.sdk.NotFoundError(
+                        `Stream ${resource.app}/${resource.stream} has no override any more`, 404, null);
+                }
+                return VIF.v2map.flatFromOverride(resource.app, resource.stream, override);
+            }
+            return VIF.v2map.flatFromGroup(await persist.streamGroupConfigs.get(resource.name));
+        }
+
+        // One dropdown row, plus the resource it addresses under the same
+        // '<app>::<stream>' key the option value carries.
+        function registerStream(resource) {
+            streamsList.push({ app_name: resource.app, stream_name: resource.stream });
+            streamRegistry[`${resource.app}::${resource.stream}`] = resource;
         }
 
         async function loadStreams(preferredValue) {
@@ -806,23 +932,38 @@
                 const currentValue = preferredValue !== undefined
                     ? preferredValue
                     : (select.value || storedValue);
-                const response = await fetch(`${serverUrl}/v1/server/plugin/vif/config`, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    }
+                const client = VIF.core.client();
+                // The flat defaultConfig is assembled from three routes: the default
+                // config, the model catalog and the listener types.
+                const [groups, defaults, catalog, listenerTypes, overrides] = await Promise.all([
+                    client.persist.streamGroupConfigs.list(),
+                    client.persist.streamGroupConfigs.default().get(),
+                    client.models(),
+                    client.listenerTypes(),
+                    client.persist.streams.list()
+                ]);
+
+                // The flat global defaults every downstream consumer reads: the model
+                // dropdown, the listener editor, the VLM modules and the
+                // effective-default placeholders.
+                defaultConfig = VIF.v2map.flatDefaultFromV2(defaults, catalog, listenerTypes);
+
+                // Both listings arrive in the server's stored order (priority, then
+                // application, then stream); groups precede the per-stream overrides.
+                streamRegistry = {};
+                streamsList = [];
+                groups.forEach(function (group) {
+                    const match = group.match || {};
+                    registerStream({
+                        kind: 'group', name: group.name,
+                        app: match.application, stream: match.streamPattern
+                    });
                 });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const config = await response.json();
-                // Preserve the API's ordering (server sorts by priority_id, then app, then stream name).
-                streamsList = config.streams || [];
-                defaultConfig = Object.assign({}, config);
-                delete defaultConfig.streams;
+                overrides.forEach(function (override) {
+                    registerStream({
+                        kind: 'override', app: override.application, stream: override.stream
+                    });
+                });
                 refreshEffectiveDefaultPlaceholders();
                 populateClassNameDropdown();
                 populateCheckpointPaths();
@@ -889,6 +1030,7 @@
                 document.getElementById('cfg-vi-service-api-key').value = '';
                 syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
                 resetNewStreamMatchFields();
+                updateMatchOverlapNote();
                 applySuggestedDefaultsForNewStream();
                 suppressDirtyTracking = false;
                 document.getElementById('cfg-detector-type').value = 'object';
@@ -913,23 +1055,12 @@
         async function cloneConfig() {
             const stream = getSelectedStream();
             if (!stream) return;
-            const apiUrl = getApiUrl();
-            if (!apiUrl) return;
+            const resource = getSelectedResource();
+            if (!resource) return;
 
             try {
                 suppressDirtyTracking = true;
-                const response = await fetch(apiUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const config = await response.json();
+                const config = await readConfig(resource);
                 const select = document.getElementById('cfg-stream-select');
                 select.value = '__new__';
                 onStreamSelected();
@@ -957,11 +1088,11 @@
         // server-side. Sub-choice inside Detect only, separate from getVlmMode().
         function getReasoningLevel() {
             const checked = document.querySelector('#cfg-vlm-reasoning-level input[name="vlm-reasoning-level"]:checked');
-            return checked ? checked.value : 'high';
+            return checked ? checked.value : 'low';
         }
 
         function setReasoningLevel(level) {
-            const value = (level === 'low' || level === 'medium') ? level : 'high';
+            const value = (level === 'medium' || level === 'high') ? level : 'low';
             const radios = document.querySelectorAll('#cfg-vlm-reasoning-level input[name="vlm-reasoning-level"]');
             radios.forEach(function(r) { r.checked = (r.value === value); });
         }
@@ -1043,6 +1174,12 @@
         // Bumped on every clear so an in-flight probe knows its result is stale.
         var vlmEndpointTestSeq = 0;
 
+        // The endpoint URL the selected document stores, snapshotted at populate.
+        // While the field still matches it, Verify probes BY REFERENCE (group name,
+        // no URL) so the stored api_key — which a read never echoes — authenticates
+        // server-side. Editing the URL or typing a key switches to a by-value probe.
+        var vlmStoredEndpointUrl = null;
+
         function clearVlmEndpointTestResult() {
             vlmEndpointTestSeq++;
             const el = document.getElementById('cfg-vlm-endpoint-test-result');
@@ -1079,21 +1216,19 @@
             const seq = ++vlmEndpointTestSeq;
 
             try {
-                // POST body (not query params) so the api_key stays out of logged URLs.
-                const payload = { endpoint_url: endpoint };
-                if (apiKey) payload.api_key = apiKey;
-                const response = await fetch(`${serverUrl}/v1/server/plugin/vif/vlm/test`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                const result = await response.json();
+                // The request carries the endpoint in its body, so the api_key stays out
+                // of logged URLs. Verifying the stored endpoint untouched goes by
+                // reference: the server pairs the stored URL with its stored key (the
+                // key never reaches the browser, so a by-value probe cannot carry it).
+                const resource = getSelectedResource();
+                const typedKey = document.getElementById('cfg-vlm-api-key').value;
+                const storedProbe = !typedKey && resource && resource.kind === 'group'
+                    && vlmStoredEndpointUrl && buildVlmEndpointUrl() === vlmStoredEndpointUrl;
+                const result = await VIF.core.client().probes.vlmEndpoint(
+                    storedProbe
+                        ? VIF.v2map.probeRequestFromV1({}, resource.name)
+                        : VIF.v2map.probeRequestFromV1({ endpoint_url: endpoint, api_key: apiKey },
+                            (resource && resource.kind === 'group') ? resource.name : 'default'));
                 if (seq !== vlmEndpointTestSeq) return; // field edited mid-flight; result is stale
                 renderVlmEndpointTestOutcome(result);
             } catch (error) {
@@ -1151,7 +1286,7 @@
             // Leaving Detect resets the reasoning level to High so Custom/Describe never
             // carry a Low/Medium marker. On a Low/Medium load, populateForm sets the level
             // AFTER this runs (mode is 'detect' there), so a reopened config keeps its level.
-            if (mode !== 'detect') setReasoningLevel('high');
+            if (mode !== 'detect') setReasoningLevel('low');
             // Re-fit the now-visible Custom-mode textareas to any prefilled content — a
             // programmatic value set (loadConfig) fires no 'input' event. Safe in any
             // mode: vlmAutoGrowAll skips textareas that are still hidden.
@@ -1866,6 +2001,7 @@
 
         function resetForm() {
             suppressDirtyTracking = true;
+            touchedSecrets = {};
             // Stream settings
             document.getElementById('cfg-active').checked = false;
             document.getElementById('cfg-inference-fps').value = '';
@@ -1921,6 +2057,7 @@
             // VLM analysis
             setVlmModelName(VLM_KNOWN_MODELS[0]);
             document.getElementById('cfg-vlm-endpoint-url').value = '';
+            vlmStoredEndpointUrl = null; // a new stream stores nothing to probe by reference
             document.getElementById('cfg-vlm-api-key').value = '';
             syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
             clearVlmEndpointTestResult();
@@ -1935,7 +2072,7 @@
             document.getElementById('cfg-vlm-advanced').style.display = 'none';
             document.getElementById('cfg-vlm-advanced-caret').innerHTML = '&#9656;';
             document.getElementById('vlm-custom-classlist-warning').style.display = 'none';
-            setReasoningLevel('high'); // default reasoning level
+            setReasoningLevel('low'); // default reasoning level
             setVlmMode('detect');
             // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
 
@@ -2119,6 +2256,7 @@
 
                 const endpointInput = document.getElementById('cfg-vlm-endpoint-url');
                 if (va.endpoint_url) endpointInput.value = va.endpoint_url;
+                vlmStoredEndpointUrl = va.endpoint_url || null;
                 const effectiveEndpoint = globalVa.endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url;
                 if (effectiveEndpoint) endpointInput.placeholder = vlmEndpointPlaceholder(effectiveEndpoint);
                 clearVlmEndpointTestResult();
@@ -2214,9 +2352,11 @@
                 }
                 setVlmMode(vlmMode);
                 // After setVlmMode so the leaving-Detect reset in toggleVlmMode can't clobber
-                // it. Only Detect mode carries the loaded level; Custom/Describe (incl. a config
-                // where a prompt won over a stray level) reset to High. Absent/unknown -> High.
-                setReasoningLevel(vlmMode === 'detect' ? (reasoningLevel || 'high') : 'high');
+                // it. Only Detect mode carries the loaded level. On the wire absent means
+                // High, so a stored config without a level must display (and re-save as)
+                // High; Low is the default for NEW configs only. Custom/Describe reset the
+                // hidden radio to that new-config default.
+                setReasoningLevel(vlmMode === 'detect' ? (reasoningLevel || 'high') : 'low');
             }
 
             {
@@ -2444,13 +2584,27 @@
 
             if (nextDetectorType && previousDetectorType && nextDetectorType !== previousDetectorType) {
                 await preloadConfiguredListenerSchemas();
-                const conflicts = getDetectorTypeSwitchConflicts(nextDetectorType);
+                // Only a listener whose TYPE has no meaning for the target detector still
+                // blocks: an ObjectTracking cannot become something a VLM stream can use.
+                // A method that the target does not allow is not a conflict any more -- the
+                // listeners follow the detector, and the operator is told what moved.
+                const conflicts = getDetectorTypeSwitchConflicts(nextDetectorType).filter(function(conflict) {
+                    return conflict.typeNotApplicable;
+                });
                 if (conflicts.length > 0) {
                     this.value = previousDetectorType;
                     toggleDetectorSection();
                     showStatus(buildDetectorTypeSwitchConflictMessage(nextDetectorType, conflicts), true);
                     alert(buildDetectorTypeSwitchConflictDialogMessage(nextDetectorType, conflicts));
                     return;
+                }
+                const adjusted = adjustListenerMethodsForDetector(nextDetectorType);
+                if (adjusted.length > 0) {
+                    showStatus('Switched to ' + nextDetectorType + ' analysis. '
+                        + adjusted.map(function(change) {
+                            return change.name + ' moved from ' + formatEventMethodLabel(change.from)
+                                + ' to ' + formatEventMethodLabel(change.to);
+                        }).join('; ') + '. Save to keep it.', false);
                 }
             }
 
@@ -2512,25 +2666,12 @@
         }
 
         async function getConfig() {
-            const apiUrl = getApiUrl();
-            if (!apiUrl) return;
+            const resource = getSelectedResource();
+            if (!resource) return;
             setFormLoading(true);
             try {
                 suppressDirtyTracking = true;
-                const response = await fetch(apiUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const config = await response.json();
-                populateForm(config);
+                populateForm(await readConfig(resource));
                 showStatus('Config loaded successfully', false);
 
             } catch (error) {
@@ -2556,35 +2697,35 @@
             hideStatus();
 
             const isNew = isNewStream();
-            const apiUrl = isNew
-                ? `${serverUrl}/v1/server/plugin/vif/applications/${encodeURIComponent(config.app_name)}/streams/${encodeURIComponent(config.stream_name)}/config`
-                : getApiUrl();
-            if (!apiUrl) return;
+            const resource = isNew ? null : getSelectedResource();
+            if (!isNew && !resource) return;
 
             setFormLoading(true);
             try {
                 setSavingState(true);
-                const response = await fetch(apiUrl, {
-                    method: isNew ? 'POST' : 'PUT',
-                    body: JSON.stringify(config),
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                // 409 Conflict: the stream config already exists (e.g. creating a stream whose
-                // name/regex is already configured). Surface a clear message rather than a raw HTTP error.
-                if (response.status === 409) {
-                    showStatus('Stream configuration already exists', true);
-                    return;
+                const persist = VIF.core.client().persist;
+                const secrets = collectSecrets(config);
+                if (isNew) {
+                    await persist.streamGroupConfigs.create(VIF.v2map.groupFromFlat(config, { secrets: secrets }));
+                } else {
+                    // The listener map the form was populated with: a name it no longer
+                    // holds has to ride as an explicit null for the merge to remove it.
+                    const previousListeners = lastRawStreamConfig && lastRawStreamConfig.vif_event_listeners;
+                    const patch = VIF.v2map.groupPatchFromV1(config,
+                        { previousListeners: previousListeners, secrets: secrets });
+                    // The re-read inside the attempt is what carries a fresh revision, so
+                    // a lost race retries once.
+                    await VIF.core.withConflictRetry(async function() {
+                        if (resource.kind === 'override') {
+                            const override = persist.streams.ref(resource.app, resource.stream);
+                            await override.get();
+                            return override.update(patch);
+                        }
+                        await persist.streamGroupConfigs.get(resource.name);
+                        return persist.streamGroupConfigs.update(resource.name, patch);
+                    });
                 }
 
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                await response.json();
                 showStatus(isNew ? 'Stream config created successfully' : 'Config saved successfully', false);
                 lockListenerTypesAfterSave();
                 markClean(true);
@@ -2604,6 +2745,12 @@
                 }
 
             } catch (error) {
+                // A 409: in practice a create whose name/pattern is already taken.
+                // Surface a clear message rather than the raw error.
+                if (VIF.sdk && error instanceof VIF.sdk.ConflictError) {
+                    showStatus('Stream configuration already exists', true);
+                    return;
+                }
                 console.error("Error saving config:", error);
                 showStatus(`Error saving config: ${error.message}`, true);
             } finally {
@@ -2618,21 +2765,22 @@
 
             if (!confirm(`Delete stream config "${stream.appName} / ${stream.streamName}"?\n\nThis cannot be undone.`)) return;
 
-            const apiUrl = getApiUrl();
-            if (!apiUrl) return;
+            const resource = getSelectedResource();
+            if (!resource) return;
 
             try {
-                const response = await fetch(apiUrl, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
+                const persist = VIF.core.client().persist;
+                // A delete quotes a revision too, so the attempt re-reads for a fresh one
+                // and a lost race retries once.
+                await VIF.core.withConflictRetry(async function() {
+                    if (resource.kind === 'override') {
+                        const override = persist.streams.ref(resource.app, resource.stream);
+                        await override.get();
+                        return override.delete();
                     }
+                    await persist.streamGroupConfigs.get(resource.name);
+                    return persist.streamGroupConfigs.delete(resource.name);
                 });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
 
                 showStatus('Stream config deleted successfully', false);
                 markClean(false);
@@ -2682,6 +2830,7 @@
         }
 
         window.onStreamSelected = onStreamSelected;
+        window.updateMatchOverlapNote = updateMatchOverlapNote;
         window.saveConfig = saveConfig;
         window.cloneConfig = cloneConfig;
         window.deleteConfig = deleteConfig;
@@ -2699,6 +2848,7 @@
         window.toggleVlmAdvanced = toggleVlmAdvanced;
         window.toggleSyntheticTlsCerts = toggleSyntheticTlsCerts;
         window.toggleVisServiceApiKeyVisibility = toggleVisServiceApiKeyVisibility;
+        window.clearVisServiceApiKey = clearVisServiceApiKey;
         window.toggleSyntheticApiKeyVisibility = toggleSyntheticApiKeyVisibility;
         window.toggleVlmApiKeyVisibility = toggleVlmApiKeyVisibility;
         window.toggleVlmModelNameOther = toggleVlmModelNameOther;
@@ -2738,6 +2888,7 @@
 
         initializeStaticFieldRules();
         initializeStaticFieldTooltips();
+        watchSecretInputs();
         toggleByteTrack();
         toggleCheckpointPath();
         toggleTiling();

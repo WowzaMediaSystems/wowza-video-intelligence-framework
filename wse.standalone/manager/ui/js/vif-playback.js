@@ -43,10 +43,6 @@
       overlayControlGroup: document.getElementById('overlayControlGroup')
     };
 
-    var resolvedServer = VIF.core.resolveServer();
-    var serverUrl = resolvedServer.serverUrl;
-    var encodedCredentials = resolvedServer.encodedCredentials;
-
     // Config-stream identity ({app, stream}) the currently loaded playback URL
     // resolved to, or null when the URL isn't a VIF-managed stream. A monotonic
     // token guards against a slow resolve for an old URL landing after the user
@@ -124,18 +120,15 @@
       return { app: segments[0], stream: segments[1] };
     }
 
-    async function fetchStreamConfig(app, stream) {
-      const response = await fetch(`${serverUrl}/v1/server/plugin/vif/applications/${encodeURIComponent(app)}/streams/${encodeURIComponent(stream)}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Basic ${encodedCredentials}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      return await response.json();
+    // The running stream's listener collection, name-keyed. Throws NotFoundError
+    // while the stream is not running; the resolve logic treats a failure as
+    // "not a VIF stream".
+    function runtimeListeners(app, stream) {
+      return VIF.core.client().runtime.streams.ref(app, stream).listeners;
+    }
+
+    async function fetchRuntimeListeners(app, stream) {
+      return runtimeListeners(app, stream).list();
     }
 
     function showOverlayControl() {
@@ -161,17 +154,17 @@
 
       const app = identity.app;
       let stream = identity.stream;
-      let config = null;
+      let listeners = null;
 
       try {
-        config = await fetchStreamConfig(app, stream);
+        listeners = await fetchRuntimeListeners(app, stream);
       } catch (e) {
         // Transcoded playback streams are named `<config-stream>-vi`; retry once
         // with the suffix stripped and adopt whichever name succeeded.
         if (stream.endsWith('-vi')) {
           const baseStream = stream.slice(0, -3);
           try {
-            config = await fetchStreamConfig(app, baseStream);
+            listeners = await fetchRuntimeListeners(app, baseStream);
             stream = baseStream;
           } catch (e2) {
             return;
@@ -183,17 +176,19 @@
 
       // A newer load superseded this resolve while we were awaiting — drop it.
       if (token !== overlayResolveToken) return;
-      if (!config) return;
+      if (!listeners) return;
 
       overlayConfigStream = { app: app, stream: stream };
-      const methods = getOverlayListenerMethods(config.vif_event_listeners);
+      const methods = getOverlayListenerMethods(VIF.v2map.listenersToV1(listeners));
       elements.overlayToggle.checked = Array.isArray(methods) && methods.indexOf('immediate') !== -1;
       showOverlayControl();
     }
 
-    // On toggle: re-GET the live config, merge the overlay listener, and PUT it
-    // back on the SAME non-/config route (runtime-only — never persisted). The
-    // switch is disabled while in flight; on error it reverts to its prior state.
+    // On toggle: re-list the running stream's listeners and write the overlay
+    // entry back through the runtime listeners resource (ephemeral — never persisted).
+    // The re-list inside the attempt is what picks up a fresh revision, so a
+    // lost race retries once through withConflictRetry. The switch is disabled
+    // while in flight; on error it reverts to its prior state.
     async function onOverlayToggleChange() {
       if (!overlayConfigStream) return;
       const app = overlayConfigStream.app;
@@ -202,28 +197,22 @@
 
       elements.overlayToggle.disabled = true;
       try {
-        const config = await fetchStreamConfig(app, stream);
-        const listeners = (config && config.vif_event_listeners) ? config.vif_event_listeners : {};
-        const overlayName = getOverlayListenerName(listeners);
-        const currentOverlay = listeners[overlayName] || {};
-
-        listeners[overlayName] = Object.assign({}, currentOverlay, {
-          class_name: currentOverlay.class_name || 'OverlayEvent',
-          methods: desired ? ['immediate'] : ['disabled']
-        });
-
-        const response = await fetch(`${serverUrl}/v1/server/plugin/vif/applications/${encodeURIComponent(app)}/streams/${encodeURIComponent(stream)}`, {
-          method: 'PUT',
-          body: JSON.stringify({ vif_event_listeners: listeners }),
-          headers: {
-            'Authorization': `Basic ${encodedCredentials}`,
-            'Content-Type': 'application/json'
+        await VIF.core.withConflictRetry(async function () {
+          const collection = runtimeListeners(app, stream);
+          const listeners = await collection.list();
+          const overlayName = getOverlayListenerName(listeners);
+          const current = listeners[overlayName];
+          if (current) {
+            // `type` rides along unchanged: a patch of a listener has to say which
+            // listener it is, and the server merges rather than replacing when the
+            // type does not move. The collection quotes the revision the list answered.
+            await collection.update(overlayName,
+              { type: current.type, enabled: desired, trigger: desired ? 'immediate' : null });
+          } else {
+            await collection.create(overlayName,
+              { type: 'overlay', enabled: desired, trigger: desired ? 'immediate' : undefined });
           }
         });
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
-        }
         hideError();
       } catch (e) {
         console.error('Error updating overlay:', e);
@@ -395,7 +384,7 @@
         // A custom-schema VLM window carries only its structured `data` object (no
         // meaningful class_name); surface that via `data` so it renders its fields
         // instead of a generic placeholder label.
-        const normalize = (det) => {
+        const normalize = (det, entry) => {
           let confidence = null;
           if (det.confidence && typeof det.confidence.avg === 'number') confidence = det.confidence.avg;
           else if (typeof det.confidence === 'number') confidence = det.confidence;
@@ -404,6 +393,9 @@
             confidence,
             reasoning: det.reasoning || null,
             data: (det.data && typeof det.data === 'object') ? det.data : null,
+            // Response-level outage flag (synthetic: the SVD endpoint was down for
+            // this window) — the verdict is an artifact then, not a result.
+            degraded: !!(entry && entry.degraded),
           };
         };
 
@@ -411,11 +403,11 @@
         if (parsed.vif_data && Array.isArray(parsed.vif_data)) {
           parsed.vif_data.forEach((viEntry) => {
             if (viEntry.detections && viEntry.detections.length > 0) {
-              viEntry.detections.forEach(det => detections.push(normalize(det)));
+              viEntry.detections.forEach(det => detections.push(normalize(det, viEntry)));
             }
           });
         } else if (parsed.detections && Array.isArray(parsed.detections)) {
-          detections = parsed.detections.map(normalize);
+          detections = parsed.detections.map((det) => normalize(det, parsed));
         } else {
           return;
         }
@@ -426,7 +418,28 @@
         if (detections.length === 0) return;
 
         const isVlm = eventType === 'vlm-detection';
+        const isSynthetic = eventType === 'synthetic-detection';
         const labels = detections.map(d => {
+          // Free-form (Describe) windows carry the internal "description" sentinel
+          // with the prose in reasoning — render the prose alone: the sentinel is
+          // plumbing, not a detected class (the burned-in overlay and the VOD
+          // report make the same call).
+          if (isVlm && d.label === 'description' && d.reasoning) {
+            return `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>`;
+          }
+          // Synthetic chips color by VERDICT, never by the score: the score is a
+          // threat score, so confidence coloring paints a detected deepfake green.
+          // A degraded window is an endpoint outage, not an analysis result — say
+          // so instead of presenting a meaningless "unknown (0.00)".
+          if (isSynthetic) {
+            if (d.degraded) {
+              return `<span class="detection-label verdict-unknown">unknown · AI offline</span>`;
+            }
+            const verdictClass = d.label === 'synthetic' ? 'verdict-synthetic'
+              : d.label === 'real' ? 'verdict-real' : 'verdict-unknown';
+            const scoreStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
+            return `<span class="detection-label ${verdictClass}">${escapeHtml(d.label ?? 'unknown')}${scoreStr}</span>`;
+          }
           // Custom-schema VLM output: render its structured fields directly — there
           // is no class to badge and a placeholder label reads as a bogus detection.
           if (d.data) {
@@ -457,9 +470,75 @@
         elements.eventDisplay.insertAdjacentHTML('afterbegin', content);
         trimHistory(elements.eventDisplay, '.event-item', CONFIG.MAX_HISTORY_ITEMS);
         elements.eventDisplay.scrollTop = 0;
+        noteDetectionRendered();
       } catch (e) {
         console.error('Error parsing event data:', e);
       }
+    }
+
+    // --- Detection-silence watchdog (formatted view) ------------------------
+    // ID3 detection events simply STOP when the detector finds nothing (and
+    // windows with zero detections are not rendered either), so the last real
+    // detection would sit at the top of the formatted view looking current —
+    // a fire that went out still reads as "fire". After SILENCE_MS without a
+    // rendered detection, a muted marker item is prepended whose duration
+    // ticks up live; the next real detection freezes it, so the gap stays in
+    // the history. Paused playback suspends the watchdog (no ID3 flows on
+    // purpose); resuming re-anchors it so a still-silent stream is marked.
+    const SILENCE_MS = 4000;
+    let lastDetectionAt = null;
+    let silenceTimerId = null;
+    let liveSilenceMarker = null;
+
+    function finalizeSilenceMarker() {
+      if (!liveSilenceMarker) return;
+      liveSilenceMarker.classList.remove('is-live');
+      liveSilenceMarker = null;
+    }
+
+    function noteDetectionRendered() {
+      finalizeSilenceMarker();
+      lastDetectionAt = Date.now();
+    }
+
+    function silenceTick() {
+      if (lastDetectionAt == null) return;
+      const gapMs = Date.now() - lastDetectionAt;
+      if (gapMs < SILENCE_MS) return;
+      if (!liveSilenceMarker) {
+        clearPlaceholder(elements.eventDisplay);
+        const item = document.createElement('div');
+        item.className = 'event-item event-item-silence is-live';
+        const time = document.createElement('div');
+        time.className = 'event-time';
+        time.textContent = 'since ' + formatWallClock(new Date(lastDetectionAt));
+        const body = document.createElement('div');
+        body.className = 'event-data silence-text';
+        item.appendChild(time);
+        item.appendChild(body);
+        elements.eventDisplay.prepend(item);
+        trimHistory(elements.eventDisplay, '.event-item', CONFIG.MAX_HISTORY_ITEMS);
+        elements.eventDisplay.scrollTop = 0;
+        liveSilenceMarker = item;
+      }
+      const seconds = Math.round(gapMs / 1000);
+      liveSilenceMarker.querySelector('.silence-text').textContent =
+        'No detections for ' + seconds + 's';
+    }
+
+    function startSilenceWatchdog() {
+      if (silenceTimerId == null) {
+        silenceTimerId = setInterval(silenceTick, 1000);
+      }
+    }
+
+    function stopSilenceWatchdog() {
+      if (silenceTimerId != null) {
+        clearInterval(silenceTimerId);
+        silenceTimerId = null;
+      }
+      lastDetectionAt = null;
+      liveSilenceMarker = null;
     }
 
     function updateStatusBadge(text, color) {
@@ -583,6 +662,14 @@
       });
       Array.from(item.querySelectorAll('.detection-data')).forEach(dataEl => {
         detections.push({ data: dataFieldsFromDiv(dataEl) });
+      });
+      // Describe windows render the prose alone (no sentinel chip) — pick up any
+      // reasoning block that has no label chip in front of it.
+      Array.from(item.querySelectorAll('.detection-reasoning')).forEach(el => {
+        const prev = el.previousElementSibling;
+        if (prev && prev.classList.contains('detection-label')) return; // captured above
+        const reasoning = (el.textContent || '').trim();
+        if (reasoning) detections.push({ class_name: 'description', reasoning });
       });
       return detections;
     }
@@ -717,6 +804,7 @@
       const shouldClearPlaybackUrl = !options || options.clearPlaybackUrl !== false;
 
       clearPlaybackDebugInterval();
+      stopSilenceWatchdog();
       if (shouldClearPlaybackUrl) {
         currentLoadingUrl = null;
       }
@@ -743,20 +831,18 @@
       }
     }
 
+    // The page's nav tabs (and shm.html's loader) call this before swapping the
+    // fragment out, so no hls instance or timer outlives the page.
     window.__vifPlaybackDestroy = destroyPlaybackSession;
-
-    function mainPage()
-    {
-      destroyPlaybackSession();
-      loadAjaxPluginContent("server","vif", "shm.html","");
-    }
 
 	document.addEventListener('visibilitychange', function() {
 		if (document.visibilityState === 'visible') {
 			console.log('Page is visible again, resuming stream loading if paused.');
 		    const videoElement = document.querySelector('#playerElement video');
 			if (!videoElement || !myPlayer) return;
-			videoElement.currentTime = myPlayer.liveSyncPosition;
+			if (typeof myPlayer.liveSyncPosition === 'number') {
+				videoElement.currentTime = myPlayer.liveSyncPosition;
+			}
 		}
 	});
 
@@ -850,6 +936,10 @@
         isPaused = false;
         updateStatusBadge('Playing', CONFIG.BADGE_COLORS.PLAYING);
         console.log('[player] play');
+        // Anchor the silence clock at (re)start so a stream that never sends
+        // a detection still gets its marker SILENCE_MS in.
+        if (lastDetectionAt == null) lastDetectionAt = Date.now();
+        startSilenceWatchdog();
         clearPlaceholder(elements.eventDisplay);
         clearPlaceholder(elements.logDisplay);
         if (!elements.eventDisplay.querySelector('.event-item')) resetFormattedDisplay();
@@ -862,6 +952,10 @@
         isPaused = true;
         updateStatusBadge('Paused', CONFIG.BADGE_COLORS.PAUSED);
         console.log('[player] pause');
+        // A paused player receives no ID3 by design — that is not detection
+        // silence. Freeze any live marker and stop the clock until play.
+        finalizeSilenceMarker();
+        lastDetectionAt = null;
       });
 
       if (Hls.isSupported()) {
@@ -942,7 +1036,6 @@
     // markup calls each of these via inline onclick=""/onchange="" attributes,
     // which resolve identifiers against the global scope at click time.
     window.createPlayer = createPlayer;
-    window.mainPage = mainPage;
     window.switchTab = switchTab;
     window.onClearFormattedFromTab = onClearFormattedFromTab;
     window.onCopyFormattedFromTab = onCopyFormattedFromTab;
