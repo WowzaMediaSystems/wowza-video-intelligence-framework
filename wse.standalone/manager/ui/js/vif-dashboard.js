@@ -21,8 +21,20 @@
             }
         }
 
+        // Each AJAX load of shm.html re-runs init(). Tear down the previous
+        // instance's intervals first, or its render loop keeps running against
+        // the new DOM with stale closure state (thumbnailsOn/lastStreamCount).
+        if (typeof window.__vifDashboardDestroy === 'function') {
+            try {
+                window.__vifDashboardDestroy();
+            } catch (error) {
+                console.error("Error destroying existing dashboard session:", error);
+            }
+        }
+
         var resolvedServer = VIF.core.resolveServer();
-        var serverUrl = resolvedServer.serverUrl;
+        // Used only by the thumbnail fetch and the Spring-session probe - direct
+        // fetches, not SDK calls, that carry their own Authorization header.
         var encodedCredentials = resolvedServer.encodedCredentials;
         var pathPrefix = 'wse-plugins/server/vif/';
         var host = resolvedServer.host;
@@ -36,7 +48,9 @@
             }
         }
 
-        jsonData = null;
+        var jsonData = null;
+        var renderdashboardId = null;
+        var securityCheckId = null;
         var lastStreamCount=0;
         // Host-scoped so separate Engines the same browser talks to keep their own preference.
         var THUMBNAILS_STORAGE_KEY = `vif.dashboard.thumbnails.${window.location.host}`;
@@ -55,14 +69,14 @@
             liveUpdatesPromise = (async () => {
                 try {
 
-                    const response = await fetch(`${serverUrl}/v1/server/plugin/vif/status`, {
-                        method: 'GET',
-                        headers: {
-                            'Authorization': `Basic ${encodedCredentials}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    const nextJsonData = await response.json();
+                    const status = await VIF.core.client().status();
+                    // The renderers below read the v1 flat status shape; the adapter
+                    // is the whole translation.
+                    const nextJsonData = {
+                        host: VIF.v2map.hostFromV2(status.host),
+                        streams: (status.streams || []).map(VIF.v2map.streamRowFromV2),
+                        vis_instances: VIF.v2map.visInstancesFromV2(status.visInstances)
+                    };
 
                     nextJsonData.streams.sort((a, b) => {
                       const nameA = a.app_name+a.stream_name;
@@ -141,11 +155,12 @@
 
         function setConfigButtonsEnabled(enabled)
         {
-            ['btn-default-config', 'btn-stream-configs'].forEach((btnId) => {
+            ['btn-stream-configs', 'btn-vod-settings'].forEach((btnId) => {
                 const btn = document.getElementById(btnId);
                 if (!btn) return;
                 btn.disabled = !enabled;
-                btn.title = enabled ? '' : 'Waiting for Engine connection';
+                // Enabled buttons keep their descriptive tooltip (data-desc).
+                btn.title = enabled ? (btn.dataset.desc || '') : 'Waiting for Engine connection';
             });
         }
 
@@ -268,6 +283,7 @@
                             : 'Connecting to Engine&hellip;',
                         isOffline ? 'alert' : 'info'
                     );
+                    renderStatBand();
                     renderHostCard('host-display', "WSE", jsonData.host.wse_version);
                     renderInferenceGroups([]);
                     const tbody = document.getElementById('streams-body');
@@ -285,11 +301,12 @@
                 // disabled/tooltip state changes here, never display.
                 setConfigButtonsEnabled(true);
 
+                renderStatBand();
                 renderWseHostGroup();
-                // jsonData.vis_instances is undefined for a legacy VIC jar's /status
-                // payload; renderInferenceGroups treats that as "no groups" and
-                // leaves the WSE Host group as the only thing rendered (F13/D5).
-                renderInferenceGroups(jsonData.vis_instances);
+                // The stat band's bulleted cells carry the per-instance story;
+                // the empty call just clears the container. The WSE Host group
+                // above remains for the multi-GPU-host case.
+                renderInferenceGroups([]);
 
                 active_stream_count = get_active_stream_count(jsonData.streams);
                 active_streams = document.getElementById('active-streams');
@@ -318,7 +335,17 @@
             clearElementContent(tbody);
             const tr = document.createElement('tr');
             tr.className = 'empty-streams-row';
-            tr.innerHTML = '<td colspan="8">No VIF Streams</td>';
+            tr.innerHTML = '<td colspan="8">'
+                + '<div class="empty-icon"><svg width="30" height="30" viewBox="0 0 24 24" fill="none"'
+                + ' stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                + '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>'
+                + '<path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>'
+                + '<path d="M7.2 12c1.3-2.1 2.9-3.2 4.8-3.2s3.5 1.1 4.8 3.2c-1.3 2.1-2.9 3.2-4.8 3.2s-3.5-1.1-4.8-3.2Z"/>'
+                + '<circle cx="12" cy="12" r="1.4"/></svg></div>'
+                + '<div class="empty-title">No VIF-enabled live streams are currently being published.</div>'
+                + '<div class="empty-hint">Publish a stream that matches an existing configuration under '
+                + '<a href="#" onclick="event.preventDefault(); loadAjaxPluginContent(\'server\', \'vif\', \'stream-config.html\', \'\')">Configs → Stream Configs</a>'
+                + ' and it will appear in this dashboard.</div></td>';
             tbody.appendChild(tr);
         }
 
@@ -379,7 +406,7 @@
                                 <div id="${id}-model-name" class="stream-type-meta-line" title="Model"></div>
                                 <div id="${id}-duration" class="stream-type-meta-line stream-type-meta-secondary" title="Window"></div>
                             </td>
-                            <td align="right">
+                            <td>
                                 <strong id="${id}-stream-name"></strong>
                                 <br>
                                 <div class="vif-controls">Active&nbsp;
@@ -389,22 +416,22 @@
                                     </label>
                                 </div>
                             </td>
-                            <td class="align-right">
-                                <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div><div title="Inference fps" id="${id}-dfps"></div>&nbsp;(<div title="equivalent ms" id="${id}-equ"></div>) </div>
+                            <td>
+                                <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div></div>
                                 <div class="vif-row" id="${id}-gopContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
-                                <div class="vif-controls align-right vif-skip-controls" id="${id}-skipSliderContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? '' : 'display:none;'}">
+                                <div class="vif-controls vif-skip-controls" id="${id}-skipSliderContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? '' : 'display:none;'}">
                                     <div class="vif-skip-line">Inference fps<input type="range" class="slider" id="${id}-skipSlider" min="1" max="${stream.frame_rate}" value="${stream.inference_fps}"><span id="${id}-skipValue" class="vif-skip-value">${stream.inference_fps}</span></div>
                                     <div class="vif-skip-note-line"><span id="${id}-frames-window" class="frames-window-note"></span></div>
                                 </div>
-                                <div class="align-right" id="${id}-vihost" style="font-style:italic"></div>
+                                <div id="${id}-vihost"></div>
                                 <div id="${id}-sts"></div>
                                 <div id="${id}-vlm-health" class="row-status-line"></div>
                             </td>
-                            <td align="right"><div id="${id}-ping"></div></td>
-                            <td align="right"><div id="${id}-ttl-proc"></div></td>
-                            <td align="right"><div id="${id}-frame-detect" title="Total Object Processing Time"></div></td>
-                            <td align="right"><div id="${id}-frame-detect-avg"></div></td>
-                            <td align="right"><a id="${id}-thumbnail-link"><img src="${pathPrefix}thumb.png" id="${id}-thumbnail" height=110 alt="Thumbnail"></a></td>
+                            <td><div id="${id}-ping"></div></td>
+                            <td><div id="${id}-ttl-proc"></div></td>
+                            <td><div id="${id}-frame-detect" title="Total Object Processing Time"></div></td>
+                            <td><div id="${id}-frame-detect-avg"></div></td>
+                            <td><a id="${id}-thumbnail-link"><img src="${pathPrefix}thumb.png" id="${id}-thumbnail" height=110 alt="Thumbnail"></a></td>
                         `;
                         tbody.appendChild(tr);
                         const tr2 = document.createElement('tr');
@@ -473,12 +500,30 @@
                     const gopEl = document.getElementById(id+"-gop");
                     if (gopEl) {
                         gopEl.textContent = stream.gop_size != null ? `Key Frame Interval:${stream.gop_size}` : '';
+                        gopEl.title = 'gop size';
+                        gopEl.style.color = '';
                         if(stream.gop_size != null && stream.gop_size >0) {
-                            const mismatch = stream.gop_size != null && stream.frame_grab_interval != null
+                            // The grab-interval comparison only means something where the keyframe
+                            // grabber feeds the detector; synthetic taps every source packet, so
+                            // its GOP is judged against the window below, not the grab interval.
+                            const mismatch = !isSynthetic && stream.gop_size != null && stream.frame_grab_interval != null
                                 && Math.round(stream.gop_size / stream.frame_rate * 1000) !== Math.round(stream.frame_grab_interval * 1000);
                             gopEl.style.color = mismatch ? '#cc9900' : '';
                             if (mismatch) {
                                 gopEl.textContent += ` (${Math.round(stream.gop_size / stream.frame_rate * 1000)}ms with frame grab of ${Math.round(stream.frame_grab_interval * 1000)}ms)`;
+                            }
+                            // Synthetic windows are keyframe-aligned, so the source GOP sets the
+                            // verdict cadence; when it dwarfs the configured window, warn on the
+                            // row and point at the encoder setting that fixes it (the module logs
+                            // the same GOP-bound WARN server-side).
+                            const windowS = Number(stream.duration);
+                            const gopS = stream.gop_size / stream.frame_rate;
+                            if (isSynthetic && isFinite(windowS) && windowS > 0 && isFinite(gopS) && gopS > windowS * 1.5) {
+                                gopEl.style.color = '#cc9900';
+                                gopEl.textContent += ` · verdicts every ~${gopS.toFixed(1)}s, not the configured ${windowS}s`;
+                                gopEl.title = 'Synthetic windows are keyframe-aligned, so the source keyframe interval'
+                                    + ' sets the verdict cadence. Shorten it to the window length in your encoder;'
+                                    + ' in OBS: Settings > Output (Advanced mode) > Keyframe Interval = ' + windowS + 's.';
                             }
                         }
                     }
@@ -487,17 +532,12 @@
                     slider = document.getElementById(id+"-skipSlider");
                     slider.max = stream.frame_rate;
                     slider.dataset.windowed = (stream.detector_type === 'scene' || stream.detector_type === 'vlm') ? 'true' : 'false';
+                    slider.dataset.detector = stream.detector_type || '';
                     slider.dataset.duration = (stream.duration != null) ? String(stream.duration) : '';
                     if (!isSkipSliderInteracting(stream.app_name, stream.stream_name)) {
                         slider.value = stream.inference_fps;
                         updateSkipFrameDisplay(id);
                     }
-                    dfps = document.getElementById(id+"-dfps");
-                    dfps.textContent = `/${stream.inference_fps}fps`;
-                    dfps.style.display = (stream.use_transcoder && !isSynthetic) ? '' : 'none';
-                    equ = document.getElementById(id+"-equ");
-                    equ.textContent = `${Number(1/stream.frame_rate*1000).toFixed(0)}ms`
-
                     sts = document.getElementById(id+"-sts");
                     sts.textContent = `${stream.status}`;
                     sts.className = stream.status.toLowerCase() == 'connected' ? 'text-good' : stream.status.toLowerCase() == 'disabled' || stream.status.toLowerCase() == 'error' ? 'text-alert' : 'text-warn';
@@ -541,10 +581,33 @@
                         : viHostLabel;
 
 
+                    // A stream notice renders as a calm chip (dot + short label);
+                    // the raw server line is one click away via the popover
+                    // (data-vif-tip -> VIF.core.initClickTips). Rebuilt only when
+                    // the text actually changes, so a repeatedly-firing notice
+                    // doesn't churn the DOM or dismiss an open popover.
                     reason = document.getElementById(id+"-reason");
-                    reason.textContent = `${stream.reason}`;
-                    reason.title = reason.textContent;
-                    reason.className = 'row-status-line ' + (reason.textContent.toLowerCase().includes('error') ? 'text-alert' : 'text-warn');
+                    const reasonText = stream.reason != null ? String(stream.reason) : '';
+                    if (!reasonText) {
+                        if (reason.dataset.vifTip !== undefined) delete reason.dataset.vifTip;
+                        reason.className = 'row-status-line';
+                        reason.textContent = '';
+                    } else if (reason.dataset.vifTip !== reasonText) {
+                        const isError = reasonText.toLowerCase().includes('error');
+                        reason.dataset.vifTip = reasonText;
+                        // Raw server text — worth a copy button (see initClickTips).
+                        reason.dataset.vifTipCopy = '1';
+                        reason.className = 'row-status-line vif-alert-chip'
+                            + (isError ? ' vif-alert-chip-error' : '');
+                        reason.textContent = '';
+                        const dot = document.createElement('span');
+                        dot.className = 'vif-alert-dot';
+                        const label = document.createElement('span');
+                        label.textContent = (isError ? 'Stream error' : 'Stream notice')
+                            + ' — view details';
+                        reason.appendChild(dot);
+                        reason.appendChild(label);
+                    }
 
                     ping = document.getElementById(id+"-ping");
                     if(!stream.active) {
@@ -587,11 +650,16 @@
         function setThumbnail(thumbnailId, stream)
         {
             const thumbnail = document.getElementById(thumbnailId);
+            const thumbnail_link = document.getElementById(thumbnailId+"-link");
+            // Both can be gone when a concurrent render pass rebuilt the
+            // table/thumbnail containers between this pass's DOM lookups.
+            if (!thumbnail || !thumbnail_link) return;
 
             const rand = new Date().getTime();
-            const thumbnail_link = document.getElementById(thumbnailId+"-link");
             var stream_name = stream.stream_name;
-            loadImage(`${serverUrl}/v1/server/plugin/vif/applications/${encodeURIComponent(stream.app_name)}/streams/${encodeURIComponent(stream_name)}/thumbnail?fitMode=fitheight&height=180&overlay=true&random=+${rand}`,`${pathPrefix}thumb.png`,thumbnailId);
+            const thumbnailUrl = VIF.core.client().runtime.streams.ref(stream.app_name, stream_name).thumbnailUrl(
+                VIF.v2map.thumbnailParamsFromV1({ fitMode: 'fitheight', height: 180, overlay: true }));
+            loadImage(`${thumbnailUrl}&random=${rand}`,`${pathPrefix}thumb.png`,thumbnailId);
             if(stream.use_transcoder)
             {
                 stream_name = stream_name + "-vi";
@@ -688,11 +756,9 @@
                 const v = frmsTtl > 0 ? Math.min((frms / frmsTtl) * 100.0, 100.0) : 0;
 
                 // The cell shows only the keep-up rate - raw frame counts confused
-                // more than they informed. The counts stay in the hover tooltip.
+                // more than they informed. No per-value tooltip: the 1s refresh
+                // rewriting a title under the cursor makes the native tooltip blink.
                 const text = `${Number(v).toFixed(0)}%`;
-                const title = frmsTtl > 0
-                    ? `${frms} of the ${frmsTtl} frames WSE captured in the last 10 seconds were analyzed by VIS (${Number(v).toFixed(0)}% keep-up)`
-                    : `No frames were captured from this stream in the last 10 seconds`;
 
                 // Zero captures while connected is a stall (or, for a window-based
                 // detector, a response cadence longer than the 10s span - operators
@@ -708,7 +774,7 @@
                 }
 
                 frame_detect2.textContent = text;
-                frame_detect2.title = title;
+                frame_detect2.removeAttribute('title');
                 frame_detect2.className = cls;
             }
         }
@@ -808,6 +874,294 @@
             return card;
         }
 
+        // --- Top stat band ------------------------------------------------------
+        // One flat row of labeled cells is the primary metrics presentation; the
+        // detailed card groups render into #vif-metric-details, revealed only when a
+        // single aggregate row cannot carry the data honestly (several GPUs or
+        // several inference instances). All text lands via textContent — the host
+        // and version strings come from the server.
+
+        function bandCell(band, label, opts)
+        {
+            opts = opts || {};
+            const cell = document.createElement('div');
+            cell.className = 'vif-stat-cell' + (opts.muted ? ' vif-stat-cell-muted' : '');
+            const labelEl = document.createElement('div');
+            labelEl.className = 'vif-stat-label';
+            labelEl.textContent = label;
+            // Info tips ride the click-popover pattern (initClickTips): a small
+            // circled tip on the label, matching the streams-table headers, instead
+            // of a hover title on the whole cell.
+            if (opts.tip) {
+                const tipEl = document.createElement('span');
+                tipEl.className = 'vif-help-tip';
+                tipEl.textContent = '?';
+                tipEl.title = opts.tip;
+                labelEl.appendChild(tipEl);
+            }
+            cell.appendChild(labelEl);
+            const valueEl = document.createElement('div');
+            valueEl.className = 'vif-stat-value';
+            const textEl = document.createElement('span');
+            textEl.textContent = opts.value != null ? String(opts.value) : '\u2013';
+            valueEl.appendChild(textEl);
+            if (opts.barPct != null && isFinite(opts.barPct)) {
+                const bar = document.createElement('span');
+                bar.className = 'vif-stat-bar';
+                const fill = document.createElement('span');
+                fill.style.width = Math.max(0, Math.min(100, opts.barPct)) + '%';
+                bar.appendChild(fill);
+                valueEl.appendChild(bar);
+            }
+            cell.appendChild(valueEl);
+            // sub: one line, or an array rendered one row each — identity strings
+            // and load figures read better stacked than dot-joined into a long
+            // run-on that wraps mid-token.
+            const subs = Array.isArray(opts.sub) ? opts.sub : (opts.sub ? [opts.sub] : []);
+            subs.forEach((line) => {
+                if (!line) return;
+                const subEl = document.createElement('div');
+                subEl.className = 'vif-stat-sub';
+                subEl.textContent = line;
+                cell.appendChild(subEl);
+            });
+            // Multi-value cells (several inference GPUs) render one bulleted
+            // line per entry instead of a single subline.
+            if (opts.subLines && opts.subLines.length) {
+                opts.subLines.forEach((line) => {
+                    const lineEl = document.createElement('div');
+                    lineEl.className = 'vif-stat-sub';
+                    lineEl.textContent = '• ' + line;
+                    cell.appendChild(lineEl);
+                });
+            }
+            band.appendChild(cell);
+        }
+
+        // {id: value} -> {id, value} of the largest entry, or null when empty.
+        function maxEntry(map)
+        {
+            let best = null;
+            if (map) {
+                for (const id in map) {
+                    const value = Number(map[id]);
+                    if (!isNaN(value) && (best == null || value > best.value)) {
+                        best = { id: id, value: value };
+                    }
+                }
+            }
+            return best;
+        }
+
+        function setMetricDetailsVisible(visible)
+        {
+            const details = document.getElementById('vif-metric-details');
+            if (details) details.classList.toggle('is-visible', !!visible);
+        }
+
+        // The Inference Host cell's sticky headline host (see renderStatBand).
+        let primaryInferenceHost = null;
+
+        function renderStatBand()
+        {
+            const band = document.getElementById('vif-stat-band');
+            if (!band) return;
+            clearElementContent(band);
+
+            const host = jsonData.host || {};
+
+            // Placeholder payloads (initJson/defaultJson) — the banner explains the
+            // state; the band keeps the page shape with muted cells.
+            if (host.vif_module_version === undefined) {
+                bandCell(band, 'WSE Host', { value: host.wse_version, muted: true });
+                bandCell(band, 'WSE GPU', { muted: true });
+                bandCell(band, 'VIF Module', { muted: true });
+                bandCell(band, 'Inference Host', { muted: true });
+                bandCell(band, 'Inference GPU', { muted: true });
+                bandCell(band, 'Inference GPU Memory', { muted: true });
+                setMetricDetailsVisible(false);
+                return;
+            }
+
+            const wireInstances = Array.isArray(jsonData.vis_instances) ? jsonData.vis_instances : [];
+            // Sticky primary: the first host seen stays the headline (and first
+            // bullet) until it leaves the wire, then the earliest remaining host
+            // is promoted — so the cell doesn't reshuffle between polls.
+            if (primaryInferenceHost == null
+                    || !wireInstances.some((inst) => inst.host === primaryInferenceHost)) {
+                primaryInferenceHost = wireInstances.length > 0 ? wireInstances[0].host : null;
+            }
+            const instances = wireInstances.slice().sort((a, b) =>
+                (a.host === primaryInferenceHost ? -1 : 0) - (b.host === primaryInferenceHost ? -1 : 0));
+            const first = instances.length > 0 ? instances[0] : null;
+
+            bandCell(band, 'WSE Host', {
+                value: host.wse_version,
+                sub: 'CPU ' + Number(host.cpu_avg).toFixed(0) + '%',
+            });
+
+            // The WSE HOST's own GPU — a different physical device than the
+            // inference GPU on split deployments, so it keeps its own cell
+            // beside WSE Host: utilization as the value, the card identity and
+            // video-engine load as the subline.
+            const hostUtil = maxEntry(host.gpu_avg);
+            const decode = maxEntry(host.gpu_decode_avg);
+            const encode = maxEntry(host.gpu_encode_avg);
+            const memBus = maxEntry(host.gpu_memory_avg);
+            // Two sublines: what the card IS, then what its video engine is doing —
+            // one dot-joined run-on wrapped mid-token on long GPU names.
+            const gpuIdentity = [];
+            if (host.nvidia_gpu_type && host.nvidia_gpu_type !== 'unknown') gpuIdentity.push(host.nvidia_gpu_type);
+            if (host.cuda_version) gpuIdentity.push('CUDA ' + host.cuda_version);
+            const videoEngine = [];
+            if (decode) videoEngine.push('Decode ' + decode.value.toFixed(0) + '%');
+            if (encode) videoEngine.push('Encode ' + encode.value.toFixed(0) + '%');
+            if (memBus) videoEngine.push('Mem bus ' + memBus.value.toFixed(0) + '%');
+            bandCell(band, 'WSE GPU', {
+                value: hostUtil ? hostUtil.value.toFixed(0) + '%' : null,
+                barPct: hostUtil ? hostUtil.value : null,
+                sub: [gpuIdentity.join(' · '), videoEngine.join(' · ')],
+                muted: hostUtil == null,
+                tip: "The Wowza Streaming Engine (WSE) host machine's GPU: utilization, video-engine (decode/encode) load, and memory-bus busy share (not VRAM in use)."
+                    + (host.nvidia_driver_version ? ' Driver ' + host.nvidia_driver_version + '.' : ''),
+            });
+
+            bandCell(band, 'VIF Module', { value: host.vif_module_version });
+
+            // One host: hostname headline, version/CPU subline. Several hosts:
+            // the count as the headline and one bulleted line per host \u2014 the
+            // same shape as the GPU cells beside it.
+            function hostBits(inst) {
+                const bits = [];
+                if (inst.version) bits.push(inst.version);
+                if (inst.reachable === false) bits.push('metrics unavailable');
+                else if (inst.cpu_pct != null) bits.push('CPU ' + Number(inst.cpu_pct).toFixed(0) + '%');
+                return bits;
+            }
+            if (instances.length > 1) {
+                const hostLines = instances.slice(0, 4).map((inst) => {
+                    const bits = hostBits(inst);
+                    return String(inst.host || '?') + (bits.length ? ' \u2014 ' + bits.join(' \u00B7 ') : '');
+                });
+                if (instances.length > 4) hostLines.push('+' + (instances.length - 4) + ' more');
+                bandCell(band, 'Inference Host', {
+                    value: first.host,
+                    subLines: hostLines,
+                    tip: 'The headline host is the first that connected; it keeps '
+                        + 'that place until it disconnects. Up to four connected hosts '
+                        + 'are listed below it; any further ones are counted.',
+                });
+            } else if (first) {
+                bandCell(band, 'Inference Host', {
+                    value: first.host,
+                    sub: hostBits(first).join(' \u00B7 '),
+                    muted: first.reachable === false,
+                });
+            } else {
+                bandCell(band, 'Inference Host', { value: 'none connected', muted: true });
+            }
+
+            // GPU utilization/memory: every inference GPU across every instance,
+            // host-tagged. The cell's headline is the busiest GPU; with several
+            // GPUs (or hosts) the subline becomes a bulleted per-GPU list.
+            // Utilization falls back to the WSE host GPU when no instance
+            // reports any (labeled as such).
+            const allGpus = [];
+            instances.forEach((inst) => {
+                (Array.isArray(inst.gpus) ? inst.gpus : []).forEach((gpu) => {
+                    allGpus.push({
+                        label: (instances.length > 1 ? String(inst.host || '?') + ' ' : '')
+                            + String(gpu.device != null ? gpu.device : ''),
+                        util: gpu.utilization_pct != null ? Number(gpu.utilization_pct) : null,
+                        usedBytes: gpu.memory_used_bytes,
+                        totalBytes: gpu.memory_total_bytes,
+                    });
+                });
+            });
+            const multiGpu = allGpus.length > 1;
+            let util = null;
+            let utilDevice = null;
+            allGpus.forEach((gpu) => {
+                if (gpu.util != null && (util == null || gpu.util > util)) {
+                    util = gpu.util;
+                    utilDevice = gpu.label;
+                }
+            });
+            let utilSource = '';
+            if (util == null) {
+                const hostBest = maxEntry(host.gpu_avg);
+                if (hostBest) {
+                    util = hostBest.value;
+                    utilDevice = 'GPU ' + hostBest.id;
+                    utilSource = ' (WSE host)';
+                }
+            }
+            // The card/driver/CUDA identify the WSE HOST's GPU, not the inference
+            // instance's (which can be a different machine entirely) — they
+            // belong to the WSE GPU cell below, never this one.
+            const utilLines = multiGpu
+                ? allGpus.slice(0, 4).map((gpu) =>
+                    gpu.label + ' — ' + (gpu.util != null ? gpu.util.toFixed(0) + '%' : 'n/a'))
+                : [];
+            if (multiGpu && allGpus.length > 4) utilLines.push('+' + (allGpus.length - 4) + ' more');
+            bandCell(band, 'Inference GPU', {
+                value: util != null ? util.toFixed(0) + '%' : null,
+                barPct: util,
+                sub: multiGpu ? '' : (utilDevice != null ? String(utilDevice) + utilSource : ''),
+                subLines: utilLines,
+                muted: util == null,
+                tip: 'How busy the GPU running the models is. Low values mean headroom '
+                    + 'for more streams or higher concurrent executions. Sustained values '
+                    + 'near 100% mean analysis may fall behind: lower the Inference FPS '
+                    + 'on busy streams or add GPU capacity.'
+                    + (multiGpu ? ' The headline value is the busiest GPU.' : ''),
+            });
+
+            let memPct = null;
+            let memSub = '';
+            allGpus.forEach((gpu) => {
+                if (gpu.usedBytes != null && gpu.totalBytes) {
+                    const pct = (gpu.usedBytes / gpu.totalBytes) * 100;
+                    if (memPct == null || pct > memPct) {
+                        memPct = pct;
+                        memSub = formatBytes(gpu.usedBytes) + ' / ' + formatBytes(gpu.totalBytes);
+                    }
+                }
+            });
+            const memLines = [];
+            if (multiGpu) {
+                allGpus.slice(0, 4).forEach((gpu) => {
+                    if (gpu.usedBytes != null && gpu.totalBytes) {
+                        memLines.push(gpu.label + ' — '
+                            + ((gpu.usedBytes / gpu.totalBytes) * 100).toFixed(0) + '% ('
+                            + formatBytes(gpu.usedBytes) + ' / ' + formatBytes(gpu.totalBytes) + ')');
+                    }
+                });
+                if (allGpus.length > 4) memLines.push('+' + (allGpus.length - 4) + ' more');
+            }
+            bandCell(band, 'Inference GPU Memory', {
+                value: memPct != null ? memPct.toFixed(0) + '%' : null,
+                barPct: memPct,
+                sub: memLines.length ? '' : memSub,
+                subLines: memLines,
+                muted: memPct == null,
+                tip: 'VRAM in use on the inference GPU. Models keep their memory while '
+                    + 'loaded, so a high value even with idle streams is normal. It limits '
+                    + 'how many different models fit at once, not how busy they are.'
+                    + (multiGpu ? ' The headline value is the fullest GPU.' : ''),
+            });
+
+            const hostGpuIds = {};
+            [host.gpu_avg, host.gpu_memory_avg, host.gpu_encode_avg, host.gpu_decode_avg].forEach((map) => {
+                if (map) for (const id in map) hostGpuIds[id] = true;
+            });
+            const hostGpuCount = Object.keys(hostGpuIds).length;
+            // The band's bulleted cells carry the multi-host / multi-GPU story
+            // themselves; the detail groups are only worth revealing for
+            // a multi-GPU WSE HOST (per-GPU decode/encode has no band slot).
+            setMetricDetailsVisible(hostGpuCount > 1);
+        }
+
         function renderWseHostGroup()
         {
             renderHostCard('host-display', "WSE", jsonData.host.wse_version);
@@ -859,12 +1213,14 @@
             }
         }
 
+        // Binary units, labeled as such: nvidia-smi and card specs count in
+        // GiB/MiB, and printing them as "GB" understates by ~7%.
         function formatBytes(bytes)
         {
             if (bytes == null) return '';
-            const gb = bytes / (1024 * 1024 * 1024);
-            if (gb >= 1) return `${gb.toFixed(1)} GB`;
-            return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+            const gib = bytes / (1024 * 1024 * 1024);
+            if (gib >= 1) return `${gib.toFixed(1)} GiB`;
+            return `${(bytes / (1024 * 1024)).toFixed(0)} MiB`;
         }
 
         function renderInferenceGroups(visInstances)
@@ -890,7 +1246,7 @@
                 titleText.textContent = instance.version
                     ? `Inference — ${instance.host} (${instance.version})`
                     : `Inference — ${instance.host}`;
-                titleText.title = 'If the Inference Service runs on the same machine as WSE, this may be the same physical GPU shown under WSE Host.';
+                titleText.title = 'If the Inference Service runs on the same machine as Wowza Streaming Engine (WSE), this may be the same physical GPU shown under WSE Host.';
                 title.appendChild(titleText);
                 group.appendChild(title);
 
@@ -992,7 +1348,7 @@
             if (dashboardMutationInFlight) return;
             checkbox = document.getElementById(id+'-activeToggle');
             const data = {
-                active: checkbox.checked
+                config: { active: checkbox.checked }
             }
             try {
                 await runDashboardMutation(id + '-row', async () => {
@@ -1004,27 +1360,34 @@
             }
         }
 
-        async function apiCall(appName, streamName, data)
+        // A runtime-only write (ephemeral - never persisted): read the running
+        // stream, set the members `settings` names on the tracked model, and save
+        // — the patch carries exactly those members and quotes the revision just
+        // read. The read lives inside the attempt, so a lost revision race
+        // re-reads and retries once.
+        async function apiCall(appName, streamName, settings)
         {
-            const response = await fetch(`${serverUrl}/v1/server/plugin/vif/applications/${encodeURIComponent(appName)}/streams/${encodeURIComponent(streamName)}`, {
-                method: 'PUT',
-                body: JSON.stringify(data),
-                headers: {
-                    'Authorization': `Basic ${encodedCredentials}`,
-                    'Content-Type': 'application/json'
+            const streams = VIF.core.client().runtime.streams;
+            return VIF.core.withConflictRetry(async () => {
+                const current = await streams.get(appName, streamName);
+                assignLeaves(current, settings);
+                return current.save();
+            });
+        }
+
+        // Writes each leaf of `patch` onto `target`, so a tracked model marks the
+        // leaves rather than the section that holds them.
+        function assignLeaves(target, patch)
+        {
+            Object.keys(patch).forEach((key) => {
+                const value = patch[key];
+                const nested = value !== null && typeof value === 'object' && !Array.isArray(value);
+                if (nested && target[key] !== null && typeof target[key] === 'object') {
+                    assignLeaves(target[key], value);
+                } else {
+                    target[key] = value;
                 }
             });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
-            }
-
-            const contentType = response.headers.get('content-type') || '';
-            if (contentType.includes('application/json')) {
-                return await response.json();
-            }
-            return await response.text();
         }
 
         function toTitleCaseRegex(str) {
@@ -1040,7 +1403,7 @@
             const fps = Number(sliderValue);
             if (!isFinite(dur) || dur <= 0 || !isFinite(fps)) return '';
             const frames = Math.max(1, Math.round(fps * dur));
-            return ` = ${frames} frames / ${dur}s request`;
+            return ` = ${frames} frames per ${dur}s window`;
         }
 
         function updateSkipFrameDisplay(id) {
@@ -1065,9 +1428,17 @@
                         noteTip.id = `${id}-frames-window-tip`;
                         noteTip.className = 'vif-help-tip';
                         noteTip.textContent = '?';
-                        noteTip.title = 'Batched detectors send one request per window. Each window contains "Inference FPS × duration" frames.';
                         noteEl.insertAdjacentElement('afterend', noteTip);
                     }
+                    // VLM endpoints cap images per request and the service thins oversized
+                    // windows before the model sees them, so a VLM row's tip must not imply
+                    // every captured frame is analyzed. Scene windows have no such cap.
+                    noteTip.title = slider.dataset.detector === 'vlm'
+                        ? 'One analysis request per window: Inference FPS × duration frames.\n'
+                            + 'VLM endpoints cap images per request (the bundled endpoint defaults to 8). '
+                            + 'Frames beyond the cap are evenly subsampled away by the service, '
+                            + 'so they add bandwidth, not analysis.'
+                        : 'Batched detectors send one request per window. Each window contains "Inference FPS × duration" frames.';
                 } else if (noteTip) {
                     noteTip.remove();
                 }
@@ -1089,7 +1460,7 @@
             if (!slider) return;
             clearSkipFrameInteraction(appName, streamName);
             const data = {
-                inference_fps: parseInt(slider.value)
+                config: { processing: { inferenceFps: parseInt(slider.value) } }
             };
             try {
                 await runDashboardMutation(id + '-row', async () => {
@@ -1267,5 +1638,11 @@
 
         renderdashboardId = setInterval(renderDashboard, 1000);
         securityCheckId = setInterval(securityCheck,15000);
+
+        window.__vifDashboardDestroy = function () {
+            clearInterval(renderdashboardId);
+            clearInterval(securityCheckId);
+            window.__vifDashboardDestroy = null;
+        };
     };
 })();

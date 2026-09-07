@@ -24,12 +24,12 @@
     /* Status color tokens shared by stream-config.html and shm.html
        (identical values in both). Scoped on .vif-plugin, not :root,
        so they never leak into the rest of the Manager DOM. */
-    --good-color: #00e676;   /* Green */
-    --alert-color: #ff5252;  /* Red */
-    --alert-bg: #ffe5e5;
-    --warn-color: #cc9900;   /* yellow/amber */
+    --good-color: #1e9e5a;   /* Green */
+    --alert-color: #d64541;  /* Red */
+    --alert-bg: #fdecea;
+    --warn-color: #8a6d00;   /* amber (text-grade) */
     --warn-bg: #fff8e5;
-    --accent-color: #00bcd4;
+    --accent-color: #f08a00;
 }
 
 /* Identical in default.html, stream-config.html and shm.html.
@@ -116,9 +116,9 @@
 .vif-plugin .text-warn { color: var(--warn-color) !important; }
 .vif-plugin .text-good { color: var(--good-color) !important; }
 
-/* Identical in stream-config.html and shm.html. */
+/* Brand accent (orange) — shared by every fragment. */
 .vif-plugin .slider {
-    accent-color: #2a71ab;
+    accent-color: #f08a00;
 }
 
 /* Shared subset of .switch (default.html, stream-config.html, shm.html).
@@ -159,7 +159,7 @@
 }
 
 .vif-plugin input:checked + .slider-switch {
-    background-color: #2a71ab;
+    background-color: #f08a00;
 }
 .vif-plugin input:checked + .slider-switch:before {
     transform: translateX(24px);
@@ -174,9 +174,9 @@
    stream-config.html adds width:100%/max-width:100%; default.html sets
    max-width:700px instead — both kept page-specific. */
 .vif-plugin .form-wrapper {
-    background: #fafafa;
-    border-radius: 12px;
-    border: 1px solid #ccc;
+    background: #fff;
+    border-radius: 3px;
+    border: 1px solid #cfd5db;
     padding: 20px;
 }
 
@@ -185,8 +185,8 @@
 .vif-plugin .form-section-title {
     font-weight: bold;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #333;
+    letter-spacing: 1.2px;
+    color: #5d6771;
 }
 
 /* Shared subset of .form-group (default.html, stream-config.html).
@@ -208,9 +208,9 @@
     flex: 0 0 var(--form-label-width);
     max-width: var(--form-label-width);
     font-size: 0.85em;
-    color: #444;
+    color: #5d6771;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 1.2px;
     text-align: right;
     line-height: 1.35;
 }
@@ -333,35 +333,34 @@
     margin-bottom: 6px;
 }
 
-/* Circled "?" help-tip affordance: a small inline circle placed right after a
- * label whose explanatory text lives on the tip's own `title` (so the tooltip
- * is discoverable, not hidden on the label). currentColor keeps it legible on
- * any background - white on the table's black <th>, dark on the light page.
- * Delete-safe and self-contained; append-only at the end of this file.
- * Applied on the dashboard only for now (shm.html + vif-dashboard.js). */
+/* Help-tip affordance: a crisp info-circle icon placed right after a label,
+ * whose explanatory text opens in the click popover (VIF.core.initClickTips
+ * upgrades the markup's `title` to data-vif-tip). The icon is an SVG mask
+ * painted with background-color, so it stays sharp at small sizes and its
+ * color is a plain CSS property (gray at rest, darker on hover). The "?"
+ * text child the markup still carries is hidden (font-size: 0). */
 .vif-plugin .vif-help-tip {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
+    display: inline-block;
+    width: 15px;
+    height: 15px;
     margin-left: 5px;
-    border: 1px solid currentColor;
-    border-radius: 50%;
-    font-size: 10px;
-    line-height: 1;
-    font-style: normal;
-    font-weight: normal;
+    font-size: 0;
     vertical-align: middle;
-    cursor: help;
-    opacity: 0.65;
+    cursor: pointer;
     flex: 0 0 auto;
+    /* A font-size:0 box has no real text baseline, so in a baseline-aligned
+       flex row (e.g. the Active Streams title) it would hang below the line —
+       center it against its flex row instead. Inert outside flex containers. */
+    align-self: center;
     user-select: none;
     -webkit-user-select: none;
+    background-color: #6b7480;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm-.9 6.7h1.8v5.5H7.1V6.7ZM8 3.7a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm-.9 6.7h1.8v5.5H7.1V6.7ZM8 3.7a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 .vif-plugin .vif-help-tip:hover {
-    opacity: 1;
+    background-color: #3d4550;
 }
 
 /* Per-GPU metrics table (WSE Host + Inference groups) - one row per
@@ -431,4 +430,168 @@
  * triggers over the text, not the full width of the block-level title row. */
 .vif-dashboard .metric-group-title-text[title] {
     cursor: help;
+}
+
+/* --- Shared page header (shm.html + vod.html) ------------------------------
+ * The "VIF Dashboard" title and the Live Streams / On-Demand tab row render
+ * identically on both pages (the tabs navigate between them), so the rules
+ * live here per this file's sharing contract. Everything in the header is
+ * sized in px, never em: the pages set different base font sizes, so an
+ * em here renders differently per page and the header jumps on tab
+ * navigation. Colors and hover states stay page-side. */
+.vif-plugin .vif-header-title {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    color: #1b2430;
+    margin: 0;
+}
+.vif-plugin .streams-header button {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 0;
+}
+/* Small leading icon inside header buttons (e.g. the settings cog); inherits
+   the button's text color. */
+.vif-plugin .vif-btn-ico {
+    width: 13px;
+    height: 13px;
+    vertical-align: -2px;
+    margin-right: 6px;
+}
+.vif-plugin .vif-tabs-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 0;
+    background: #fff;
+}
+.vif-plugin .vif-tab,
+.vif-plugin button.vif-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    border: 1px solid #d9dee3;
+    border-radius: 3px;
+    background: #fff;
+    color: #6a7480;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 0;
+}
+.vif-plugin button.vif-tab:hover {
+    background: #f5f6f7;
+    border-color: #b9c0c8;
+}
+.vif-plugin .vif-tab.is-active {
+    background: #f08a00;
+    border-color: #f08a00;
+    color: #fff;
+    cursor: default;
+}
+.vif-plugin .vif-tab .vif-tab-count {
+    font-weight: 600;
+    color: #6b7480;
+}
+.vif-plugin .vif-tab.is-active .vif-tab-count {
+    color: rgba(255, 255, 255, 0.85);
+}
+.vif-plugin .vif-tabs-summary {
+    font-size: 12px;
+    color: #6b7480;
+    margin-left: 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.vif-plugin .vif-tabs-meta {
+    font-size: 11px;
+    color: #6b7480;
+}
+/* Secondary tab row for the Configs area: which config surface is showing.
+   Underline style, one visual tier below the primary pills. */
+.vif-plugin .vif-subtabs {
+    display: flex;
+    gap: 18px;
+    border-bottom: 1px solid #e3e6ea;
+    background: #fff;
+}
+.vif-plugin .vif-subtab,
+.vif-plugin button.vif-subtab {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6a7480;
+    padding: 2px 2px 9px;
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    margin-bottom: 0;
+}
+.vif-plugin button.vif-subtab:hover {
+    color: #1b2430;
+}
+.vif-plugin .vif-subtab.is-active {
+    color: #1b2430;
+    border-bottom-color: #f08a00;
+    cursor: default;
+}
+
+/* --- Click-popover tips (VIF.core.initClickTips) ---------------------------
+ * The floating card lives on document.body (fixed positioning must escape the
+ * fragment), so the element carries the vif-plugin class itself to satisfy
+ * this file's scoping contract. */
+.vif-plugin.vif-popover {
+    position: fixed;
+    z-index: 10000;
+    max-width: 340px;
+    background: #1b2430;
+    color: #f2f5f8;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(11, 16, 24, 0.4);
+    padding: 10px 12px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    align-items: flex-start;
+    gap: 10px;
+}
+.vif-plugin.vif-popover .vif-popover-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    /* Tip copy uses \n for deliberate line breaks (timing timelines, multi-line
+       explanations); without this they collapse into one run-on paragraph. */
+    white-space: pre-line;
+}
+.vif-plugin.vif-popover .vif-popover-copy {
+    flex: 0 0 auto;
+    border: none;
+    background: none;
+    padding: 2px;
+    margin: -1px -2px 0 0;
+    cursor: pointer;
+    color: #9aa4b0;
+    line-height: 0;
+}
+.vif-plugin.vif-popover .vif-popover-copy:hover {
+    color: #fff;
+}
+.vif-plugin.vif-popover .vif-popover-copy svg {
+    width: 14px;
+    height: 14px;
+}
+.vif-plugin.vif-popover .vif-popover-copy.is-copied {
+    color: #4ade80;
+}
+
+/* Click-tips open on click, not hover. */
+.vif-plugin [data-vif-tip] {
+    cursor: pointer;
 }

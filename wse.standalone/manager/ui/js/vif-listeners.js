@@ -8,7 +8,7 @@
     // workflow - see the comment there), used below to version the
     // dynamically-constructed listeners/<ClassName>.js script URLs
     // (ensureListenerScriptLoaded).
-    var UI_VERSION = '1.0.3';
+    var UI_VERSION = '1.1.0';
 
     VIF.listeners.init = function () {
         var NEW_LISTENER_PRESET_TYPES = ['OverlayEvent', 'Id3Event', 'LogFileEvent', 'WebhookEvent2', 'ObjectTracking'];
@@ -686,6 +686,12 @@
             }, []);
         }
 
+        // A descriptor entry with neither `key` nor `type` is metadata about the listener rather
+        // than a property to render: the four *_methods arrays below, and `requires` - the
+        // read-only mirror of the sink's Java IVifEventListener.requires() declaration (enum
+        // names: LIVE_STREAM, APP_INSTANCE, RENDER_TARGET, WALL_CLOCK, JOB_INFO, MEDIA_TIMELINE).
+        // Nothing reads `requires` yet; it is here so a host-aware view (a VOD submit form) can
+        // grey a sink the way the per-detector method gating already does.
         function getListenerMethodMetadata(shortName) {
             const schema = getListenerSchema(shortName);
             return schema.reduce(function(metadata, field) {
@@ -844,6 +850,48 @@
             }
 
             return 'Available methods for this listener type: ' + enabledOptions.join(', ') + '.';
+        }
+
+        // Switching the detector changes which methods each listener may use, and for
+        // most of them exactly one is left: a LogFile is Batch under object and Immediate
+        // everywhere else, an Id3Event is Rollup. Blocking the switch until the operator
+        // retypes that by hand had no way through — the method select offers what the
+        // CURRENT detector allows, so the value the switch demands could not be picked
+        // until after the switch it was blocking.
+        //
+        // So the listeners follow the detector, and the caller says what moved. A
+        // listener the operator turned off stays off, and one whose type does not apply
+        // to the target at all is not adjustable — that stays a conflict.
+        //
+        // With more than one method left the first is taken. It is a starting point, not
+        // a guess to get right: the select offers the rest once the switch has happened.
+        function adjustListenerMethodsForDetector(targetDetectorType) {
+            const adjusted = [];
+
+            Object.keys(eventListenersData || {}).forEach(function(name) {
+                const listener = eventListenersData[name];
+                if (!listener || !listener.class_name) return;
+                if (!isListenerTypeOfferedForDetector(listener.class_name, targetDetectorType)) return;
+
+                const currentMethod = String(listener.methods || 'disabled').toLowerCase();
+                if (currentMethod === 'disabled') return;
+
+                const allowedMethods = getAllowedEventMethodValues(listener.class_name, targetDetectorType);
+                if (allowedMethods.includes(currentMethod)) return;
+
+                const replacement = allowedMethods.filter(function(method) {
+                    return method !== 'disabled';
+                })[0];
+                if (!replacement) return;
+
+                listener.methods = replacement;
+                adjusted.push({ name: name, from: currentMethod, to: replacement });
+            });
+
+            if (adjusted.length > 0) {
+                renderListenerList();
+            }
+            return adjusted;
         }
 
         function getDetectorTypeSwitchConflicts(targetDetectorType) {
@@ -1454,6 +1502,7 @@
         window.syncListenerFields = syncListenerFields;
         window.preloadConfiguredListenerSchemas = preloadConfiguredListenerSchemas;
         window.getDetectorTypeSwitchConflicts = getDetectorTypeSwitchConflicts;
+        window.adjustListenerMethodsForDetector = adjustListenerMethodsForDetector;
         window.buildDetectorTypeSwitchConflictMessage = buildDetectorTypeSwitchConflictMessage;
         window.buildDetectorTypeSwitchConflictDialogMessage = buildDetectorTypeSwitchConflictDialogMessage;
         window.updateListenerTip = updateListenerTip;
