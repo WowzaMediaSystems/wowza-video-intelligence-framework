@@ -33,6 +33,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 - [Persistent Volume Mounts](#persistent-volume-mounts)
 - [Running Wowza VIF Locally (Quick Start)](#running-wowza-vif-locally-quick-start)
 - [Testing Object Detection and VLM Analysis](#testing-object-detection-and-vlm-analysis)
+- [Analyzing Video Files (VOD)](#analyzing-video-files-vod)
 - [Default Model Coverage and Configuration](#default-model-coverage-and-configuration)
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
@@ -218,6 +219,16 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
 
 See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for VLM modes (`Detect`, `Describe`, and `Custom`), endpoint settings, and GPU tuning.
+
+## Analyzing Video Files (VOD)
+
+VIF analyzes **video files** as well as live streams. A **VOD job** points any of the detectors — object, scene, VLM, or synthetic — at a file under the Engine content directory (`./wse/content`), runs it over the whole file as fast as the analysis backend allows, and leaves behind a queryable record: every detection stamped with its position on the video timeline, a provenance manifest describing what was run, and a thumbnail. Progress is reported in media time rather than wall-clock, because a file is analyzed as fast as the service answers — a 10-minute file can finish in well under a minute.
+
+Jobs run in the background, survive Engine restarts, recover automatically from transient failures, and can push status updates to your own service by webhook, so a single `POST` is enough to fire and forget. They reuse the same configuration model as live streams: the same detector types, models, thresholds, class names, and listeners, either by naming a saved stream group config or by passing a config inline. Listeners that write into an output stream (overlay rendering, ID3 injection) do not apply to a file and are skipped; log and webhook listeners work exactly as they do for live streams.
+
+Everything is driven over the WSE REST API under `/v2/vif/vod`, and the Manager submits and reports on jobs from its own VOD pages, including playback of the analyzed file seeked from the detection strip.
+
+See [`docs/VOD_GUIDE.md`](docs/VOD_GUIDE.md) for the walkthrough: accepted inputs and codecs, layering stream group configs with inline configs, reading and downloading results, lifecycle webhooks and named webhook secrets, retention and upload settings, the full API reference, and troubleshooting.
 
 ## Default Model Coverage and Configuration
 
