@@ -797,7 +797,7 @@ The job's frame as a JPEG — live while running, representative once finished, 
 
 **A `synthetic` job fails with "clip detectors need an H.264 source".** The file is H.265, and clip-based analysis relays the bitstream instead of decoding it. Analyze that file with `object`, `scene`, or `vlm` instead, which decode either codec — or transcode it to H.264 and submit that.
 
-**Frame-decoded jobs fail with "the MainConcept frame decoder is unavailable".** The Engine installation is missing the decoder library the `object`, `scene`, and `vlm` types decode with, so those jobs fail while `synthetic` still runs. The message names what it could not load; the Video Intelligence log from startup carries the same reason. Reinstall the plugin from the distribution that carries the native libraries.
+**Frame-decoded jobs fail with "frame decoder is unavailable".** The Engine's VOD frame decoder is missing from the installation, so `object`, `scene`, and `vlm` jobs fail while `synthetic` — which never decodes a frame — still runs. The message names what it could not load, and the Video Intelligence log from startup carries the same reason. Reinstall the plugin from the distribution that carries the native libraries.
 
 **The job sits in `pending`.** Jobs run `max_concurrent_jobs` at a time (default 1) — it is waiting for the jobs ahead of it.
 
