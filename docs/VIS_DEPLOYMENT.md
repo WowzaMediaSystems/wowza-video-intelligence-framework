@@ -58,9 +58,11 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `NVIDIA_VISIBLE_DEVICES` | `all` | GPU devices to expose (e.g., `0,1`) |
 | `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` | Required NVIDIA capabilities |
 | `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`); default is to scan the `models/` folder |
-| `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
-| `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
-| `SSL_KEYFILE_PASSWORD` | — | Password for encrypted SSL key |
+| `SSL_KEYSTORE_PATH` | — | Path to a JKS or PKCS12 keystore (inside container) — the same file Engine serves TLS from. Setting it together with `SSL_KEYFILE`/`SSL_CERTFILE` stops the service at startup |
+| `SSL_KEYSTORE_PASSWORD` | — | Password that opens the keystore and the private key in it (Engine's `<KeyStorePassword>`) |
+| `SSL_KEYFILE` | — | Path to SSL private key in PEM format (inside container) |
+| `SSL_CERTFILE` | — | Path to SSL certificate in PEM format (inside container); may hold the whole chain, leaf first |
+| `SSL_KEYFILE_PASSWORD` | — | Password for an encrypted `SSL_KEYFILE` |
 | `VIS_LICENSE` | — | License key string (required). Takes precedence over license files |
 | `VIS_LICENSE_DIR` | `licenses` | Directory scanned for license files when `VIS_LICENSE` is unset |
 
@@ -70,7 +72,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 |---|---|---|
 | `./vis/models` | `/build/models` | Model checkpoints and cached TensorRT engines |
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
-| `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
+| `./certs` | `/certs:ro` | SSL certificates or keystore (optional, read-only) |
 
 ### Logging
 
@@ -179,22 +181,76 @@ See [`docs/README.wse-plugin.md`](README.wse-plugin.md) for full plugin configur
 
 ## SSL/TLS
 
-To enable encrypted connections (HTTPS/WSS), set the following environment variables in `docker-compose.yaml` or `.env`:
+### Key and certificate — two sources
+
+VIS reads its private key and certificate from one of two sources, never from
+both. Set the variables of one source in `docker-compose.yaml` or `.env`.
+Setting variables from both stops the service at startup, and so does an
+incomplete source (`SSL_CERTFILE` without `SSL_KEYFILE`, a keystore without its
+password) or material VIS cannot read. Each of those failures is one `CRITICAL`
+line — in `videointelligenceservice.log` and in
+`docker compose --profile vi-service logs` — naming what to correct, never a
+silent fallback to plaintext. The startup log also names the certificate VIS
+loaded, its CN, its SANs and its expiry date, and warns once that date is
+within 30 days or already past.
+
+**A — the keystore Engine already uses** (the file named by `VHost.xml`'s
+`<KeyStorePath>`, with the password from its `<KeyStorePassword>`; the path
+below is where you mount that file inside the VIS container, not Engine's own
+path):
+
+```yaml
+- SSL_KEYSTORE_PATH=/certs/example.streamlock.net.jks
+- SSL_KEYSTORE_PASSWORD=your-keystore-password
+```
+
+VIS reads both JKS and PKCS12 keystores and detects the format from the file's
+contents, not its extension — since Java 9, `keytool` writes PKCS12 even into a
+file named `.jks`. The keystore must hold one private key with its certificate
+chain and nothing else, and the keystore password must open the key too —
+exactly how Engine uses it. JCEKS keystores are not supported; the startup
+error names the `keytool -importkeystore` command that converts one to PKCS12.
+
+**B — PEM key and certificate:**
 
 ```yaml
 - SSL_KEYFILE=/certs/server-key.pem
 - SSL_CERTFILE=/certs/server-cert.pem
-- SSL_KEYFILE_PASSWORD=optional-key-password  # only if key is encrypted
+- SSL_KEYFILE_PASSWORD=optional-key-password  # only if the key is encrypted
 ```
 
-Mount your certificates:
+The bundled TLS proxy below also serves PEM files. To produce them from a
+keystore, convert it once (both tools prompt for the keystore password):
+
+```bash
+keytool -importkeystore -srckeystore example.streamlock.net.jks -srcstoretype JKS \
+        -destkeystore vis.p12 -deststoretype PKCS12
+openssl pkcs12 -in vis.p12 -nocerts -nodes -out server-key.pem
+openssl pkcs12 -in vis.p12 -nokeys -out server-cert.pem
+```
+
+Mount whichever files the source needs:
 
 ```yaml
 volumes:
   - ./certs:/certs:ro
+  # or share the keystore Engine already has:
+  - ./wse/conf/example.streamlock.net.jks:/certs/example.streamlock.net.jks:ro
 ```
 
-**Self-signed certificate (development only):**
+VIS runs as uid/gid **1001**, so the mounted key, certificate or keystore must
+be readable by that user — `vis-init` only fixes the `vis/models` and
+`vis/logs` mounts. Create the file on the host before starting the stack: a
+single-file bind mount with no source makes Docker create a directory in its
+place. When VIS runs on a different host from Engine, copy the keystore to that
+host first and protect it as you would Engine's own copy — it holds the private
+key.
+
+**Renewal:** VIS reads the key and certificate only at startup. After replacing
+a renewed certificate or keystore, restart the service
+(`docker compose --profile vi-service restart video-intelligence-service-gpu`).
+
+### Self-signed certificate (development only)
 
 ```bash
 mkdir -p certs
@@ -283,8 +339,8 @@ the `IP:` form in the SAN (`-subj "/CN=10.0.0.9" -addext "subjectAltName=IP:10.0
 - *Via the TLS proxy* (same layout as above): leave the cert at
   `./certs/server-cert.pem` + `./certs/server-key.pem` and start the stack with
   the `docker-compose.tls-proxy.yaml` overlay. Engine then uses `VIS_PORT=5443`.
-  The proxy terminates TLS, so VIS's own `SSL_CERTFILE`/`SSL_KEYFILE`/
-  `SSL_KEYFILE_PASSWORD` stay commented out — they are only for the option below.
+  The proxy terminates TLS, so VIS's own `SSL_*` variables stay commented out
+  — they are only for the option below.
 - *Directly in VIS*: uncomment `SSL_CERTFILE`/`SSL_KEYFILE` and the
   `./certs:/certs:ro` volume in the VIS service, and publish `VIS_PORT` (5001).
   Don't use the TLS proxy overlay in this case.
@@ -374,6 +430,7 @@ docker compose ps
 | Problem | Action |
 |---|---|
 | Service won't start | Check logs with `docker compose --profile vi-service logs -f` |
+| Service stops right after startup with a `CRITICAL` TLS line | The key/certificate configuration is incomplete, sets both sources, or names a file VIS cannot read — see [SSL/TLS](#ssltls) |
 | GPU not detected | Verify `nvidia-container-toolkit` is installed and `nvidia-smi` works on the host |
 | Engine cannot connect | Check network connectivity, port 5001, and firewall rules between Engine and VIS |
 | Engine connection refused after restart | VIS takes ~1 minute to initialize after a restart. Engine will reconnect automatically once VIS is ready — see [Startup behavior](#quick-start) |
