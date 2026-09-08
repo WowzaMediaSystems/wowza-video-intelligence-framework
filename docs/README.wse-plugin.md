@@ -196,18 +196,7 @@ Add  `--help` to the above commands to see all the options available.
 		<IPWhiteList>127.0.0.1,172.*.*.*,192.168.*.*,10.*.*.*</IPWhiteList>
 	```
 * If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
-* If Manager is served over HTTPS (`httpsPort` in `manager/conf/tomcat.properties`), the Engine REST API has to be served over HTTPS as well. The VIF pages call the REST API directly from the browser, and a browser refuses plain `http://` requests from an `https://` page (mixed content), so the UI addresses `https://<host>:8087`. While the `RESTInterface` still speaks plain HTTP the VIF dashboard shows "Offline - lost connection to the Engine" even though Engine and VIS are fine. Add the keystore Manager uses (the same StreamLock `.jks` works) to the REST interface's own `SSLConfig`, which is separate from the one under `HostPort` 443 in VHost.xml:
-	```xml
-	<RESTInterface>
-		<Port>8087</Port>
-		...
-		<SSLConfig>
-			<KeyStorePath>${com.wowza.wms.context.VHostConfigHome}/conf/<domain>.streamlock.net.jks</KeyStorePath>
-			<KeyStorePassword><password></KeyStorePassword>
-			<KeyStoreType>JKS</KeyStoreType>
-		</SSLConfig>
-	```
-	Restart Engine, then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, not for `localhost`. The `IPWhiteList` above still applies to the browser's address. None of this depends on whether Engine reaches VIS over `ws` or `wss`.
+* If Manager itself is served over HTTPS, the REST API must serve HTTPS too - see [Manager over HTTPS](#manager-over-https).
 * The VIF dashboard (`docker/manager/ui`, entry page `shm.html` per `config.json`) is reachable only through the WSE Manager — there is no standalone entry page; for standalone dev/preview use the `qa_automation` harness's static-server mode (VIS repo).
 
 ### Misc
@@ -217,6 +206,31 @@ Add  `--help` to the above commands to see all the options available.
 	```shell
 	apt-get install -y libfreetype6 fontconfig
 	```
+
+## Manager over HTTPS
+
+The VIF pages in Manager call the Engine REST API (port 8087) directly from the browser. A browser refuses plain `http://` requests from an `https://` page (mixed content), so when Manager is served over HTTPS (`httpsPort` in `manager/conf/tomcat.properties`) the UI addresses `https://<host>:8087`, and the Engine REST API has to serve HTTPS as well. Until it does, the VIF dashboard shows "Offline - lost connection to the Engine" even though Engine and VIS are fine.
+
+Add the keystore Manager uses (the same StreamLock `.jks` works) to the REST interface's own `SSLConfig` in `Server.xml`. It is separate from the one under `HostPort` 443 in `VHost.xml`:
+
+```xml
+<RESTInterface>
+	<Port>8087</Port>
+	...
+	<SSLConfig>
+		<KeyStorePath>${com.wowza.wms.context.VHostConfigHome}/conf/<domain>.streamlock.net.jks</KeyStorePath>
+		<KeyStorePassword><password></KeyStorePassword>
+		<KeyStoreType>JKS</KeyStoreType>
+	</SSLConfig>
+```
+
+Restart Engine:
+
+```shell
+sudo systemctl restart WowzaStreamingEngine
+```
+
+Then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, not for `localhost`. The `IPWhiteList` in `RESTInterface` still applies to the browser's address. None of this depends on whether Engine reaches VIS over `ws` or `wss`; that is `vi_service_url` below.
 
 ## VIF Configuration
 Configuration files for the module are stored in `conf.modules/vif/`

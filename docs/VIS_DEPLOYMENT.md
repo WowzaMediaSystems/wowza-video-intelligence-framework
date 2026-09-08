@@ -177,6 +177,10 @@ VIS and Wowza Streaming Engine communicate over WebSocket and can run on the sam
 
 3. Start (or restart) Engine so it picks up the new configuration.
 
+Serving **Manager** over HTTPS is a separate matter from `wss` to VIS: the VIF pages
+call Engine's REST API (port 8087) from the browser, so that API has to serve HTTPS
+too. See [Manager over HTTPS](README.wse-plugin.md#manager-over-https).
+
 See [`docs/README.wse-plugin.md`](README.wse-plugin.md) for full plugin configuration details.
 
 ## SSL/TLS
