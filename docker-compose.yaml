@@ -63,6 +63,10 @@ services:
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change <http://localhost:8088/RESTAPIDocumentation/>
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
+            # Manager over HTTPS. The VIF pages then call the Engine REST API over HTTPS too,
+            # so the wse container's RESTInterface (port 8087) needs its own SSLConfig with a
+            # keystore, or the VIF tab shows "lost connection to the Engine". See the WSEM
+            # section of docs/README.wse-plugin.md.
             # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
             # - JKS_PASSWORD=tbd
             # - WSE_PLAYBACK_HOST=tbd
