@@ -21,8 +21,6 @@ C:\Program Files\Wowza Media Systems\Wowza Streaming Engine x.y.z+vv\jre\bin\jav
 
 Add  `--help` to the above commands to see all the options available.
 
-The installer prepares the REST API for the Manager UI (CORS policy and IP white list) but does not put TLS on it. If Manager is served over HTTPS, read [Manager over HTTPS](#manager-over-https) before opening the VIF tab.
-
 ## Manually updating Wowza Streaming Engine
 
 ### Lib folder and jar files
