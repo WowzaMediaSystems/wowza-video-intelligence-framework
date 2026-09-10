@@ -36,6 +36,7 @@ services:
              - ./wse/content:/usr/local/WowzaStreamingEngine/content
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
+             - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs   # VOD job records, results, thumbnails
 
         ports:
             - 80:80                     #HLS
