@@ -58,7 +58,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `NVIDIA_VISIBLE_DEVICES` | `all` | GPU devices to expose (e.g., `0,1`) |
 | `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` | Required NVIDIA capabilities |
 | `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`); default is to scan the `models/` folder |
-| `SSL_KEYSTORE_PATH` | — | Path to a JKS or PKCS12 keystore (inside container) — the same file Engine serves TLS from. Setting it together with `SSL_KEYFILE`/`SSL_CERTFILE` stops the service at startup |
+| `SSL_KEYSTORE_PATH` | — | Path to a JKS or PKCS12 keystore (inside container) — the same file Engine serves TLS from. This setting can't be used together with `SSL_KEYFILE`/`SSL_CERTFILE` |
 | `SSL_KEYSTORE_PASSWORD` | — | Password that opens the keystore and the private key in it (Engine's `<KeyStorePassword>`) |
 | `SSL_KEYFILE` | — | Path to SSL private key in PEM format (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate in PEM format (inside container); may hold the whole chain, leaf first |
@@ -191,11 +191,8 @@ VIS reads its private key and certificate from one of two sources, never from
 both. Set the variables of one source in `docker-compose.yaml` or `.env`.
 Setting variables from both stops the service at startup, and so does an
 incomplete source (`SSL_CERTFILE` without `SSL_KEYFILE`, a keystore without its
-password) or material VIS cannot read. Each of those failures is one `CRITICAL`
-line — in `videointelligenceservice.log` and in
-`docker compose --profile vi-service logs` — naming what to correct, never a
-silent fallback to plaintext. The startup log also names the certificate VIS
-loaded, its CN, its SANs and its expiry date, and warns once that date is
+password) or material VIS cannot read. The startup log names the certificate
+VIS loaded, its CN, its SANs and its expiry date, and warns once that date is
 within 30 days or already past.
 
 **A — the keystore Engine already uses** (the file named by `VHost.xml`'s
