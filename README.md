@@ -160,6 +160,7 @@ In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount a
 - `./wse/content -> /usr/local/WowzaStreamingEngine/content`
 - `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
 - `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
+- `./wse/vif-vod-jobs -> /usr/local/WowzaStreamingEngine/vif-vod-jobs`
 - `./vis/models -> /build/models`
 
 What this enables:
@@ -168,6 +169,7 @@ What this enables:
 - Editing WSE config directly in your repo and seeing those changes in the running container.
 - Keeping WSE logs on the host for troubleshooting and historical inspection.
 - Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
+- Keeping VOD job records, results, and thumbnails across container recreation; without this mount they are lost when the container is replaced.
 - Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
 
 This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:

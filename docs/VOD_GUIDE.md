@@ -309,11 +309,13 @@ vif-vod-jobs/
 ```
 
 > [!IMPORTANT]
-> In a container deployment this directory lives **inside the container** unless you mount it. The framework's compose file persists the configuration, the content directory and the logs — not the jobs directory — so job records, results and thumbnails survive an Engine restart but go with the container when it is recreated (`docker compose down`, or an image update). Mount it alongside the others to keep them:
+> In a container deployment this directory has to be mounted to outlive the container. Job records, results and thumbnails survive an Engine restart either way, but go with the container when it is recreated (`docker compose down`, or an image update). The framework's compose file mounts it alongside the configuration, the content directory and the logs:
 >
 > ```yaml
 > - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs
 > ```
+>
+> A deployment that brings its own compose file, or that disables those mounts, needs the same line.
 
 The REST API is the intended way to consume these, but the files are plain JSON/JPEG and safe to read: manifests and thumbnails are replaced atomically, and result rows are appended a whole line at a time as the job runs. When a job completes with its results fully stored, the plain `.jsonl` is swapped for a gzipped `.jsonl.gz` (typically ~10× smaller); a job that can still be resumed — failed, cancelled, or completed with a storage gap — keeps the plain file so the next run can append to it. Reading the compressed form outside the API is one `gunzip` away.
 
