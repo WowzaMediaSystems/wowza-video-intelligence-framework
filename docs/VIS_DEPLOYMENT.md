@@ -212,6 +212,14 @@ chain and nothing else, and the keystore password must open the key too —
 exactly how Engine uses it. JCEKS keystores are not supported; the startup
 error names the `keytool -importkeystore` command that converts one to PKCS12.
 
+Sharing Engine's certificate does not by itself make Engine accept it: a
+keystore holds what a server serves, a trust store what a client accepts. One
+from a public CA — StreamLock among them — Engine trusts already; a self-signed
+one has to be imported there as well, as
+[below](#self-signed-certs-end-to-end-vis--engine). Either way `vi_service_url`
+has to address VIS by a hostname the certificate carries, never `localhost` or
+an IP, even when Engine and VIS share a host.
+
 **B — PEM key and certificate:**
 
 ```yaml

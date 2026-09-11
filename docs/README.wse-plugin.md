@@ -235,7 +235,23 @@ Restart Engine:
 sudo systemctl restart WowzaStreamingEngine
 ```
 
-Then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, not for `localhost`. The `IPWhiteList` in `RESTInterface` still applies to the browser's address.
+Then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, not for `localhost`. The `IPWhiteList` in `RESTInterface` still applies to the browser's address. None of this depends on whether Engine reaches VIS over `ws` or `wss`; that is the section below.
+
+## Engine over `wss` to VIS
+
+A `vi_service_url` that starts with `wss://` makes Engine the TLS client, and Engine judges the certificate VIS serves against its Java trust store - the WebSocket and the REST calls the VIF pages live on (`/status`, `/available-models`, `/vlm/defaults`, `/metrics`) alike. The module has no trust setting of its own: what that trust store holds is what Engine accepts.
+
+A certificate it cannot accept is reported against `VisService` in the Engine access log, `HTTP 0` standing for a request that never reached a response:
+
+```
+VideoIntelligenceController:VisService:available-models: HTTP 0: PKIX path building failed: sun.security.provider.certpath.SunCertPathBuilderException: unable to find valid certification path to requested target
+```
+
+The symptom rarely looks like a certificate. Everything the pages read from VIS is gone: the Checkpoint Path list under Object Analysis says "No custom models available" and the class lists are empty, even while VIS logs `Model catalog built: 6 models available (5 default, 1 custom)`; and no stream connects, because the detector polls `/status` over the same link before opening the WebSocket and gives up with "Timed out waiting for VIS Service".
+
+Two conditions have to hold. The certificate has to chain to a certificate authority the trust store knows - one from a public CA, a StreamLock certificate among them, already does. And the host in `vi_service_url` has to appear in the certificate: one issued for `example.streamlock.net` covers neither `localhost` nor an IP address, even when Engine and VIS share a host, so address VIS by the name the certificate carries.
+
+A self-signed certificate, or one from an internal CA, fails the first and has to be imported into a copy of Engine's trust store, which `conf/Tune.xml` then names as `-Djavax.net.ssl.trustStore`. [Self-signed certs end to end (VIS + Engine)](VIS_DEPLOYMENT.md#self-signed-certs-end-to-end-vis--engine) walks through both sides for the Compose stack; on an Engine installed on the host, the trust store and the `keytool` that writes it are `java/lib/security/cacerts` and `java/bin/keytool` under the Engine install directory (`jre\...` on Windows), and the copy belongs in `conf/`, where it survives an Engine upgrade.
 
 ## VIF Configuration
 Configuration files for the module are stored in `conf.modules/vif/`
