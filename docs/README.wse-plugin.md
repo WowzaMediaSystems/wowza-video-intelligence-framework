@@ -221,13 +221,13 @@ Add the keystore used by Manager (the same StreamLock `.jks` works) to the REST 
 	...
 	<SSLConfig>
 		<Enable>true</Enable>
-		<KeyStorePath>${com.wowza.wms.context.VHostConfigHome}/conf/<domain>.streamlock.net.jks</KeyStorePath>
+		<KeyStorePath>${com.wowza.wms.ConfigHome}/conf/<domain>.streamlock.net.jks</KeyStorePath>
 		<KeyStorePassword><password></KeyStorePassword>
 		<KeyStoreType>JKS</KeyStoreType>
 	</SSLConfig>
 ```
 
-`<Enable>` is what switches the REST API to HTTPS; a keystore alone does nothing. A `Server.xml` from a recent Engine already carries this block with `<Enable>false</Enable>` and Wowza's bundled `conf/tls.jks`, so on those the change is flipping `Enable` and pointing the keystore at your certificate.
+`<Enable>` is what switches the REST API to HTTPS; a keystore alone does nothing. The path takes `${com.wowza.wms.ConfigHome}`, not the `${com.wowza.wms.context.VHostConfigHome}` of `VHost.xml`: `Server.xml` never expands that one, and Engine then fails to start the REST API at all, leaving nothing on 8087 and only a `FileNotFoundException` in the Engine log. A `Server.xml` from a recent Engine already carries this block with `<Enable>false</Enable>` and Wowza's bundled `conf/tls.jks`, so on those the change is flipping `Enable` and pointing the keystore at your certificate.
 
 Restart Engine:
 
