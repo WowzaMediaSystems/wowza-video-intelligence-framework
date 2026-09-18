@@ -1,7 +1,7 @@
 # Synthetic Video Detector Guide
 
 The Video Intelligence framework can flag **synthetic / AI-generated video**
-on a live stream, backed by the **NVIDIA Maxine Synthetic Video Detector (SVD)** model.
+on a live stream, backed by the **NVIDIA Synthetic Video Detector (SVD)** model.
 With `detector_type: "synthetic"`, the framework watches your stream in short windows 
 and returns a per-window **Real vs Fake** verdict, based on a configurable threshold
 
@@ -574,5 +574,5 @@ threshold and your human-review policy to your obligations.
 
 - [`README.md`](../README.md) — framework quick start and configuration.
 - [`VLM_GUIDE.md`](VLM_GUIDE.md) — the VLM sidecar this profile mirrors.
-- NVIDIA SVD model docs: <https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/index.html>
+- [NVIDIA SVD model docs](https://docs.nvidia.com/nim/maxine/synthetic-video-detector/latest/index.html)
 - Try the API: <https://build.nvidia.com/nvidia/synthetic-video-detector>

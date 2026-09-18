@@ -256,7 +256,7 @@ services:
                   count: all
 
     # ── Synthetic Video Detector NIM sidecar (opt-in) ──────────────────────
-    # NVIDIA Maxine Synthetic Video Detector (SVD) NIM backing the
+    # NVIDIA Synthetic Video Detector (SVD) NIM backing the
     # `detector_type=synthetic` analyzer. Bidirectional-streaming gRPC: VIS
     # relays each VIC-remuxed H.264 window (no re-encode) and returns a
     # per-window Real/Fake verdict.
