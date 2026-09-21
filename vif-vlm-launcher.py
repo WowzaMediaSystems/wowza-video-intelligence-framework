@@ -267,7 +267,9 @@ def probe_gpus(gpu_ids: str) -> float | None:
             name: str = pynvml.nvmlDeviceGetName(handle)
             if isinstance(name, bytes):
                 name = name.decode()
-            memory_mib: int = pynvml.nvmlDeviceGetMemoryInfo(handle).total // (1024 * 1024)
+            memory_mib: int = pynvml.nvmlDeviceGetMemoryInfo(handle).total // (
+                1024 * 1024
+            )
             major, minor = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
             capability: float = float(f"{major}.{minor}")
             log(f"  {index}, {name}, {memory_mib} MiB, {major}.{minor}")
@@ -330,7 +332,9 @@ def wait_for_spec(path: str, timeout_seconds: int) -> dict[str, Any]:
     while True:
         reason: str = ""
         try:
-            document: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
+            document: dict[str, Any] = json.loads(
+                Path(path).read_text(encoding="utf-8")
+            )
             return document
         except FileNotFoundError:
             reason = "not written yet"
@@ -360,8 +364,12 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         if required not in document:
             raise ConfigError(f"engine spec is missing '{required}'")
 
-    env: dict[str, str] = {str(k): str(v) for k, v in (document.get("env") or {}).items()}
-    gpu_ids: str = str(document.get("gpu_ids") or environ.get("VLM_GPU_IDS", "")).strip()
+    env: dict[str, str] = {
+        str(k): str(v) for k, v in (document.get("env") or {}).items()
+    }
+    gpu_ids: str = str(
+        document.get("gpu_ids") or environ.get("VLM_GPU_IDS", "")
+    ).strip()
     env.update(pin_gpus(gpu_ids))
 
     sleep_mode: bool = bool(document["sleep_mode"])
@@ -415,7 +423,9 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
     # combination up front rather than leaving an engine awake that the pool is
     # sized for asleep.
     if state_file and not sleep_mode:
-        raise ConfigError("VLM_STATE_FILE needs VLM_SLEEP_MODE=1 (the /sleep endpoint).")
+        raise ConfigError(
+            "VLM_STATE_FILE needs VLM_SLEEP_MODE=1 (the /sleep endpoint)."
+        )
 
     env: dict[str, str] = pin_gpus(environ.get("VLM_GPU_IDS", ""))
 
@@ -461,7 +471,9 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
     # --max-num-seqs: pin to the value, or omit when "auto" so vLLM sizes it
     # to this GPU's KV capacity.
     if max_num_seqs == "auto":
-        log("VLM_MAX_NUM_SEQS=auto -> letting vLLM derive --max-num-seqs from KV capacity.")
+        log(
+            "VLM_MAX_NUM_SEQS=auto -> letting vLLM derive --max-num-seqs from KV capacity."
+        )
     else:
         args.append(f"--max-num-seqs={max_num_seqs}")
 
@@ -569,7 +581,9 @@ class Engine:
 
     def _read_active_model(self) -> str:
         try:
-            for line in Path(self.plan.state_file).read_text(encoding="utf-8").splitlines():
+            for line in (
+                Path(self.plan.state_file).read_text(encoding="utf-8").splitlines()
+            ):
                 if line.strip():
                     return line.strip()
         except OSError:
@@ -606,7 +620,9 @@ class Engine:
             with urllib.request.urlopen(request, timeout=30):
                 log("asleep.")
         except (urllib.error.URLError, OSError) as exc:
-            warn(f"/sleep failed ({exc}); this engine stays awake and keeps its GPU memory.")
+            warn(
+                f"/sleep failed ({exc}); this engine stays awake and keeps its GPU memory."
+            )
 
     # -- process lifecycle --------------------------------------------------
 
@@ -704,7 +720,11 @@ def main() -> int:
     for part in [plan.model, *plan.args]:
         log(f"  {part}")
     max_model_len: str = next(
-        (arg.split("=", 1)[1] for arg in plan.args if arg.startswith("--max-model-len=")),
+        (
+            arg.split("=", 1)[1]
+            for arg in plan.args
+            if arg.startswith("--max-model-len=")
+        ),
         "<max_model_len>",
     )
     log(

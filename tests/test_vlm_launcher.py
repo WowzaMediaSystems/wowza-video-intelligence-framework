@@ -124,7 +124,10 @@ class TestLegacyFlagResolution:
             '{"enable_thinking":false}',
             *XGRAMMAR,
         ]
-        assert '--mm-processor-kwargs={"min_pixels": 4096, "max_pixels": 1003520}' in plan.args
+        assert (
+            '--mm-processor-kwargs={"min_pixels": 4096, "max_pixels": 1003520}'
+            in plan.args
+        )
 
     def test_cosmos_nano_pins_max_num_seqs(self) -> None:
         plan: Any = launcher.plan_from_env(profile_env("cosmos-nano"))
@@ -199,16 +202,21 @@ class TestKvCacheProbe:
     def _with_fake_pynvml(
         self, monkeypatch: pytest.MonkeyPatch, capability: tuple[int, int]
     ) -> None:
-        module: types.ModuleType = types.ModuleType("pynvml")
-        module.nvmlInit = lambda: None  # type: ignore[attr-defined]
-        module.nvmlShutdown = lambda: None  # type: ignore[attr-defined]
-        module.nvmlDeviceGetCount = lambda: 1  # type: ignore[attr-defined]
-        module.nvmlDeviceGetHandleByIndex = lambda index: index  # type: ignore[attr-defined]
-        module.nvmlDeviceGetName = lambda handle: "Fake GPU"  # type: ignore[attr-defined]
-        module.nvmlDeviceGetMemoryInfo = lambda handle: types.SimpleNamespace(  # type: ignore[attr-defined]
+        memory: types.SimpleNamespace = types.SimpleNamespace(
             total=24 * 1024 * 1024 * 1024
         )
-        module.nvmlDeviceGetCudaComputeCapability = lambda handle: capability  # type: ignore[attr-defined]
+        functions: dict[str, Any] = {
+            "nvmlInit": lambda: None,
+            "nvmlShutdown": lambda: None,
+            "nvmlDeviceGetCount": lambda: 1,
+            "nvmlDeviceGetHandleByIndex": lambda index: index,
+            "nvmlDeviceGetName": lambda handle: "Fake GPU",
+            "nvmlDeviceGetMemoryInfo": lambda handle: memory,
+            "nvmlDeviceGetCudaComputeCapability": lambda handle: capability,
+        }
+        module: types.ModuleType = types.ModuleType("pynvml")
+        for name, function in functions.items():
+            setattr(module, name, function)
         monkeypatch.setitem(sys.modules, "pynvml", module)
 
     def test_ada_and_newer_get_fp8(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,12 +229,16 @@ class TestKvCacheProbe:
         plan: Any = launcher.plan_from_env({})
         assert "--kv-cache-dtype=auto" in plan.args
 
-    def test_no_pynvml_falls_back_to_auto(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_pynvml_falls_back_to_auto(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setitem(sys.modules, "pynvml", None)
         plan: Any = launcher.plan_from_env({})
         assert "--kv-cache-dtype=auto" in plan.args
 
-    def test_an_explicit_dtype_skips_the_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_an_explicit_dtype_skips_the_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._with_fake_pynvml(monkeypatch, (9, 0))
         plan: Any = launcher.plan_from_env({"VLM_KV_CACHE_DTYPE": "auto"})
         assert "--kv-cache-dtype=auto" in plan.args
@@ -316,7 +328,9 @@ class TestSpecPath:
 
     def test_a_future_spec_version_is_refused(self, tmp_path: Path) -> None:
         path: Path = write_spec(tmp_path, spec_version=2)
-        with pytest.raises(launcher.ConfigError, match="spec version 2 is not supported"):
+        with pytest.raises(
+            launcher.ConfigError, match="spec version 2 is not supported"
+        ):
             launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
 
     def test_a_spec_missing_a_field_is_refused(self, tmp_path: Path) -> None:
@@ -327,7 +341,9 @@ class TestSpecPath:
         with pytest.raises(launcher.ConfigError, match="missing 'args'"):
             launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
 
-    def test_an_inactive_engine_without_sleep_mode_is_refused(self, tmp_path: Path) -> None:
+    def test_an_inactive_engine_without_sleep_mode_is_refused(
+        self, tmp_path: Path
+    ) -> None:
         path: Path = write_spec(tmp_path, active=False, sleep_mode=False)
         with pytest.raises(launcher.ConfigError, match="cannot park itself"):
             launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
@@ -559,7 +575,11 @@ class TestDuties:
             processes.append(
                 subprocess.Popen(
                     [sys.executable, str(LAUNCHER)],
-                    env={**os.environ, **first_env, "PATH": f"{stub_path}:{os.environ['PATH']}"},
+                    env={
+                        **os.environ,
+                        **first_env,
+                        "PATH": f"{stub_path}:{os.environ['PATH']}",
+                    },
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
@@ -569,7 +589,11 @@ class TestDuties:
             processes.append(
                 subprocess.Popen(
                     [sys.executable, str(LAUNCHER)],
-                    env={**os.environ, **second_env, "PATH": f"{stub_path}:{os.environ['PATH']}"},
+                    env={
+                        **os.environ,
+                        **second_env,
+                        "PATH": f"{stub_path}:{os.environ['PATH']}",
+                    },
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
@@ -577,14 +601,18 @@ class TestDuties:
             deadline: float = time.monotonic() + 40
             while time.monotonic() < deadline:
                 names: list[str] = [
-                    event.get("model", "") for event in events(log) if event["event"] == "start"
+                    event.get("model", "")
+                    for event in events(log)
+                    if event["event"] == "start"
                 ]
                 if "acme/model-b" in names:
                     break
                 time.sleep(0.2)
             recorded: list[dict[str, Any]] = events(log)
             starts: dict[str, float] = {
-                event["model"]: event["at"] for event in recorded if event["event"] == "start"
+                event["model"]: event["at"]
+                for event in recorded
+                if event["event"] == "start"
             }
             assert set(starts) == {"acme/model-a", "acme/model-b"}
             # B only started once A was ready and released the lock: A's stub
