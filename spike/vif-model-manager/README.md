@@ -35,6 +35,7 @@ Everything is env, with defaults that work on a single-GPU box:
 | `VIF_SPIKE_GPUS` | `all` | passed to `docker run --gpus` |
 | `VIF_SPIKE_STATE_DIR` | `/tmp/vif-spike-state` | host dir standing in for the shared state volume |
 | `VIF_SPIKE_HF_CACHE` | `~/.cache/huggingface` | weights cache, so runs after the first are warm |
+| `VIF_SPIKE_UTILIZATION` | `0.80` | `--gpu-memory-utilization` for each engine; the pool checks need two resident at once |
 | `VIF_SPIKE_PORT_A` / `_B` | `18001` / `18002` | published ports |
 | `VIF_SPIKE_READY_TIMEOUT` | `900` | seconds to wait for an engine to come up |
 | `VIF_SPIKE_HEALTH_TIMEOUT` | `90` | the launcher's health deadline in the wedge check |

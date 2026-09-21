@@ -15,6 +15,11 @@ MODEL_B="${VIF_SPIKE_MODEL_B:-Qwen/Qwen3-VL-4B-Instruct-FP8}"
 GPUS="${VIF_SPIKE_GPUS:-all}"
 STATE_DIR="${VIF_SPIKE_STATE_DIR:-/tmp/vif-spike-state}"
 HF_CACHE="${VIF_SPIKE_HF_CACHE:-${HOME}/.cache/huggingface}"
+# The launcher defaults to 0.90, which on a 46 GB card leaves no room for a
+# second engine beside a sleeping one (a sleeper still holds ~1.5 GiB of cumem
+# pool). The pool checks need both engines resident, so size them like the
+# shipped profiles do.
+UTILIZATION="${VIF_SPIKE_UTILIZATION:-0.80}"
 READY_TIMEOUT="${VIF_SPIKE_READY_TIMEOUT:-900}"
 # dist-packages of the pinned image; --middleware resolves vif_auth from here.
 SITE_PACKAGES="${VIF_SPIKE_SITE_PACKAGES:-/usr/local/lib/python3.12/dist-packages}"
@@ -75,6 +80,7 @@ engine_start() {
     -v "${STATE_DIR}:/vif-state" \
     -v "${HF_CACHE}:/root/.cache/huggingface" \
     -e VLM_MODEL="${model}" \
+    -e VLM_GPU_MEMORY_UTILIZATION="${UTILIZATION}" \
     -e VLM_SLEEP_MODE=1 \
     -e VLM_LOAD_LOCK_FILE=/vif-state/load.lock \
     -e VLM_STATE_FILE=/vif-state/active-model \
@@ -85,8 +91,12 @@ engine_start() {
 }
 
 # engine_child_pid <name> -- the `vllm serve` process the launcher supervises.
+# The pattern is bracketed so it cannot match the `bash -c` wrapper running it:
+# in a pipeline bash forks and keeps a command line containing the pattern, and
+# `head -n1` would then return that transient pid, which is gone by the time the
+# caller signals it.
 engine_child_pid() {
-  docker exec "$1" bash -c 'pgrep -f "vllm serve" | head -n1'
+  docker exec "$1" bash -c 'pgrep -f "vllm[ ]serve" | head -n1'
 }
 
 container_state() { docker inspect --format '{{.State.Status}}' "$1"; }
