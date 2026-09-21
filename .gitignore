@@ -21,3 +21,6 @@ wse/
 # Local AI-assistant config (per-machine; never commit)
 .claude/settings.local.json
 CLAUDE.local.md
+# Python bytecode from running the spike tests locally
+__pycache__/
+*.pyc
