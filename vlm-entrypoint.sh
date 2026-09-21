@@ -304,7 +304,7 @@ wait_for_health() {
     if ! kill -0 "${CHILD_PID}" 2>/dev/null; then
       return 2
     fi
-    if curl -fsS -o /dev/null --connect-timeout 2 --max-time 5 \
+    if curl -fs -o /dev/null --connect-timeout 2 --max-time 5 \
         "http://127.0.0.1:${PORT}/health"; then
       return 0
     fi

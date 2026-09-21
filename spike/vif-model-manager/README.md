@@ -119,3 +119,12 @@ The measurements — wake latency per sleep level, host RAM per sleeper, residua
 VRAM, whether the whole catalog fits resident — are the spike's actual output
 and its GO/NO-GO input. These scripts only prove the mechanism behaves; they say
 nothing about whether it is fast or small enough.
+
+## WSL2 caveat (2026-09-21)
+
+Sleep mode requires vLLM's cumem allocator, which requires CUDA UVA — unavailable under WSL2.
+An engine started with `--enable-sleep-mode` on WSL2 crashes at boot (`RuntimeError: UVA is not
+available`). These checks therefore need a native-Linux GPU host; a WSL2 box (e.g. the local 5060)
+can only exercise the lock/supervisor/flag paths with sleep mode OFF. How managed deployments
+should behave on no-UVA platforms is an OPEN design item (starting without sleep mode conflicts
+with multiple resident models — all engines would be awake at full reservation).
