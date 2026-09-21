@@ -70,6 +70,7 @@ engine_start() {
     --restart="${VIF_SPIKE_RESTART:-no}" \
     -p "${port}:8000" \
     -v "${REPO_ROOT}/vlm-entrypoint.sh:/vlm-entrypoint.sh:ro" \
+    -v "${REPO_ROOT}/vif-vlm-launcher.py:/vif-vlm-launcher.py:ro" \
     -v "${REPO_ROOT}/vlm-patches/vif_auth.py:${SITE_PACKAGES}/vif_auth.py:ro" \
     -v "${STATE_DIR}:/vif-state" \
     -v "${HF_CACHE}:/root/.cache/huggingface" \

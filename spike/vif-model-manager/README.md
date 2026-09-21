@@ -4,7 +4,7 @@ Runnable checks for the parts of the VIF Model Manager (see
 [`docs/vif-model-manager-proposal.md`](../../docs/vif-model-manager-proposal.md))
 that cannot be proved on CI: they need a real GPU, real weights and a real vLLM
 engine. They exercise the opt-in pool duties in
-[`vlm-entrypoint.sh`](../../vlm-entrypoint.sh) and the Bearer guard in
+[`vif-vlm-launcher.py`](../../vif-vlm-launcher.py) and the Bearer guard in
 [`vlm-patches/vif_auth.py`](../../vlm-patches/vif_auth.py).
 
 **These have not been run.** They are written to be run on rented datacenter-GPU
