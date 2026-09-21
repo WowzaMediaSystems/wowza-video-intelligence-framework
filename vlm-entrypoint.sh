@@ -68,12 +68,57 @@
 # Use the same <Y> to size the `max_concurrent_requests` cap in the VIS
 # WebSocket VLM config -- vLLM does not expose the ceiling over HTTP, so
 # VIS cannot read it automatically.
+#
+# ── POOL DUTIES (opt-in, OFF by default) ────────────────────────────────
+# These exist for a pool of resident engines sharing one GPU, where a
+# manager decides which one serves. With NONE of them set this script
+# behaves exactly as it always has: it execs `vllm serve` directly.
+#   VLM_SLEEP_MODE               "1"/"true" adds --enable-sleep-mode and
+#                                exports VLLM_SERVER_DEV_MODE=1, which is
+#                                what mounts /sleep, /wake_up and
+#                                /is_sleeping. Default off.
+#   VLM_LOAD_LOCK_FILE           Path to a lock file on a volume shared by
+#                                every engine on the GPU. Held from before
+#                                the engine launches until it is ready, so
+#                                cold loads serialize instead of claiming
+#                                the card at once. Unset = no locking.
+#   VLM_HEALTH_TIMEOUT_SECONDS   How long to wait for this engine's own
+#                                /health while holding the lock (default
+#                                1800). On timeout the lock is released,
+#                                the engine is stopped (SIGTERM, then
+#                                SIGKILL 10s later) and the container exits
+#                                75 so the restart policy retries -- one
+#                                wedged engine must not block the pool.
+#   VLM_HEALTH_POLL_SECONDS      Interval between /health polls (default 2).
+#   VLM_STATE_FILE               Path on the shared volume naming the model
+#                                that should be serving (first non-empty
+#                                line = a model id). Once healthy, this
+#                                engine sleeps unless the file names it --
+#                                an absent or unreadable file means sleep,
+#                                because several awake engines on one card
+#                                is how you OOM it. This script only ever
+#                                sleeps itself; waking is the manager's job.
+#   VLM_SLEEP_LEVEL              Sleep level for that self-sleep (default 1:
+#                                weights to host RAM; 2 discards them).
+#
+# Setting VLM_LOAD_LOCK_FILE or VLM_STATE_FILE means there is work to do
+# after the engine is up, so the engine runs as a child process and this
+# script supervises it: SIGTERM/SIGINT are forwarded and the child's exit
+# code becomes the container's.
+#
+# EXIT CODES: 75 health-check timeout (see above), 78 bad configuration
+# (reported before the engine launches); anything else is vLLM's own.
 
 set -euo pipefail
 
 # Bump on every edit to this file.
-ENTRYPOINT_REVISION="2026-07-24"
+ENTRYPOINT_REVISION="2026-09-21"
 echo "[vlm-entrypoint] revision ${ENTRYPOINT_REVISION}"
+
+EXIT_HEALTH_TIMEOUT=75
+EXIT_CONFIG=78
+# Grace between SIGTERM and SIGKILL when this script stops a wedged engine.
+STOP_GRACE_SECONDS=10
 
 MODEL="${VLM_MODEL:-Qwen/Qwen3-VL-4B-Instruct-FP8}"
 MAX_MODEL_LEN="${VLM_MAX_MODEL_LEN:-16384}"
@@ -88,6 +133,29 @@ MIN_PIXELS="${VLM_MIN_PIXELS:-}"
 MAX_PIXELS="${VLM_MAX_PIXELS:-}"
 MAX_IMAGES="${VLM_MAX_IMAGES_PER_PROMPT:-8}"
 PORT="${VLM_PORT:-8000}"
+
+LOAD_LOCK_FILE="${VLM_LOAD_LOCK_FILE:-}"
+STATE_FILE="${VLM_STATE_FILE:-}"
+HEALTH_TIMEOUT="${VLM_HEALTH_TIMEOUT_SECONDS:-1800}"
+HEALTH_POLL="${VLM_HEALTH_POLL_SECONDS:-2}"
+SLEEP_LEVEL="${VLM_SLEEP_LEVEL:-1}"
+
+case "${VLM_SLEEP_MODE:-}" in
+  1|true|TRUE|yes|YES) SLEEP_MODE=1 ;;
+  ''|0|false|FALSE|no|NO) SLEEP_MODE=0 ;;
+  *)
+    echo "[vlm-entrypoint] VLM_SLEEP_MODE='${VLM_SLEEP_MODE}' is not a boolean." >&2
+    exit "${EXIT_CONFIG}"
+    ;;
+esac
+
+# Self-sleep goes through /sleep, which only exists in dev mode. Refuse the
+# combination up front rather than leaving an engine awake that the pool is
+# sized for asleep.
+if [ -n "${STATE_FILE}" ] && [ "${SLEEP_MODE}" -eq 0 ]; then
+  echo "[vlm-entrypoint] VLM_STATE_FILE needs VLM_SLEEP_MODE=1 (the /sleep endpoint)." >&2
+  exit "${EXIT_CONFIG}"
+fi
 
 # Pin the sidecar to the GPU(s) named in VLM_GPU_IDS; indices match
 # `nvidia-smi` output.
@@ -163,6 +231,14 @@ else
   ARGS+=(--max-num-seqs="${MAX_NUM_SEQS}")
 fi
 
+# Sleep mode is what makes an engine parkable: the process, its compiled
+# graphs and its warm state survive, but the GPU memory does not.
+if [ "${SLEEP_MODE}" -eq 1 ]; then
+  export VLLM_SERVER_DEV_MODE=1
+  ARGS+=(--enable-sleep-mode)
+  echo "[vlm-entrypoint] VLM_SLEEP_MODE -> --enable-sleep-mode, VLLM_SERVER_DEV_MODE=1."
+fi
+
 # Escape hatch for vLLM flags not exposed above (e.g. --disable-log-requests,
 # --quantization). Space-separated; flag values containing spaces cannot be
 # passed here.
@@ -179,4 +255,146 @@ printf '  %s\n' "${MODEL}" "${ARGS[@]}"
 echo "[vlm-entrypoint] On startup, find: 'Maximum concurrency for ${MAX_MODEL_LEN} tokens per request: <Y>x'"
 echo "[vlm-entrypoint] -> set VLM_MAX_NUM_SEQS to floor(<Y>) to match THIS GPU's KV capacity."
 
-exec vllm serve "${MODEL}" "${ARGS[@]}"
+# Nothing to do once the engine is up: hand the container straight to vLLM,
+# exactly as this script always has.
+if [ -z "${LOAD_LOCK_FILE}" ] && [ -z "${STATE_FILE}" ]; then
+  exec vllm serve "${MODEL}" "${ARGS[@]}"
+fi
+
+CHILD_PID=""
+LOCK_FD=""
+TERMINATING=0
+
+# shellcheck disable=SC2329  # invoked from the traps below.
+forward_signal() {
+  local signal="$1"
+  TERMINATING=1
+  if [ -n "${CHILD_PID}" ]; then
+    kill -s "${signal}" "${CHILD_PID}" 2>/dev/null || true
+  fi
+}
+
+take_load_lock() {
+  [ -n "${LOAD_LOCK_FILE}" ] || return 0
+  exec {LOCK_FD}>>"${LOAD_LOCK_FILE}"
+  echo "[vlm-entrypoint] waiting for the load lock (${LOAD_LOCK_FILE})..."
+  flock -x "${LOCK_FD}"
+  echo "[vlm-entrypoint] load lock acquired."
+}
+
+# flock also drops when the process dies; releasing explicitly is what lets
+# the next engine start while this one keeps serving.
+release_load_lock() {
+  [ -n "${LOCK_FD}" ] || return 0
+  flock -u "${LOCK_FD}"
+  exec {LOCK_FD}>&-
+  LOCK_FD=""
+  echo "[vlm-entrypoint] load lock released."
+}
+
+# 0 ready, 1 timed out, 2 the engine exited on its own. Every probe is
+# time-boxed: a wedged engine still accepts connections, so an untimed curl
+# would wait out the very deadline it is being polled against.
+wait_for_health() {
+  local deadline=$(( SECONDS + HEALTH_TIMEOUT ))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if [ "${TERMINATING}" -eq 1 ]; then
+      return 2
+    fi
+    if ! kill -0 "${CHILD_PID}" 2>/dev/null; then
+      return 2
+    fi
+    if curl -fsS -o /dev/null --connect-timeout 2 --max-time 5 \
+        "http://127.0.0.1:${PORT}/health"; then
+      return 0
+    fi
+    sleep "${HEALTH_POLL}"
+  done
+  return 1
+}
+
+read_active_model() {
+  [ -r "${STATE_FILE}" ] || return 0
+  grep -v '^[[:space:]]*$' "${STATE_FILE}" 2>/dev/null | head -n1 | tr -d '[:space:]'
+}
+
+# Sleep unless the state file names this model. An absent, unreadable or
+# foreign state file all mean the same thing: this engine is not the one
+# that should be holding the card.
+maybe_self_sleep() {
+  [ -n "${STATE_FILE}" ] || return 0
+  local active
+  active="$(read_active_model || true)"
+  if [ -n "${active}" ] && [ "${active}" = "${MODEL}" ]; then
+    echo "[vlm-entrypoint] state file names ${MODEL} -> staying awake."
+    return 0
+  fi
+  echo "[vlm-entrypoint] active model is '${active:-<none>}', not ${MODEL} -> sleeping at level ${SLEEP_LEVEL}."
+  local -a auth=()
+  if [ -n "${VLLM_API_KEY:-}" ]; then
+    auth=(-H "Authorization: Bearer ${VLLM_API_KEY}")
+  fi
+  if curl -fsS -o /dev/null --connect-timeout 2 --max-time 30 -X POST "${auth[@]}" \
+      "http://127.0.0.1:${PORT}/sleep?level=${SLEEP_LEVEL}"; then
+    echo "[vlm-entrypoint] asleep."
+  else
+    echo "[vlm-entrypoint] /sleep failed; this engine stays awake and keeps its GPU memory." >&2
+  fi
+}
+
+# `wait` returns >128 when a trapped signal interrupts it, so keep waiting
+# until the child is really gone; its status is the container's.
+await_child() {
+  local status=0
+  set +e
+  wait "${CHILD_PID}"
+  status=$?
+  while [ "${status}" -gt 128 ] && kill -0 "${CHILD_PID}" 2>/dev/null; do
+    wait "${CHILD_PID}"
+    status=$?
+  done
+  set -e
+  return "${status}"
+}
+
+# A wedged engine may be unable to act on SIGTERM at all, so the watchdog
+# guarantees this script still reaches its exit.
+stop_child() {
+  kill -s TERM "${CHILD_PID}" 2>/dev/null || true
+  ( sleep "${STOP_GRACE_SECONDS}"; kill -s KILL "${CHILD_PID}" 2>/dev/null || true ) &
+  local watchdog=$!
+  await_child || true
+  kill "${watchdog}" 2>/dev/null || true
+  wait "${watchdog}" 2>/dev/null || true
+}
+
+trap 'forward_signal TERM' TERM
+trap 'forward_signal INT' INT
+
+take_load_lock
+
+vllm serve "${MODEL}" "${ARGS[@]}" &
+CHILD_PID=$!
+
+health=0
+wait_for_health || health=$?
+
+case "${health}" in
+  0)
+    maybe_self_sleep
+    release_load_lock
+    ;;
+  1)
+    echo "[vlm-entrypoint] no /health in ${HEALTH_TIMEOUT}s; releasing the lock and stopping." >&2
+    release_load_lock
+    stop_child
+    exit "${EXIT_HEALTH_TIMEOUT}"
+    ;;
+  *)
+    release_load_lock
+    ;;
+esac
+
+CHILD_STATUS=0
+await_child || CHILD_STATUS=$?
+exit "${CHILD_STATUS}"
