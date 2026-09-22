@@ -34,20 +34,18 @@ fi
 docker exec "${NAME}" kill -STOP "${CHILD_PID}"
 log "SIGSTOPped pid ${CHILD_PID}; expecting exit 75 within ~$((HEALTH_TIMEOUT + 30))s"
 
-# The restart policy relaunches it, so watch the exit code rather than the state.
-RECORDED=""
-DEADLINE=$((SECONDS + HEALTH_TIMEOUT + 60))
-while [ "${SECONDS}" -lt "${DEADLINE}" ]; do
-  CODE="$(container_exit_code "${NAME}")"
-  if [ "${CODE}" != "0" ]; then
-    RECORDED="${CODE}"
-    break
-  fi
-  sleep 2
-done
+# The restart policy relaunches it, and `.State.ExitCode` is reset to 0 the
+# moment it comes back -- polling it races the restart and usually samples the
+# fresh container. Take the code from the daemon's own `die` event instead.
+RECORDED="$(timeout "$((HEALTH_TIMEOUT + 90))" docker events \
+  --filter "container=${NAME}" --filter 'event=die' \
+  --format '{{.Actor.Attributes.exitCode}}' 2>/dev/null | head -n1 || true)"
 expect_eq "exit code after the health timeout" "75" "${RECORDED:-<none, never exited>}"
 
-if docker logs "${NAME}" 2>&1 | grep -q 'load lock released'; then
+# `grep -q` would exit at the first match, hand `docker logs` a SIGPIPE and make
+# the pipeline 141 under lib.sh's `set -o pipefail` -- reported as "not found"
+# even when the line is there. `grep -c` consumes the whole stream instead.
+if [ "$(docker logs "${NAME}" 2>&1 | grep -c 'load lock released' || true)" != "0" ]; then
   pass "the lock was released before exiting"
 else
   fail "no 'load lock released' in the logs -- the lock rode the process down"

@@ -22,7 +22,14 @@ wait_ready "${NAME_A}" "${PORT_A}" || finish
 wait_ready "${NAME_B}" "${PORT_B}" || finish
 
 # docker logs -t prefixes RFC3339 timestamps; both engines log to the same clock.
-first_match() { docker logs -t "$1" 2>&1 | grep -m1 -- "$2" | awk '{print $1}'; }
+# The logs are captured first: piping `docker logs` straight into `grep -m1` makes
+# grep exit early, `docker logs` take SIGPIPE, and lib.sh's `set -e -o pipefail`
+# abort the whole check with 141 before a single assertion runs.
+first_match() {
+  local logs
+  logs="$(docker logs -t "$1" 2>&1)" || true
+  printf '%s\n' "${logs}" | grep -m1 -- "$2" | awk '{print $1}' || true
+}
 
 A_RELEASED="$(first_match "${NAME_A}" 'load lock released')"
 B_WAITING="$(first_match "${NAME_B}" 'waiting for the load lock')"
