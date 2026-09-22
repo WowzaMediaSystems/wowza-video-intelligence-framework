@@ -197,6 +197,8 @@ services:
           - ./vlm-env/${VLM_CONF:-qwen}.env
         volumes:
           - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
+        # The launcher itself; vlm-entrypoint.sh is a shim that execs it.
+          - ./vif-vlm-launcher.py:/vif-vlm-launcher.py:ro
         # Cosmos3-Edge fix for the v0.26.0 image (vLLM PR #49190 cherry-pick,
         # see the file's header); inert for other models. Remove on a fixed release.
           - ./vlm-patches/cosmos3_edge.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/cosmos3_edge.py:ro

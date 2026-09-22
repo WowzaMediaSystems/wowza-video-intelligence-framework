@@ -4,7 +4,7 @@ Runnable checks for the parts of the VIF Model Manager (see
 [`docs/vif-model-manager-proposal.md`](../../docs/vif-model-manager-proposal.md))
 that cannot be proved on CI: they need a real GPU, real weights and a real vLLM
 engine. They exercise the opt-in pool duties in
-[`vlm-entrypoint.sh`](../../vlm-entrypoint.sh) and the Bearer guard in
+[`vif-vlm-launcher.py`](../../vif-vlm-launcher.py) and the Bearer guard in
 [`vlm-patches/vif_auth.py`](../../vlm-patches/vif_auth.py).
 
 **These have not been run.** They are written to be run on rented datacenter-GPU
@@ -35,6 +35,7 @@ Everything is env, with defaults that work on a single-GPU box:
 | `VIF_SPIKE_GPUS` | `all` | passed to `docker run --gpus` |
 | `VIF_SPIKE_STATE_DIR` | `/tmp/vif-spike-state` | host dir standing in for the shared state volume |
 | `VIF_SPIKE_HF_CACHE` | `~/.cache/huggingface` | weights cache, so runs after the first are warm |
+| `VIF_SPIKE_UTILIZATION` | `0.80` | `--gpu-memory-utilization` for each engine; the pool checks need two resident at once |
 | `VIF_SPIKE_PORT_A` / `_B` | `18001` / `18002` | published ports |
 | `VIF_SPIKE_READY_TIMEOUT` | `900` | seconds to wait for an engine to come up |
 | `VIF_SPIKE_HEALTH_TIMEOUT` | `90` | the launcher's health deadline in the wedge check |
@@ -70,7 +71,10 @@ ready.
 
 ### `03-self-sleep-matrix.sh`
 
-The state file decides who stays awake. Three cases, each a fresh engine:
+Who stands down, how deeply, and on whose say-so. Two halves.
+
+**Legacy half** — the state file decides who stays awake; the rest sleep. Three cases, each a
+fresh engine:
 
 | State file | Expected |
 | --- | --- |
@@ -80,6 +84,20 @@ The state file decides who stays awake. Three cases, each a fresh engine:
 
 `/health` must answer `200` in all three, including while asleep — otherwise the
 compose healthcheck would kill parked engines.
+
+**Managed half** — one engine following its spec through every desired state,
+with nothing restarted in between. It starts `parked` (the cold tier: no engine
+process at all) and the check asserts `/health` `200`, `/vif/parked` `200`,
+`/is_sleeping` `404` and no `vllm serve` in the container — a container that
+stays healthy while holding nothing. Rewriting the spec then walks it
+`parked → awake → asleep → parked`, asserting at each step that the engine
+process appears or disappears and that `is_sleeping` follows. The awake step
+also asserts the log tee: `<state dir>/logs/<engine key>.log` is non-empty,
+which is how the Manager shows engine logs without VIS holding a Docker socket.
+
+A last case covers capability beating configuration: a spec asking for `asleep`
+on an engine started without sleep mode must end up **parked**, never awake on
+a card it was not given.
 
 ### `04-lock-timeout-recovery.sh`
 

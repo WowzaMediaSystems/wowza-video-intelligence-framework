@@ -30,6 +30,8 @@ services:
           - ./vlm-env/${VLM_2_CONF:-nemotron}.env
         volumes:
           - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
+        # The launcher itself; vlm-entrypoint.sh is a shim that execs it.
+          - ./vif-vlm-launcher.py:/vif-vlm-launcher.py:ro
           - ./vis/vlm-models:/root/.cache/huggingface
           - ./vis/vlm-cache:/root/.cache/vllm
         entrypoint: ["/bin/bash", "/vlm-entrypoint.sh"]
