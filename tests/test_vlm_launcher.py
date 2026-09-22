@@ -308,18 +308,46 @@ class TestSpecPath:
             == "qwen-qwen3-vl-4b-instruct-fp8"
         )
 
-    def test_an_active_engine_has_no_sleep_duty(self, tmp_path: Path) -> None:
+    def test_an_active_engine_is_awake(self, tmp_path: Path) -> None:
         path: Path = write_spec(tmp_path, active=True)
         plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
-        assert plan.has_sleep_duty is False
-        assert plan.needs_supervision is False
+        assert plan.desired_state == "awake"
+        # A spec is watched for as long as the engine runs, so even the active
+        # engine is supervised: VIS can park it without restarting anything.
+        assert plan.watches is True
+        assert plan.needs_supervision is True
 
-    def test_an_inactive_engine_parks_itself(self, tmp_path: Path) -> None:
+    def test_an_inactive_engine_sleeps(self, tmp_path: Path) -> None:
         path: Path = write_spec(tmp_path, active=False, sleep_level=2)
         plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
-        assert plan.has_sleep_duty is True
-        assert plan.needs_supervision is True
+        assert plan.desired_state == "asleep"
         assert plan.sleep_level == 2
+
+    def test_desired_state_wins_over_active(self, tmp_path: Path) -> None:
+        path: Path = write_spec(tmp_path, active=True, desired_state="parked")
+        plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        assert plan.desired_state == "parked"
+
+    def test_an_unknown_desired_state_is_refused(self, tmp_path: Path) -> None:
+        path: Path = write_spec(tmp_path, desired_state="hibernating")
+        with pytest.raises(
+            launcher.ConfigError,
+            match="desired_state 'hibernating' is not one of awake, asleep, parked",
+        ):
+            launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+
+    def test_the_state_volume_is_derived_from_the_spec_path(
+        self, tmp_path: Path
+    ) -> None:
+        path: Path = write_spec(tmp_path)
+        plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        assert plan.state_file == str(tmp_path / "active-model")
+        assert plan.ready_file == str(
+            tmp_path / "ready" / "qwen-qwen3-vl-4b-instruct-fp8"
+        )
+        assert plan.log_file == str(
+            tmp_path / "logs" / "qwen-qwen3-vl-4b-instruct-fp8.log"
+        )
 
     def test_the_spec_pins_the_gpus(self, tmp_path: Path) -> None:
         path: Path = write_spec(tmp_path, gpu_ids="3")
@@ -341,12 +369,14 @@ class TestSpecPath:
         with pytest.raises(launcher.ConfigError, match="missing 'args'"):
             launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
 
-    def test_an_inactive_engine_without_sleep_mode_is_refused(
-        self, tmp_path: Path
+    def test_an_engine_that_cannot_sleep_is_parked_instead_of_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """Capability beats configuration: never a dead state, never a refusal."""
         path: Path = write_spec(tmp_path, active=False, sleep_mode=False)
-        with pytest.raises(launcher.ConfigError, match="cannot park itself"):
-            launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        assert plan.desired_state == "parked"
+        assert "parking it instead" in capsys.readouterr().err
 
     def test_a_spec_that_never_arrives_times_out(self, tmp_path: Path) -> None:
         with pytest.raises(launcher.ConfigError, match="no usable engine spec"):
@@ -649,3 +679,304 @@ class TestDuties:
         finally:
             if process.poll() is None:
                 process.kill()
+
+
+def http_get(port: int, path: str) -> tuple[int, str]:
+    """A plain GET against an engine's own port, status and body."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}{path}", timeout=5
+        ) as response:
+            return int(response.status), response.read().decode("utf-8")
+    except urllib.error.HTTPError as error:
+        return int(error.code), error.read().decode("utf-8")
+    except (urllib.error.URLError, OSError) as error:
+        return 0, str(error)
+
+
+def until(predicate: Any, timeout: float = 30.0) -> bool:
+    """Poll a predicate to a deadline. False means it never came true."""
+    deadline: float = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def engine_key(model: str) -> str:
+    return launcher.engine_key(model)
+
+
+def put_spec(state_dir: Path, model: str, **overrides: Any) -> Path:
+    """Write one engine's spec the way VIS does: whole file, through a rename."""
+    document: dict[str, Any] = {
+        "spec_version": 1,
+        "catalog_id": model,
+        "model": model,
+        "served_model_name": model,
+        "port": overrides.pop("port", 8000),
+        "args": [f"--port={overrides.get('port', 8000)}"],
+        "env": {},
+        "sleep_mode": True,
+        "sleep_level": 1,
+        "active": True,
+        "desired_state": "awake",
+        "gpu_ids": None,
+        "tensor_parallel_size": 1,
+        "tuning_tier": "compact",
+        "load_lock_file": None,
+        "health_timeout_seconds": 1800,
+        "generated_by": "VIS 1.1.0",
+        "generated_at": "2026-09-22T12:00:00Z",
+    }
+    document.update(overrides)
+    document["args"] = [f"--port={document['port']}"]
+    path: Path = state_dir / "engines" / f"{engine_key(model)}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    return path
+
+
+class ManagedEngine:
+    """One launcher running against a state volume, driven by its spec."""
+
+    def __init__(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path, model: str
+    ) -> None:
+        self.state_dir: Path = state_dir
+        self.model: str = model
+        self.port: int = free_port()
+        self.log: Path = tmp_path / f"events-{engine_key(model)}.jsonl"
+        self.stub_path: Path = stub_path
+        self.process: subprocess.Popen[str] | None = None
+        self.extra_env: dict[str, str] = {}
+
+    @property
+    def ready_marker(self) -> Path:
+        return self.state_dir / "ready" / engine_key(self.model)
+
+    @property
+    def engine_log(self) -> Path:
+        return self.state_dir / "logs" / f"{engine_key(self.model)}.log"
+
+    def spec(self, **overrides: Any) -> Path:
+        overrides.setdefault("port", self.port)
+        return put_spec(self.state_dir, self.model, **overrides)
+
+    def start(self) -> None:
+        env: dict[str, str] = {
+            "VIF_STATE_DIR": str(self.state_dir),
+            "VLM_MODEL": self.model,
+            "VIF_WATCH_POLL_SECONDS": "0.2",
+            "VLM_HEALTH_POLL_SECONDS": "0.2",
+            "VLM_HEALTH_TIMEOUT_SECONDS": "30",
+            "FAKE_VLLM_EVENT_LOG": str(self.log),
+            **self.extra_env,
+        }
+        self.process = subprocess.Popen(
+            [sys.executable, str(LAUNCHER)],
+            env={**os.environ, **env, "PATH": f"{self.stub_path}:{os.environ['PATH']}"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    def events(self) -> list[str]:
+        return [event["event"] for event in events(self.log)]
+
+    def started_at(self) -> float:
+        for event in events(self.log):
+            if event["event"] == "start":
+                return float(event["at"])
+        raise AssertionError(f"{self.model} never started an engine")
+
+    def stop(self) -> str:
+        assert self.process is not None
+        if self.process.poll() is None:
+            self.process.terminate()
+        return self.process.communicate(timeout=30)[0]
+
+
+@pytest.fixture()
+def state_dir(tmp_path: Path) -> Path:
+    directory: Path = tmp_path / "vif-state"
+    directory.mkdir()
+    return directory
+
+
+class TestWatchLoop:
+    """The six desired-state transitions VIS drives by rewriting a spec."""
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    def test_awake_to_asleep(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+
+        engine.spec(desired_state="asleep", active=False)
+        assert until(lambda: "sleep" in engine.events())
+        assert until(lambda: not engine.ready_marker.exists())
+        assert http_get(engine.port, "/is_sleeping") == (200, '{"is_sleeping": true}')
+
+    def test_asleep_to_awake(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: "sleep" in engine.events())
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: "wake" in engine.events())
+        assert engine.events() == ["start", "sleep", "wake"]
+        assert until(lambda: engine.ready_marker.exists())
+        assert http_get(engine.port, "/is_sleeping") == (200, '{"is_sleeping": false}')
+
+    def test_awake_to_parked(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+
+        engine.spec(desired_state="parked", active=False)
+        assert until(lambda: "sigterm" in engine.events())
+        assert engine.events() == ["start", "sigterm"]
+        assert until(lambda: not engine.ready_marker.exists())
+        # The container stays healthy on a stub, with no engine behind it.
+        assert until(lambda: http_get(engine.port, "/health")[0] == 200)
+        assert http_get(engine.port, "/vif/parked")[0] == 200
+        assert http_get(engine.port, "/is_sleeping")[0] == 404
+
+    def test_asleep_to_parked(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: "sleep" in engine.events())
+
+        engine.spec(desired_state="parked")
+        assert until(lambda: "sigterm" in engine.events())
+        assert engine.events() == ["start", "sleep", "sigterm"]
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+
+    def test_parked_to_awake(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert engine.events() == []
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: engine.events() == ["start"])
+        assert until(lambda: engine.ready_marker.exists())
+        # The stub is gone: the engine owns the port again.
+        assert http_get(engine.port, "/vif/parked")[0] == 404
+        assert http_get(engine.port, "/health")[0] == 200
+
+    def test_parked_to_asleep(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+
+        engine.spec(desired_state="asleep", active=False)
+        assert until(lambda: engine.events() == ["start", "sleep"])
+        assert not engine.ready_marker.exists()
+
+    def test_a_spec_that_does_not_parse_is_ignored(self, engine: ManagedEngine) -> None:
+        """A write in flight is a snapshot, not a decision."""
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+
+        path: Path = engine.state_dir / "engines" / f"{engine_key(engine.model)}.json"
+        path.write_text('{"spec_version": 1, "model": "acme/mo', encoding="utf-8")
+        time.sleep(2)
+        assert engine.events() == ["start"]
+        assert engine.ready_marker.exists()
+
+        engine.spec(desired_state="parked")
+        assert until(lambda: "sigterm" in engine.events())
+
+    def test_the_parked_stub_names_itself(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        status, body = http_get(engine.port, "/vif/parked")
+        assert json.loads(body) == {
+            "parked": True,
+            "model": "acme/model-a",
+            "launcher_revision": launcher.LAUNCHER_REVISION,
+        }
+        assert json.loads(http_get(engine.port, "/health")[1])["parked"] is True
+
+    def test_the_child_output_is_teed_to_the_state_volume(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env["FAKE_VLLM_STDOUT"] = "loading weights\nserving now"
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+        assert until(lambda: "serving now" in engine.engine_log.read_text("utf-8"))
+        assert engine.engine_log.read_text("utf-8").splitlines() == [
+            "loading weights",
+            "serving now",
+        ]
+        # And the container's own stdout still carries it.
+        output: str = engine.stop()
+        assert "loading weights" in output
+        assert "serving now" in output
+
+
+class TestLoadLockPriority:
+    """The engine that should be serving loads first, whoever asked first."""
+
+    @pytest.fixture()
+    def engines(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        (state_dir / "active-model").write_text("acme/model-a\n", encoding="utf-8")
+        lock: Path = state_dir / "load.lock"
+        active: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        other: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-b"
+        )
+        for engine in (active, other):
+            engine.extra_env["FAKE_VLLM_READY_AFTER"] = "2"
+        active.spec(desired_state="awake", load_lock_file=str(lock))
+        other.spec(desired_state="asleep", active=False, load_lock_file=str(lock))
+        yield active, other
+        for engine in (active, other):
+            if engine.process is not None:
+                engine.stop()
+
+    def test_a_non_active_engine_waits_for_the_active_one(
+        self, engines: tuple[ManagedEngine, ManagedEngine]
+    ) -> None:
+        active, other = engines
+        # The neighbour asks first and still loads second: flock alone would
+        # have handed it the lock two seconds before the active engine asked.
+        other.start()
+        time.sleep(2)
+        active.start()
+
+        assert until(lambda: other.events() == ["start", "sleep"], timeout=60)
+        assert active.started_at() < other.started_at()
+        assert active.ready_marker.exists()
+
+    def test_the_active_engine_never_waits(
+        self, engines: tuple[ManagedEngine, ManagedEngine]
+    ) -> None:
+        active, _ = engines
+        # Nothing has published a readiness marker, and the active engine is
+        # not supposed to care: it is the one everyone else waits for.
+        launched: float = time.time()
+        active.start()
+        assert until(lambda: active.events() == ["start"], timeout=30)
+        assert active.started_at() - launched < 5

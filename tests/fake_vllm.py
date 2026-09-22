@@ -9,6 +9,10 @@ Knobs (env):
   FAKE_VLLM_EXIT_CODE      exit code on SIGTERM (0)
   FAKE_VLLM_EVENT_LOG      file every event is appended to, one JSON per line
   FAKE_VLLM_IGNORE_SIGTERM "1" makes it deaf to SIGTERM, as a wedged engine is
+  FAKE_VLLM_STDOUT         text written to stdout at startup, one line per \n
+
+It also answers /is_sleeping, /sleep and /wake_up, so the launcher's desired
+state can be read back the way VIS reads it.
 """
 
 import json
@@ -27,6 +31,7 @@ READY_AFTER: float = float(os.environ.get("FAKE_VLLM_READY_AFTER", "0"))
 NEVER_READY: bool = os.environ.get("FAKE_VLLM_NEVER_READY", "") == "1"
 EXIT_CODE: int = int(os.environ.get("FAKE_VLLM_EXIT_CODE", "0"))
 EVENT_LOG: str = os.environ.get("FAKE_VLLM_EVENT_LOG", "")
+SLEEPING: bool = False
 
 
 def record(event: str, **fields: Any) -> None:
@@ -46,16 +51,34 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _respond_json(self, status: int, payload: dict[str, Any]) -> None:
+        body: bytes = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:
         if self.path.startswith("/health"):
             ready: bool = not NEVER_READY and (time.monotonic() - START) >= READY_AFTER
             self._respond(200 if ready else 503)
             return
+        if self.path.startswith("/is_sleeping"):
+            self._respond_json(200, {"is_sleeping": SLEEPING})
+            return
         self._respond(404)
 
     def do_POST(self) -> None:
+        global SLEEPING
         if self.path.startswith("/sleep"):
             record("sleep", path=self.path, model=MODEL)
+            SLEEPING = True
+            self._respond(200)
+            return
+        if self.path.startswith("/wake_up"):
+            record("wake", path=self.path, model=MODEL)
+            SLEEPING = False
             self._respond(200)
             return
         self._respond(404)
@@ -74,6 +97,8 @@ if __name__ == "__main__":
         if arg.startswith("--port="):
             port = int(arg.split("=", 1)[1])
     record("start", model=MODEL, argv=argv, port=port)
+    for line in os.environ.get("FAKE_VLLM_STDOUT", "").splitlines():
+        print(line, flush=True)
     if os.environ.get("FAKE_VLLM_IGNORE_SIGTERM", "") == "1":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     else:

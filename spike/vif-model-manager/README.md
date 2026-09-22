@@ -71,7 +71,10 @@ ready.
 
 ### `03-self-sleep-matrix.sh`
 
-The state file decides who stays awake. Three cases, each a fresh engine:
+Who parks, how deeply, and on whose say-so. Two halves.
+
+**Legacy half** — the state file decides who stays awake. Three cases, each a
+fresh engine:
 
 | State file | Expected |
 | --- | --- |
@@ -81,6 +84,20 @@ The state file decides who stays awake. Three cases, each a fresh engine:
 
 `/health` must answer `200` in all three, including while asleep — otherwise the
 compose healthcheck would kill parked engines.
+
+**Managed half** — one engine following its spec through every desired state,
+with nothing restarted in between. It starts `parked` (the cold tier: no engine
+process at all) and the check asserts `/health` `200`, `/vif/parked` `200`,
+`/is_sleeping` `404` and no `vllm serve` in the container — a container that
+stays healthy while holding nothing. Rewriting the spec then walks it
+`parked → awake → asleep → parked`, asserting at each step that the engine
+process appears or disappears and that `is_sleeping` follows. The awake step
+also asserts the log tee: `<state dir>/logs/<engine key>.log` is non-empty,
+which is how the Manager shows engine logs without VIS holding a Docker socket.
+
+A last case covers capability beating configuration: a spec asking for `asleep`
+on an engine started without sleep mode must end up **parked**, never awake on
+a card it was not given.
 
 ### `04-lock-timeout-recovery.sh`
 
