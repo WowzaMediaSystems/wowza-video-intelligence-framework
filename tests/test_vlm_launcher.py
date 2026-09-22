@@ -453,12 +453,24 @@ def events(log: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
 
+_HANDED_OUT: set[int] = set()
+
+
 def free_port() -> int:
+    """
+    A port nothing is listening on. Never the same one twice in a session:
+    the kernel is free to hand a closed ephemeral port straight back, and two
+    engines on one port make for a very confusing failure.
+    """
     import socket
 
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    while True:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port: int = int(sock.getsockname()[1])
+        if port not in _HANDED_OUT:
+            _HANDED_OUT.add(port)
+            return port
 
 
 class TestDuties:
@@ -614,7 +626,10 @@ class TestDuties:
                     stderr=subprocess.DEVNULL,
                 )
             )
-            # Let the first engine take the lock before the second asks.
+            # Let the first engine take the lock before the second asks. The
+            # wait covers a Python startup, so it is generous: if the second
+            # launcher won the race the test would be measuring nothing.
+            assert until(lambda: lock.exists(), timeout=30)
             time.sleep(1)
             processes.append(
                 subprocess.Popen(

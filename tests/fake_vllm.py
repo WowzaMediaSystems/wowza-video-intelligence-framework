@@ -103,7 +103,18 @@ if __name__ == "__main__":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     else:
         signal.signal(signal.SIGTERM, on_sigterm)
-    server: HTTPServer = HTTPServer(("127.0.0.1", port), Handler)
+    # The port was picked by the test moments ago and can still be in TIME_WAIT
+    # from whoever held it before; a real engine would just fail, but here the
+    # port is ours and worth waiting for.
+    server: HTTPServer | None = None
+    deadline: float = time.monotonic() + 15
+    while server is None:
+        try:
+            server = HTTPServer(("127.0.0.1", port), Handler)
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.2)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     while True:
         time.sleep(3600)
