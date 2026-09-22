@@ -87,7 +87,7 @@ script execs `vllm serve` directly, exactly as the bash entrypoint did.
   VLM_LOAD_LOCK_FILE           Path to a lock file on a volume shared by every
                                engine on the GPU. Held from before the engine
                                launches until it is ready (and, for an engine
-                               that must park, until it is asleep), so cold
+                               that must sleep, until it is asleep), so cold
                                loads serialize instead of claiming the card at
                                once. Unset = no locking.
   VLM_HEALTH_TIMEOUT_SECONDS   How long to wait for this engine's own /health
@@ -135,9 +135,9 @@ this script keeps following the spec for as long as it runs (re-read every
 couple of seconds; a spec whose content has not changed costs one read):
 
   awake    the engine serves.
-  asleep   the engine is parked in host RAM (vLLM sleep level 1). The process,
-           its CUDA context and its compiled graphs stay; it is back in a
-           second or two.
+  asleep   the engine's weights are in host RAM (vLLM sleep level 1). The
+           process, its CUDA context and its compiled graphs stay; it is back
+           in a second or two.
   parked   no engine process at all -- the weights are on disk and this script
            answers /health itself, so the container stays healthy. Back in a
            cold start (a minute or two). This is the cold tier, and the only
@@ -508,9 +508,10 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
     desired: DesiredState = read_desired_state(document)
     if desired is DesiredState.ASLEEP and not sleep_mode:
         # Capability beats configuration, on this side too: an engine with no
-        # /sleep endpoint cannot park itself in RAM, so it parks the only way
-        # it can rather than staying awake and holding a card it was not
-        # given. VIS writes "parked" for such engines; this is the backstop.
+        # /sleep endpoint cannot put itself to sleep, so it parks -- the only
+        # way it has of standing down -- rather than staying awake and holding
+        # a card it was not given. VIS writes "parked" for such engines
+        # already; this is the backstop.
         warn(
             f"the engine spec asks {model} to be asleep but sleep mode is off; "
             "parking it instead (no engine process, health stub only)."
@@ -629,8 +630,9 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
     else:
         args.append(f"--max-num-seqs={max_num_seqs}")
 
-    # Sleep mode is what makes an engine parkable: the process, its compiled
-    # graphs and its warm state survive, but the GPU memory does not.
+    # Sleep mode is what lets an engine stand down without dying: the process,
+    # its compiled graphs and its warm state survive, but the GPU memory does
+    # not.
     if sleep_mode:
         env["VLLM_SERVER_DEV_MODE"] = "1"
         args.append("--enable-sleep-mode")
@@ -973,10 +975,10 @@ class Engine:
             return False
 
     def sleep_now(self) -> None:
-        """Park in host RAM. A failure leaves the engine awake, and says so."""
+        """Sleep in host RAM. A failure leaves the engine awake, and says so."""
         if not self.plan.sleep_mode:
             warn(
-                "this engine has no /sleep endpoint, so it cannot park in RAM; "
+                "this engine has no /sleep endpoint, so it cannot sleep; "
                 "it stays awake and keeps its GPU memory."
             )
             return

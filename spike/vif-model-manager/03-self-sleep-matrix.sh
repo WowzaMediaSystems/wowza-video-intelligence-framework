@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, parking: an engine parks itself unless it is the one that should
-# be serving. Absent state and foreign state both mean park -- the default that
-# keeps N engines from claiming one card.
+# Phase-0 gate, standing down: an engine stands down unless it is the one that
+# should be serving. Absent state and foreign state both mean stand down -- the
+# default that keeps N engines from claiming one card.
 #
-# Two halves. The LEGACY half reads the state file and parks in host RAM
-# (sleep). The MANAGED half reads a spec and follows it between all three
-# desired states, including COLD (parked): no engine process at all, with the
-# launcher answering /health so the container stays healthy.
+# Two halves, and two depths. The LEGACY half reads the state file and puts the
+# engine to SLEEP: its weights move to host RAM and the process stays. The
+# MANAGED half reads a spec and follows it between all three desired states,
+# including PARKED -- the cold tier, no engine process at all, with the launcher
+# answering /health so the container stays healthy.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 trap cleanup_containers EXIT

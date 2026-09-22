@@ -313,7 +313,7 @@ class TestSpecPath:
         plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
         assert plan.desired_state == "awake"
         # A spec is watched for as long as the engine runs, so even the active
-        # engine is supervised: VIS can park it without restarting anything.
+        # engine is supervised: VIS can stand it down without a restart.
         assert plan.watches is True
         assert plan.needs_supervision is True
 
@@ -485,7 +485,7 @@ class TestDuties:
             "FAKE_VLLM_EVENT_LOG": str(log),
         }
 
-    def test_it_parks_itself_when_the_state_file_names_another_model(
+    def test_it_sleeps_when_the_state_file_names_another_model(
         self, tmp_path: Path, stub_path: Path
     ) -> None:
         log: Path = tmp_path / "events.jsonl"

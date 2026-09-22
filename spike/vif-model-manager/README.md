@@ -71,9 +71,9 @@ ready.
 
 ### `03-self-sleep-matrix.sh`
 
-Who parks, how deeply, and on whose say-so. Two halves.
+Who stands down, how deeply, and on whose say-so. Two halves.
 
-**Legacy half** — the state file decides who stays awake. Three cases, each a
+**Legacy half** — the state file decides who stays awake; the rest sleep. Three cases, each a
 fresh engine:
 
 | State file | Expected |
