@@ -1,14 +1,26 @@
 # Wowza Streaming Engine · Video Intelligence Framework
 
-**Docker-based Wowza Streaming Engine with a Video Intelligence add-on for real-time object detection, VLM analysis (including scene understanding), and synthetic video detection.**  
+**Real-time computer vision for Wowza Streaming Engine — object detection, scene understanding, vision-language analysis, and synthetic video detection. Runs on your own servers, so your video never leaves your network.**
 
-Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-time AI analysis across edge and cloud environments. The stream name determines which type of AI analysis is performed. 
+Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-time AI analysis across edge and cloud environments. The stream name determines which type of AI analysis is performed. This repository contains the Docker Compose setup files, working default configuration, and sample videos. VIF can also be installed directly on an existing Wowza Streaming Engine server using [platform installers](https://www.wowza.com/docs/install-wse-video-intelligence-module) available from the [Wowza portal](https://portal.wowza.com/account/downloads#vif).
 
 [![Docker](https://img.shields.io/badge/docker-required-blue?logo=docker&style=flat-square)](https://docs.docker.com/engine/install/)
 [![WSE](https://img.shields.io/badge/Wowza%20Streaming%20Engine-license%20required-orange?style=flat-square)](https://auth.wowza.com/register?type=engine)
 [![License](https://img.shields.io/badge/license-proprietary-red?style=flat-square)](LICENSE)
 
 ---
+
+## How VIF Works
+
+VIF has two parts:
+
+- **Video Intelligence Service (VIS)** — runs the AI models on an NVIDIA GPU. This is the analysis engine.
+- **Video Intelligence Controller (VIC)** — a plugin inside Wowza Streaming Engine (WSE). It uses the WSE transcoder to pull frames from your streams and send them to VIS over a WebSocket connection.
+
+For a first test, one server with a supported GPU is simplest. For production, we recommend running VIS on its own GPU server, connected to the Controller over a dedicated WebSocket connection.
+
+> [!TIP]
+> **No-transcoder mode:** VIC can skip transcoding entirely, but then it can only grab keyframes (your GOP sets the analysis rate) and overlays are not available. See [Install without Docker](https://www.wowza.com/docs/install-wse-video-intelligence-module) for details.
 
 ## Quick Summary
 
@@ -22,13 +34,17 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 | **VI Service deployment** | Connect to a remote VI Service instance (`wss://`) or run VIF locally via Docker |
 
 ## Prerequisites
-- [Docker Engine](https://docs.docker.com/engine/install/)
+- [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose v2](https://docs.docker.com/compose/install/)
 - A valid [Wowza Streaming Engine](https://auth.wowza.com/register?type=engine) license key
 - A valid Video Intelligence Service license (`VIS_LICENSE`) for local VIS deployments
-- For local GPU inference: an NVIDIA GPU and compatible NVIDIA drivers
+- For local GPU inference: an NVIDIA GPU with driver **570+** and **CUDA 12.8+**, plus the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - (Optional) [FFmpeg](https://www.ffmpeg.org/download.html) for publishing test streams
 
+> [!TIP]
+> **Installing without Docker?** VIF also ships as platform installers (Windows, Linux x86_64, Linux Arm64) for existing Wowza Streaming Engine 4.11.1+ servers. Download them from the [Wowza portal](https://portal.wowza.com/account/downloads#vif) and follow the [Install without Docker](https://www.wowza.com/docs/install-wse-video-intelligence-module) guide. Both paths give you the same features.
+
 ## Table of Contents
+- [How VIF Works](#how-vif-works)
 - [Repository Layout](#repository-layout)
 - [Persistent Volume Mounts](#persistent-volume-mounts)
 - [Running Wowza VIF Locally (Quick Start)](#running-wowza-vif-locally-quick-start)
@@ -77,7 +93,7 @@ Make sure you have a valid [Wowza Streaming Engine key](https://www.wowza.com/fr
 Before starting, confirm your machine meets the [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif). The default local workflow runs all three containers (`wse`, `manager`, and `video-intelligence-service-gpu`).
 
 > [!TIP]
-> To install on an existing installation of Wowza Streaming Engine, see instructions [here](wse.standalone/README.md).
+> **Already running WSE 4.11.1+?** You can add VIF to your existing server using [platform installers](https://www.wowza.com/docs/install-wse-video-intelligence-module) instead of Docker. See [wse.standalone/README.md](wse.standalone/README.md) for the standalone plugin setup.
 > 
 #### 1. Create `.env` from the example and edit values:
     
@@ -107,17 +123,23 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
 
-#### 2. Verify Docker and NVIDIA driver visibility:
-   
+#### 2. Verify your GPU and Docker can see it:
+
+   First, confirm the host GPU:
+   ```bash
+   nvidia-smi
    ```
+   Then confirm Docker can reach it:
+   ```bash
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi
    ```
-   Check the version:
-   * NVIDIA driver reports a version greater than or equal to 570
-   * CUDA version is greater than or equal to 12.8
+   You're ready when you see:
+   * Driver version **570 or higher**
+   * CUDA version **12.8 or higher**
+   * Your GPU listed by name
    
 > [!NOTE]
-> You may need to install the NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html.
+> If the Docker command fails, you may need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 
 #### 3. Start WSE + Manager + VIS:
 
@@ -217,6 +239,9 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
 7. Expected output for streams analyzed by VIF:
 
    - The `-vi` rendition includes overlays. For example, publish `object_mystream1`, then play `http://localhost/live/object_mystream1-vi/playlist.m3u8` in an HLS player.
+   - **VIF live dashboard:** View all incoming live VIF streams at `http://localhost:8088/Home.htm#plugin/server/vif/shm.html`.
+   - **VIF VOD dashboard:** View all processed video on-demand VIF jobs at `http://localhost:8088/Home.htm#plugin/server/vif/vod.html`.
+   - **Live playback with overlays and ID3:** Open the built-in player at `http://localhost:8088/Home.htm#plugin/server/vif/playback.html` to see overlays and ID3 metadata together. Both overlays and ID3 must be enabled in the stream configuration.
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
 
