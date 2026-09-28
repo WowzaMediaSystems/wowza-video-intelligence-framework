@@ -203,6 +203,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -218,7 +219,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-28.2"
+LAUNCHER_REVISION: str = "2026-09-28.4"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -825,6 +826,48 @@ def _digest_of(path: str) -> str:
         return ""
 
 
+class _StubServer(ThreadingHTTPServer):
+    """
+    A ThreadingHTTPServer that can close the connections it is still serving.
+
+    `shutdown()` only stops accepting: a handler thread already holding a
+    connection keeps answering on it. A pooled client would then keep talking
+    to a stub that no longer exists while the engine serves new connections on
+    the same port.
+    """
+
+    def __init__(self, address: tuple[str, int], handler: type[Any]) -> None:
+        self._live: set[socket.socket] = set()
+        self._live_lock: threading.Lock = threading.Lock()
+        super().__init__(address, handler)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        with self._live_lock:
+            self._live.add(request)
+        super().process_request(request, client_address)
+
+    def shutdown_request(self, request: Any) -> None:
+        with self._live_lock:
+            self._live.discard(request)
+        super().shutdown_request(request)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # A connection closed under its handler by close_live_connections is
+        # the expected way for it to end, not something to print a trace for.
+        return
+
+    def close_live_connections(self) -> None:
+        with self._live_lock:
+            live: list[socket.socket] = list(self._live)
+            self._live.clear()
+        for connection in live:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+
+
 class ParkedStub:
     """
     The HTTP server a parked engine leaves in place of its vLLM process.
@@ -835,10 +878,14 @@ class ParkedStub:
     healthy, and `/vif/parked` so anything asking can tell "parked on purpose"
     from "started without dev mode". Everything else 404s, `/is_sleeping`
     included: a parked engine genuinely does not have one.
+
+    No connection outlives an answer, or the stub: every response closes its
+    connection, and `stop()` closes any still open. A client that reuses a
+    connection must reconnect -- and reach the engine -- once the stub is gone.
     """
 
     def __init__(self) -> None:
-        self._server: ThreadingHTTPServer | None = None
+        self._server: _StubServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -866,6 +913,8 @@ class ParkedStub:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
+                # Also sets close_connection: one request per connection.
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(payload)
 
@@ -879,7 +928,7 @@ class ParkedStub:
             def do_POST(self) -> None:
                 self._send(404, b"{}")
 
-        self._server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+        self._server = _StubServer(("0.0.0.0", port), Handler)
         self._thread = threading.Thread(
             target=self._server.serve_forever, daemon=True, name="parked-stub"
         )
@@ -891,6 +940,7 @@ class ParkedStub:
             return
         self._server.shutdown()
         self._server.server_close()
+        self._server.close_live_connections()
         if self._thread is not None:
             self._thread.join(timeout=10)
         self._server = None

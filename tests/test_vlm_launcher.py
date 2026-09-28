@@ -15,15 +15,19 @@ They also pass on any Python 3.12 with pytest.
 """
 
 import fcntl
+import http.client
 import importlib.util
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
 import types
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -1409,3 +1413,105 @@ class TestStopSignals:
                 if process.poll() is None:
                     process.kill()
         assert events(log) == []
+
+
+class _FakeEngineHandler(BaseHTTPRequestHandler):
+    """Stands in for vLLM on the stub's port: /vif/parked is a 404 here."""
+
+    protocol_version: str = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        return
+
+    def do_GET(self) -> None:
+        body: bytes = b'{"engine": true}'
+        self.send_response(200 if self.path == "/health" else 404)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class TestParkedStubConnections:
+    """No connection to the stub outlives it, so no client talks to a ghost."""
+
+    @pytest.fixture()
+    def port(self) -> int:
+        return free_port()
+
+    @pytest.fixture()
+    def stub(self, port: int) -> Any:
+        parked: Any = launcher.ParkedStub()
+        parked.start(port, "acme/model-a")
+        yield parked
+        parked.stop()
+
+    @pytest.fixture()
+    def fake_engine(self) -> Any:
+        servers: list[HTTPServer] = []
+
+        def start(port: int) -> HTTPServer:
+            server: HTTPServer = HTTPServer(("127.0.0.1", port), _FakeEngineHandler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            servers.append(server)
+            return server
+
+        yield start
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+    def test_every_answer_closes_its_connection(self, stub: Any, port: int) -> None:
+        connection: http.client.HTTPConnection = http.client.HTTPConnection(
+            "127.0.0.1", port, timeout=5
+        )
+        connection.request("GET", "/vif/parked", headers={"Connection": "keep-alive"})
+        response: http.client.HTTPResponse = connection.getresponse()
+        assert response.status == 200
+        assert response.getheader("Connection") == "close"
+        assert json.loads(response.read())["parked"] is True
+        connection.close()
+
+    def test_a_reused_connection_reaches_the_engine_after_stop(
+        self, stub: Any, port: int, fake_engine: Any
+    ) -> None:
+        connection: http.client.HTTPConnection = http.client.HTTPConnection(
+            "127.0.0.1", port, timeout=5
+        )
+        connection.request("GET", "/vif/parked", headers={"Connection": "keep-alive"})
+        first: http.client.HTTPResponse = connection.getresponse()
+        assert first.status == 200
+        first.read()
+
+        stub.stop()
+        fake_engine(port)
+        # The same connection object, as a pooled client would reuse it.
+        connection.request("GET", "/vif/parked", headers={"Connection": "keep-alive"})
+        second: http.client.HTTPResponse = connection.getresponse()
+        assert second.status == 404
+        assert second.read() == b'{"engine": true}'
+        connection.close()
+
+    def test_stop_closes_a_connection_still_held_open(
+        self, stub: Any, port: int
+    ) -> None:
+        held: socket.socket = socket.create_connection(("127.0.0.1", port), timeout=5)
+        # Give the stub's accept loop time to hand the connection to a handler,
+        # which then waits on it for a request line.
+        time.sleep(0.5)
+        stub.stop()
+        try:
+            held.sendall(b"GET /vif/parked HTTP/1.1\r\nHost: x\r\n\r\n")
+            answer: bytes = held.recv(4096)
+        except OSError:
+            answer = b""
+        finally:
+            held.close()
+        assert answer == b""
+
+    def test_a_new_request_after_stop_reaches_the_engine(
+        self, stub: Any, port: int, fake_engine: Any
+    ) -> None:
+        stub.stop()
+        fake_engine(port)
+        assert http_get(port, "/vif/parked") == (404, '{"engine": true}')
+        assert http_get(port, "/health") == (200, '{"engine": true}')
