@@ -14,6 +14,7 @@ Run them where the launcher runs, the pinned engine image:
 They also pass on any Python 3.12 with pytest.
 """
 
+import fcntl
 import importlib.util
 import json
 import os
@@ -1203,3 +1204,80 @@ class TestLoadLockPriority:
         active.start()
         assert until(lambda: active.events() == ["start"], timeout=30)
         assert active.started_at() - launched < 5
+
+
+def launch(env: dict[str, str], output: Path, stub_path: Path) -> subprocess.Popen[str]:
+    """A launcher whose output goes to a file, so a test can wait on a line."""
+    return subprocess.Popen(
+        [sys.executable, str(LAUNCHER)],
+        env={**os.environ, **env, "PATH": f"{stub_path}:{os.environ['PATH']}"},
+        stdout=output.open("w", encoding="utf-8"),
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
+class TestStopSignals:
+    """A stop that arrives before there is an engine still stops the container."""
+
+    def test_sigterm_during_the_spec_wait_exits_cleanly(
+        self, tmp_path: Path, stub_path: Path
+    ) -> None:
+        output: Path = tmp_path / "launcher.log"
+        process: subprocess.Popen[str] = launch(
+            {
+                "VIF_ENGINE_SPEC_FILE": str(tmp_path / "engines" / "absent.json"),
+                "VIF_SPEC_TIMEOUT_SECONDS": "60",
+            },
+            output,
+            stub_path,
+        )
+        try:
+            assert until(lambda: "waiting up to 60s" in output.read_text("utf-8"))
+            stopped_at: float = time.monotonic()
+            process.send_signal(signal.SIGTERM)
+            assert process.wait(timeout=5) == 0
+            assert time.monotonic() - stopped_at < 2
+        finally:
+            if process.poll() is None:
+                process.kill()
+
+    def test_sigterm_before_the_child_exists_starts_no_engine(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        model: str = "acme/model-a"
+        log: Path = tmp_path / "events.jsonl"
+        lock: Path = state_dir / "load.lock"
+        output: Path = tmp_path / "launcher.log"
+        put_spec(
+            state_dir,
+            model,
+            port=free_port(),
+            desired_state="awake",
+            load_lock_file=str(lock),
+        )
+        with lock.open("a", encoding="utf-8") as held:
+            # A neighbour is loading: the launcher waits for the lock, with no
+            # engine process yet, and that is when the stop arrives.
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+            process: subprocess.Popen[str] = launch(
+                {
+                    "VIF_STATE_DIR": str(state_dir),
+                    "VLM_MODEL": model,
+                    "FAKE_VLLM_EVENT_LOG": str(log),
+                },
+                output,
+                stub_path,
+            )
+            try:
+                assert until(
+                    lambda: "waiting for the load lock" in output.read_text("utf-8")
+                )
+                stopped_at: float = time.monotonic()
+                process.send_signal(signal.SIGTERM)
+                assert process.wait(timeout=5) == 0
+                assert time.monotonic() - stopped_at < 2
+            finally:
+                if process.poll() is None:
+                    process.kill()
+        assert events(log) == []

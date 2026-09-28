@@ -162,7 +162,9 @@ bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
 is a configuration error, exit 78, naming the variable.
 
 EXIT CODES: 75 health-check timeout, 78 bad configuration (including a spec
-that never arrives); anything else is vLLM's own.
+that never arrives), 0 for a SIGTERM that arrives before there is an engine to
+pass it to (waiting for the spec, the active engine or the load lock); anything
+else is vLLM's own.
 """
 
 import fcntl
@@ -208,6 +210,7 @@ DEFAULT_WATCH_POLL_SECONDS: float = 2.0
 # engine that is not coming.
 DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS: int = 1800
 READY_POLL_SECONDS: float = 2.0
+LOCK_POLL_SECONDS: float = 0.2
 
 FP8_KV_CACHE_MIN_COMPUTE_CAPABILITY: float = 8.9
 
@@ -218,6 +221,31 @@ _NON_SLUG: re.Pattern[str] = re.compile(r"[^a-z0-9]+")
 
 class ConfigError(Exception):
     """Something is wrong with the configuration; the engine never starts."""
+
+
+class Stopped(Exception):
+    """A stop signal arrived before there was an engine to hand it to."""
+
+
+# Set by SIGTERM/SIGINT from the moment main() starts. Every wait in this file
+# polls it: the launcher is PID 1, which ignores a signal it has no handler for.
+_STOP: threading.Event = threading.Event()
+STOP_POLL_SECONDS: float = 0.1
+
+
+def request_stop(_signum: int, _frame: FrameType | None) -> None:
+    _STOP.set()
+
+
+def pause(seconds: float) -> bool:
+    """Sleep up to `seconds`, cut short by a stop. True when one was requested."""
+    deadline: float = time.monotonic() + seconds
+    while not _STOP.is_set():
+        remaining: float = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(STOP_POLL_SECONDS, remaining))
+    return _STOP.is_set()
 
 
 class DesiredState(StrEnum):
@@ -505,6 +533,8 @@ def wait_for_spec(path: str, timeout_seconds: int) -> dict[str, Any]:
     deadline: float = time.monotonic() + timeout_seconds
     announced: bool = False
     while True:
+        if _STOP.is_set():
+            raise Stopped(f"stopped while waiting for {path}")
         reason: str = ""
         try:
             document: dict[str, Any] = json.loads(
@@ -525,7 +555,7 @@ def wait_for_spec(path: str, timeout_seconds: int) -> dict[str, Any]:
         if not announced:
             log(f"waiting up to {timeout_seconds}s for VIS to write {path}...")
             announced = True
-        time.sleep(2.0)
+        pause(2.0)
 
 
 def spec_int(document: dict[str, Any], name: str, default: int | None = None) -> int:
@@ -830,7 +860,8 @@ class Engine:
         self.plan: LaunchPlan = plan
         self.environ: dict[str, str] = environ
         self.child: subprocess.Popen[bytes] | None = None
-        self.terminating: bool = False
+        # Whether a stop signal has already been passed on to the child.
+        self._forwarded: bool = False
         # Nothing has been entered yet: no process, no stub.
         self.state: DesiredState = DesiredState.PARKED
         self._stub: ParkedStub = ParkedStub()
@@ -845,20 +876,41 @@ class Engine:
 
     # -- signals ------------------------------------------------------------
 
+    @property
+    def terminating(self) -> bool:
+        return _STOP.is_set()
+
     def forward_signal(self, signum: int, _frame: FrameType | None) -> None:
-        self.terminating = True
+        _STOP.set()
         if self.child is not None and self.child.poll() is None:
             self.child.send_signal(signum)
+            self._forwarded = True
 
     # -- load lock ----------------------------------------------------------
 
-    def take_load_lock(self) -> None:
+    def take_load_lock(self) -> bool:
+        """
+        Wait for the load lock. False means a stop came first.
+
+        Polled rather than blocking, so that a stop never waits for a
+        neighbour to finish loading.
+        """
         if not self.plan.load_lock_file or self._lock_file is not None:
-            return
+            return True
         self._lock_file = open(self.plan.load_lock_file, "a", encoding="utf-8")
         log(f"waiting for the load lock ({self.plan.load_lock_file})...")
-        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX)
+        while True:
+            try:
+                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if pause(LOCK_POLL_SECONDS):
+                    self._lock_file.close()
+                    self._lock_file = None
+                    log("stopped while waiting for the load lock.")
+                    return False
         log("load lock acquired.")
+        return True
 
     def release_load_lock(self) -> None:
         # flock also drops when the process dies; releasing explicitly is what
@@ -904,7 +956,7 @@ class Engine:
                     "before asking for the load lock..."
                 )
                 announced = True
-            time.sleep(READY_POLL_SECONDS)
+            pause(READY_POLL_SECONDS)
         log(f"the active engine ({active}) is ready.")
 
     def mark_ready(self) -> None:
@@ -948,7 +1000,7 @@ class Engine:
                         return 0
             except (urllib.error.URLError, OSError):
                 pass
-            time.sleep(self.plan.health_poll_seconds)
+            pause(self.plan.health_poll_seconds)
         return 1
 
     # -- the desired state --------------------------------------------------
@@ -1209,8 +1261,17 @@ class Engine:
         Returns an exit code only when the container itself should stop.
         """
         self.wait_for_active_engine(target)
-        self.take_load_lock()
+        if self.terminating or not self.take_load_lock():
+            return 0
+        if self.terminating:
+            self.release_load_lock()
+            return 0
         self.start()
+        # A stop that landed while the child was being spawned found no child
+        # to forward to; hand it over now.
+        if self.terminating and not self._forwarded and self.child is not None:
+            self.child.terminate()
+            self._forwarded = True
         health: int = self.wait_for_health()
         if health == 1:
             warn(
@@ -1275,7 +1336,7 @@ class Engine:
                 code = self.enter(self.poll_desired())
                 if code is not None:
                     return code
-            time.sleep(self.plan.watch_poll_seconds)
+            pause(self.plan.watch_poll_seconds)
 
         if self.child is not None:
             return self.await_child()
@@ -1325,6 +1386,8 @@ def describe(plan: LaunchPlan) -> dict[str, Any]:
 
 def main() -> int:
     global _LOG_STREAM
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
     try:
         dry_run: bool = env_bool(dict(os.environ), "VIF_LAUNCHER_DRY_RUN")
         if dry_run:
@@ -1334,6 +1397,9 @@ def main() -> int:
     except ConfigError as exc:
         warn(str(exc))
         return EXIT_CONFIG
+    except Stopped as exc:
+        log(f"{exc}; exiting.")
+        return 0
 
     if dry_run:
         print(json.dumps(describe(plan), indent=2))
@@ -1362,6 +1428,10 @@ def main() -> int:
 
     if plan.sleep_mode:
         warn_if_sleep_mode_cannot_work()
+
+    if _STOP.is_set():
+        log("stopped before the engine started; exiting.")
+        return 0
 
     # Nothing to do once the engine is up: hand the container straight to vLLM.
     if not plan.needs_supervision:
