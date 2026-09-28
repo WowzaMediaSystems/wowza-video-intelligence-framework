@@ -525,6 +525,15 @@ def wait_for_spec(path: str, timeout_seconds: int) -> dict[str, Any]:
         time.sleep(2.0)
 
 
+def spec_int(document: dict[str, Any], name: str, default: int | None = None) -> int:
+    """An integer field of the spec; one that is not an integer is a config error."""
+    raw: Any = document.get(name, default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ConfigError(f"engine spec {name}={raw!r} is not an integer.") from None
+
+
 def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchPlan:
     version: Any = document.get("spec_version")
     if version != ENGINE_SPEC_VERSION:
@@ -566,16 +575,16 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         model=model,
         args=[str(arg) for arg in document["args"]],
         env=env,
-        port=int(document["port"]),
+        port=spec_int(document, "port"),
         sleep_mode=sleep_mode,
-        sleep_level=int(document.get("sleep_level", 1)),
+        sleep_level=spec_int(document, "sleep_level", 1),
         desired_state=desired,
         spec_file=spec_file,
         state_file=str(Path(state_dir) / ACTIVE_MODEL_FILENAME) if state_dir else "",
         ready_dir=str(Path(state_dir) / ENGINE_READY_DIRNAME) if state_dir else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=str(document.get("load_lock_file") or ""),
-        health_timeout_seconds=int(document.get("health_timeout_seconds", 1800)),
+        health_timeout_seconds=spec_int(document, "health_timeout_seconds", 1800),
         health_poll_seconds=env_float(environ, "VLM_HEALTH_POLL_SECONDS", 2.0),
         watch_poll_seconds=env_float(
             environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS

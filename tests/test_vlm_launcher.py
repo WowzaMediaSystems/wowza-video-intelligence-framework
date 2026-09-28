@@ -378,6 +378,27 @@ class TestSpecPath:
         assert plan.desired_state == "parked"
         assert "parking it instead" in capsys.readouterr().err
 
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [("port", "abc"), ("sleep_level", "deep"), ("health_timeout_seconds", None)],
+    )
+    def test_a_malformed_number_is_a_config_error_naming_the_field(
+        self, tmp_path: Path, name: str, value: Any
+    ) -> None:
+        path: Path = write_spec(tmp_path, **{name: value})
+        with pytest.raises(launcher.ConfigError) as caught:
+            launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        assert str(caught.value) == f"engine spec {name}={value!r} is not an integer."
+
+    def test_a_malformed_spec_number_exits_78(self, tmp_path: Path) -> None:
+        path: Path = write_spec(tmp_path, port="abc")
+        result: subprocess.CompletedProcess[str] = run_launcher(
+            {"VIF_LAUNCHER_DRY_RUN": "1", "VIF_ENGINE_SPEC_FILE": str(path)}
+        )
+        assert result.returncode == 78
+        assert "engine spec port='abc' is not an integer." in result.stderr
+        assert "Traceback" not in result.stderr
+
     def test_a_spec_that_never_arrives_times_out(self, tmp_path: Path) -> None:
         with pytest.raises(launcher.ConfigError, match="no usable engine spec"):
             launcher.build_plan(
