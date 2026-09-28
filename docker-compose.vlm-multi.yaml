@@ -1,24 +1,26 @@
-# Example override: run a SECOND VLM on the same host.
+# Example override: run an ADDITIONAL, unmanaged VLM on its own GPU.
 #
-# The base docker-compose.yaml runs ONE VLM container (`vlm`). Layer this file
-# to add a second (`vlm-2`); copy the `vlm-2` block for a third, etc. Each is a
-# separate container on its own GPU -- vLLM serves one model per process. Run
-# it with both files (this brings up BOTH, since vlm-2 also has the `vlm`
-# profile):
+# The base docker-compose.yaml runs the managed VLM engines (`vif-model-*`),
+# one model serving at a time behind VIS's endpoint, on GPU 0 by default. This
+# file adds `vlm-2`: a plain vLLM container serving one more model at the same
+# time, on another card. VIS does not manage it -- streams reach it directly,
+# as a bring-your-own endpoint, at `endpoint_url: http://vlm-2.docker:8000/v1`.
+# Copy the `vlm-2` block for a third, etc. Run it with both files (this brings
+# up the managed engines AND vlm-2, since vlm-2 also has the `vlm` profile):
 #
 #   docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
 #     --profile default --profile vlm up -d
 #
-# Each container's model is a per-model env file in ./vlm-env/, picked by
-# VLM_CONF (vlm, default qwen) and VLM_2_CONF (vlm-2, default nemotron); its GPU
-# by VLM_GPU_IDS / VLM_2_GPU_IDS (defaults 0 / 1). e.g.:
+# vlm-2's model is a per-model env file in ./vlm-env/, picked by VLM_2_CONF
+# (default nemotron); its GPU by VLM_2_GPU_IDS (default 1). e.g.:
 #
-#   VLM_CONF=qwen VLM_2_CONF=nemotron docker compose \
+#   VLM_2_CONF=nemotron docker compose \
 #     -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
 #     --profile default --profile vlm up -d
 #
-# Two models on ONE big GPU: set VLM_GPU_IDS and VLM_2_GPU_IDS to the same card
-# and lower each model file's VLM_GPU_MEMORY_UTILIZATION so they sum to < 1.
+# Keep vlm-2 off the managed engines' card: VIS sizes them against the whole
+# card and does not know about vlm-2, so sharing it can leave them short of
+# memory.
 services:
     vlm-2:
         hostname: vlm-2.docker

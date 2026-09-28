@@ -1,7 +1,7 @@
 # VERBATIM copy of vLLM v0.27.0's cosmos3_edge.py (only this comment block
 # added) -- bind-mounted over
 # /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/cosmos3_edge.py
-# by the `vlm` service in docker-compose.yaml (v0.26.0 image ONLY).
+# by every `vif-model-*` service in docker-compose.yaml (v0.26.0 image ONLY).
 #
 # WHY: v0.26.0's own copy predates the nvidia/Cosmos3-Edge checkpoint's
 # generation-only tensors (k_norm_und_for_gen), so weight loading dies with
