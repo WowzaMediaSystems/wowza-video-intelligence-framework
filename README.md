@@ -14,7 +14,7 @@ Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-ti
 
 VIF has two parts:
 
-- **Video Intelligence Service (VIS)** — runs the AI models on an NVIDIA GPU. This is the analysis engine.
+- **Video Intelligence Service (VIS)** — the analysis engine. Runs object detection and scene understanding models on an NVIDIA GPU, and coordinates VLM and synthetic video detection when enabled.
 - **Video Intelligence Controller (VIC)** — a plugin inside Wowza Streaming Engine (WSE). It uses the WSE transcoder to pull frames from your streams and send them to VIS over a WebSocket connection.
 
 For a first test, one server with a supported GPU is simplest. For production, we recommend running VIS on its own GPU server, connected to the Controller over a dedicated WebSocket connection.
