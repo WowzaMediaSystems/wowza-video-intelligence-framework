@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, lock timeout: a wedged engine must not hold the pool's lock
+# Gated check, lock timeout: a wedged engine must not hold the pool's lock
 # forever. SIGSTOP the child so it never answers /health, then assert the
 # launcher releases the lock, exits 75, and the restart policy brings the
 # container back to a healthy engine.

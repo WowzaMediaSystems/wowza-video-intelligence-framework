@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, self-sleep: an engine parks itself unless the state file names
+# Gated check, self-sleep: an engine parks itself unless the state file names
 # it. Absent state and foreign state both mean sleep -- the default that keeps N
 # engines from claiming one card. The launcher never wakes anything.
 

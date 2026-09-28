@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, vif_auth: with VLLM_API_KEY set the dev surface needs the Bearer
+# Gated check, vif_auth: with VLLM_API_KEY set the dev surface needs the Bearer
 # and the open paths do not; /v1 keeps being vLLM's own business. With no key
 # the middleware is inert -- the documented keyless posture.
 
