@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, supervisor: `docker stop` must reach the vLLM child through the
+# Gated check, supervisor: `docker stop` must reach the vLLM child through the
 # launcher and come back as a clean exit -- not a SIGKILL at the daemon's grace.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, load lock: two engines starting at once on one GPU must load one
+# Gated check, load lock: two engines starting at once on one GPU must load one
 # after the other. The assert is on the log timestamps -- the second engine's
 # weight load starts only after the first reports ready.
 

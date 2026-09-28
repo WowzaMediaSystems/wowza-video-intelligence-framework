@@ -1,16 +1,14 @@
 # Model Manager spike — gated checks
 
-Runnable checks for the parts of the VIF Model Manager (see
-[`docs/vif-model-manager-proposal.md`](../../docs/vif-model-manager-proposal.md))
-that cannot be proved on CI: they need a real GPU, real weights and a real vLLM
-engine. They exercise the opt-in pool duties in
-[`vif-vlm-launcher.py`](../../vif-vlm-launcher.py) and the Bearer guard in
-[`vlm-patches/vif_auth.py`](../../vlm-patches/vif_auth.py).
+Runnable checks for the parts of the VIF Model Manager that cannot be proved on
+CI: they need a real GPU, real weights and a real vLLM engine. They exercise the
+opt-in pool duties in [`vif-vlm-launcher.py`](../../vif-vlm-launcher.py) and the
+Bearer guard in [`vlm-patches/vif_auth.py`](../../vlm-patches/vif_auth.py).
 
-**These have not been run.** They are written to be run on rented datacenter-GPU
-hardware, as part of the phase-0 spike. Nothing here runs in CI, and nothing
-here is part of a customer deployment — the duties they exercise are off by
-default and the shipped stack never sets the variables that turn them on.
+They have been run against real engines on an NVIDIA L40S. Nothing here runs in
+CI, and nothing here is part of a customer deployment — the duties they exercise
+are off by default and the shipped stack never sets the variables that turn them
+on.
 
 `test_vif_auth.py` is the exception: it is a plain unit test of the middleware
 against a dummy ASGI app and needs no GPU. Run it anywhere.
@@ -131,18 +129,17 @@ docker run --rm -v "$PWD:/repo" -w /repo --entrypoint python3 \
   vllm/vllm-openai:v0.26.0 -m pytest spike/vif-model-manager/test_vif_auth.py -q
 ```
 
-## What the spike still owes beyond these checks
+## What these checks do not measure
 
-The measurements — wake latency per sleep level, host RAM per sleeper, residual
-VRAM, whether the whole catalog fits resident — are the spike's actual output
-and its GO/NO-GO input. These scripts only prove the mechanism behaves; they say
-nothing about whether it is fast or small enough.
+Wake latency per sleep level, host RAM per sleeper, residual VRAM, and whether a
+whole catalog fits resident on one card. These scripts only prove the mechanism
+behaves; they say nothing about whether it is fast or small enough.
 
 ## WSL2 caveat (2026-09-21)
 
 Sleep mode requires vLLM's cumem allocator, which requires CUDA UVA — unavailable under WSL2.
 An engine started with `--enable-sleep-mode` on WSL2 crashes at boot (`RuntimeError: UVA is not
-available`). These checks therefore need a native-Linux GPU host; a WSL2 box (e.g. the local 5060)
+available`). These checks therefore need a native-Linux GPU host; a WSL2 box
 can only exercise the lock/supervisor/flag paths with sleep mode OFF. How managed deployments
 should behave on no-UVA platforms is an OPEN design item (starting without sleep mode conflicts
 with multiple resident models — all engines would be awake at full reservation).

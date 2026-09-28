@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase-0 gate, standing down: an engine stands down unless it is the one that
+# Gated check, standing down: an engine stands down unless it is the one that
 # should be serving. Absent state and foreign state both mean stand down -- the
 # default that keeps N engines from claiming one card.
 #
