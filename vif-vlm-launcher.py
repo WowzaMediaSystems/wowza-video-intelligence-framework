@@ -104,8 +104,8 @@ script execs `vllm serve` directly, exactly as the bash entrypoint did.
                                unless the file names it -- an absent or
                                unreadable file means sleep, because several
                                awake engines on one card is how you OOM it.
-                               This script only ever sleeps itself; waking is
-                               the manager's job.
+                               When the file names this engine again, it wakes
+                               itself.
   VLM_SLEEP_LEVEL              Sleep level for that self-sleep (default 1:
                                weights to host RAM; 2 discards them).
 
@@ -299,7 +299,10 @@ class LaunchPlan:
 
 
 def engine_key(model_id: str) -> str:
-    """Filesystem-safe key for a model id. Mirrors VIS's app/vlm/engine_spec.py."""
+    """
+    Filesystem-safe key for a model id: the same rule as the engine-spec format
+    the Video Intelligence Service writes.
+    """
     return _NON_SLUG.sub("-", model_id.lower()).strip("-")
 
 
