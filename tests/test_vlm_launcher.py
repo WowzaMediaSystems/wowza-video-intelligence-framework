@@ -1050,6 +1050,17 @@ class TestWatchLoop:
         engine.spec(desired_state="parked")
         assert until(lambda: "sigterm" in engine.events())
 
+    def test_a_stale_ready_marker_is_cleared_at_start(
+        self, engine: ManagedEngine
+    ) -> None:
+        """A launcher killed outright leaves its marker behind; the next one clears it."""
+        engine.ready_marker.parent.mkdir(parents=True)
+        engine.ready_marker.write_text(f"{engine.model}\n", encoding="utf-8")
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert not engine.ready_marker.exists()
+
     def test_the_parked_stub_names_itself(self, engine: ManagedEngine) -> None:
         engine.spec(desired_state="parked", active=False)
         engine.start()

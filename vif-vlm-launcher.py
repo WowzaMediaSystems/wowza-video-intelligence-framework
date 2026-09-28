@@ -1254,6 +1254,9 @@ class Engine:
         The loop is the whole cold tier: VIS moves an engine between awake,
         asleep and parked by rewriting its spec, and this is what acts on it.
         """
+        # A marker left by a launcher that died without cleaning up (SIGKILL,
+        # OOM, a host crash) would tell the neighbours this engine is loaded.
+        self.clear_ready()
         target: DesiredState = self.poll_desired()
         if target is DesiredState.PARKED:
             self._stub.start(self.plan.port, self.plan.model)
