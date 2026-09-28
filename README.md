@@ -41,7 +41,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - (Optional) [FFmpeg](https://www.ffmpeg.org/download.html) for publishing test streams
 
 > [!TIP]
-> **Installing without Docker?** VIF also ships as platform installers (Windows, Linux x86_64, Linux Arm64) for existing Wowza Streaming Engine 4.11.1+ servers. Download them from the [Wowza portal](https://portal.wowza.com/account/downloads#vif) and follow the [Install without Docker](https://www.wowza.com/docs/install-wse-video-intelligence-module) guide. Both paths give you the same features.
+> **Installing without Docker?** VIF also ships as platform installers (Windows, Linux x86_64, Linux Arm64) for existing Wowza Streaming Engine 4.11.1+ servers. Download them from the [Wowza portal](https://portal.wowza.com/account/downloads#vif) and follow the [Install without Docker](https://www.wowza.com/docs/install-wse-video-intelligence-module) guide. ***Non-Docker installers provide full access to Object Detection and Scene Understanding. Vision Language Models and Synthetic Video Detection require additional configuration.***
 
 ## Table of Contents
 - [How VIF Works](#how-vif-works)
