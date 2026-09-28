@@ -1037,6 +1037,52 @@ class TestWatchLoop:
         }
         assert json.loads(http_get(engine.port, "/health")[1])["parked"] is True
 
+    def test_every_restart_runs_under_the_env_of_the_spec_in_force(
+        self, engine: ManagedEngine
+    ) -> None:
+        """A parked engine brought back hot needs that spec's dev mode and pin."""
+        engine.extra_env["FAKE_VLLM_RECORD_ENV"] = (
+            "VLLM_SERVER_DEV_MODE,CUDA_VISIBLE_DEVICES,VIF_TEST_MARK"
+        )
+        engine.spec(desired_state="parked", active=False, sleep_mode=False, env={})
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+
+        engine.spec(
+            desired_state="asleep",
+            active=False,
+            env={"VLLM_SERVER_DEV_MODE": "1", "VIF_TEST_MARK": "first"},
+            gpu_ids="1",
+        )
+        assert until(lambda: engine.events() == ["start", "sleep"])
+
+        engine.spec(desired_state="parked", active=False)
+        assert until(lambda: engine.events() == ["start", "sleep", "sigterm"])
+        engine.spec(
+            desired_state="awake",
+            env={"VLLM_SERVER_DEV_MODE": "1", "VIF_TEST_MARK": "second"},
+            gpu_ids="2",
+        )
+        assert until(
+            lambda: engine.events() == ["start", "sleep", "sigterm", "start"]
+        )
+
+        starts: list[dict[str, Any]] = [
+            event["env"] for event in events(engine.log) if event["event"] == "start"
+        ]
+        assert starts == [
+            {
+                "VLLM_SERVER_DEV_MODE": "1",
+                "CUDA_VISIBLE_DEVICES": "1",
+                "VIF_TEST_MARK": "first",
+            },
+            {
+                "VLLM_SERVER_DEV_MODE": "1",
+                "CUDA_VISIBLE_DEVICES": "2",
+                "VIF_TEST_MARK": "second",
+            },
+        ]
+
     def test_the_child_output_is_teed_to_the_state_volume(
         self, engine: ManagedEngine
     ) -> None:

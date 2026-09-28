@@ -1007,7 +1007,7 @@ class Engine:
         request: urllib.request.Request = urllib.request.Request(
             f"http://127.0.0.1:{self.plan.port}{path}", method="POST"
         )
-        api_key: str = env_value(self.environ, "VLLM_API_KEY")
+        api_key: str = env_value(self.child_env, "VLLM_API_KEY")
         if api_key:
             request.add_header("Authorization", f"Bearer {api_key}")
         try:
@@ -1086,12 +1086,26 @@ class Engine:
             if handle is not None:
                 handle.close()
 
+    @property
+    def child_env(self) -> dict[str, str]:
+        """
+        The environment of the spec being executed, on top of the container's.
+
+        Built on every start, never once at boot: an engine that booted parked
+        and is restarted hot needs that spec's VLLM_SERVER_DEV_MODE, or it has
+        no /sleep, and a new GPU pin must reach the new process.
+        """
+        return {**self.environ, **self.plan.env}
+
     def start(self) -> None:
         if not self.plan.log_file:
-            self.child = subprocess.Popen(self.plan.argv)
+            self.child = subprocess.Popen(self.plan.argv, env=self.child_env)
             return
         self.child = subprocess.Popen(
-            self.plan.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            self.plan.argv,
+            env=self.child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
         assert self.child.stdout is not None
         self._tee = threading.Thread(
@@ -1276,8 +1290,6 @@ def main() -> int:
         print(json.dumps(describe(plan), indent=2))
         return 0
 
-    os.environ.update(plan.env)
-
     if plan.desired_state is DesiredState.PARKED:
         log(f"{plan.model} starts parked: no engine process until VIS asks for one.")
         return supervise(plan, dict(os.environ))
@@ -1304,7 +1316,7 @@ def main() -> int:
 
     # Nothing to do once the engine is up: hand the container straight to vLLM.
     if not plan.needs_supervision:
-        os.execvp(plan.argv[0], plan.argv)
+        os.execvpe(plan.argv[0], plan.argv, {**os.environ, **plan.env})
 
     return supervise(plan, dict(os.environ))
 

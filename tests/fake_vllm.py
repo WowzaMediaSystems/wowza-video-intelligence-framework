@@ -10,6 +10,8 @@ Knobs (env):
   FAKE_VLLM_EVENT_LOG      file every event is appended to, one JSON per line
   FAKE_VLLM_IGNORE_SIGTERM "1" makes it deaf to SIGTERM, as a wedged engine is
   FAKE_VLLM_STDOUT         text written to stdout at startup, one line per \n
+  FAKE_VLLM_RECORD_ENV     comma-separated variables recorded on the start event
+  FAKE_VLLM_WAKE_FAILS     "1" makes /wake_up answer 500 and stay asleep
 
 It also answers /is_sleeping, /sleep and /wake_up, so the launcher's desired
 state can be read back the way VIS reads it.
@@ -96,7 +98,12 @@ if __name__ == "__main__":
     for arg in argv:
         if arg.startswith("--port="):
             port = int(arg.split("=", 1)[1])
-    record("start", model=MODEL, argv=argv, port=port)
+    recorded: dict[str, str | None] = {
+        name: os.environ.get(name)
+        for name in os.environ.get("FAKE_VLLM_RECORD_ENV", "").split(",")
+        if name
+    }
+    record("start", model=MODEL, argv=argv, port=port, env=recorded)
     for line in os.environ.get("FAKE_VLLM_STDOUT", "").splitlines():
         print(line, flush=True)
     if os.environ.get("FAKE_VLLM_IGNORE_SIGTERM", "") == "1":
