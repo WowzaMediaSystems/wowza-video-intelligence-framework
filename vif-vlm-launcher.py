@@ -115,17 +115,20 @@ MANAGED PATH:
   VIF_STATE_DIR                The state volume: where specs live when the path
                                is not given (<dir>/engines/<engine key>.json),
                                and where the log tee (<dir>/logs/) and the
-                               readiness markers (<dir>/ready/) go.
+                               markers (<dir>/ready/, <dir>/awake/) go.
   VIF_SPEC_TIMEOUT_SECONDS     How long to wait for VIS to write the spec
                                before exiting 78 (default 300).
   VIF_WATCH_POLL_SECONDS       How often the spec is re-read once the engine is
                                running (default 2).
-  VIF_ACTIVE_READY_TIMEOUT_SECONDS
-                               How long a non-active engine waits for the active
-                               one to publish its readiness marker before taking
-                               the load lock anyway (default 1800). The bound
-                               exists so an engine that never arrives cannot
-                               wedge the pool.
+  VIF_POOL_LOAD_TIMEOUT_SECONDS
+                               How long the engine that should be serving waits
+                               for the rest of the hot pool to load before it
+                               takes the load lock anyway (default 7800: four
+                               other engines, each holding the lock for at most
+                               its 1800 s health deadline plus a 120 s step into
+                               sleep, rounded up). The bound exists so an engine
+                               that never arrives cannot keep the pool from
+                               serving.
   VIF_ENGINE_LOG_FILE          Override for where the child's output is teed.
 
 BOTH PATHS:
@@ -160,12 +163,39 @@ spec changes: VIS decides what happens to an engine that would not move.
 THE POOL DUTIES, when several engines share one card:
 
   * the LOAD LOCK serializes cold loads, so five engines starting at once do
-    not thrash the disk and the GPU. The engine that should be serving takes
-    it first: every other engine waits until that one publishes its readiness
-    marker before it even asks for the lock, because flock is not fair.
+    not thrash the disk and the GPU.
+  * BOOT ORDER: the engine that should be serving loads LAST. Each engine's
+    memory reservation is sized on the assumption that every other engine is
+    asleep while it loads, so the active one, which stays awake, cannot load
+    first. Before it asks for the lock it waits until every other engine whose
+    spec says `asleep` has published its readiness marker (loaded, and asleep)
+    or rests parked (spec `parked`, or `asleep` without sleep mode). Engines
+    whose spec says `parked` are never waited for. The wait is bounded by
+    VIF_POOL_LOAD_TIMEOUT_SECONDS, then it loads anyway with a WARNING naming
+    who it gave up on.
+  * the LOAD GUARD: an engine whose spec says `asleep` and that is not loaded
+    does not start loading while another engine's `awake/` marker exists --
+    there is no room for it beside a serving engine. It serves the parked
+    health stub instead and loads once no awake marker remains, or when its
+    spec turns to `awake` (the manager puts the previous engine to sleep
+    before it asks). This is what keeps an engine restarted beside a serving
+    one from crash-looping.
   * the LOG TEE copies the engine's output to <state dir>/logs/<key>.log as
     well as to this container's stdout, which is how the Manager shows engine
     logs without VIS ever holding a Docker socket.
+
+THE STATE VOLUME, shared with VIS and every other engine:
+
+  <state dir>/engines/<key>.json  this engine's spec          (written by VIS)
+  <state dir>/active-model        the id that should serve    (written by VIS)
+  <state dir>/ready/<key>         loaded, awake or asleep     (written here)
+  <state dir>/awake/<key>         awake and serving           (written here)
+  <state dir>/logs/<key>.log      this engine's output        (written here)
+
+The awake marker is created after a load that is not followed by a sleep and
+after a successful wake, and removed when the engine goes to sleep, is parked
+or stops. Each launcher clears both of its own markers when it starts, so one
+left by a launcher that was killed outright never misleads the pool.
 
 AN EMPTY VALUE COUNTS AS UNSET, for every variable above, as it did for the
 bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
@@ -173,7 +203,7 @@ is a configuration error, exit 78, naming the variable.
 
 EXIT CODES: 75 health-check timeout, 78 bad configuration (including a spec
 that never arrives), 0 for a SIGTERM that arrives before there is an engine to
-pass it to (waiting for the spec, the active engine or the load lock); anything
+pass it to (waiting for the spec, the rest of the pool or the load lock); anything
 else is vLLM's own.
 """
 
@@ -198,7 +228,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-28.1"
+LAUNCHER_REVISION: str = "2026-09-28.3"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -209,16 +239,18 @@ ENGINE_SPEC_VERSION: int = 1
 ENGINE_SPEC_DIRNAME: str = "engines"
 ENGINE_LOG_DIRNAME: str = "logs"
 ENGINE_READY_DIRNAME: str = "ready"
+ENGINE_AWAKE_DIRNAME: str = "awake"
 ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
 DEFAULT_SPEC_TIMEOUT_SECONDS: int = 300
 # How often the desired state is re-read. Fast enough that a switch is not
 # noticeably slower for it, slow enough to be free.
 DEFAULT_WATCH_POLL_SECONDS: float = 2.0
-# How long a non-active engine waits for the active one to be ready before it
-# gives up on the priority and loads anyway. Never wedge the pool on one
-# engine that is not coming.
-DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS: int = 1800
+# How long the engine that should be serving waits for the rest of the hot
+# pool to load first: the shipped catalog has five models, so at most four
+# others, each holding the load lock for at most its health deadline (1800 s)
+# plus its step into sleep (the 120 s /sleep call). 4 x 1920 = 7680, rounded up.
+DEFAULT_POOL_LOAD_TIMEOUT_SECONDS: int = 7800
 READY_POLL_SECONDS: float = 2.0
 LOCK_POLL_SECONDS: float = 0.2
 
@@ -296,15 +328,18 @@ class LaunchPlan:
     # The file naming the model that should be serving: the spec path derives
     # it from the state volume, the legacy path takes VLM_STATE_FILE.
     state_file: str = ""
-    # Where this engine publishes "I am loaded", and where it looks for the
-    # active engine's own marker before asking for the load lock.
+    # Where this engine publishes "I am loaded" and "I am serving", and where
+    # it reads the other engines' markers.
     ready_dir: str = ""
+    awake_dir: str = ""
+    # The other engines' specs, which the boot order reads. Spec path only.
+    engines_dir: str = ""
     log_file: str = ""
     load_lock_file: str = ""
     health_timeout_seconds: int = 1800
     health_poll_seconds: float = 2.0
     watch_poll_seconds: float = DEFAULT_WATCH_POLL_SECONDS
-    active_ready_timeout_seconds: int = DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS
+    pool_load_timeout_seconds: int = DEFAULT_POOL_LOAD_TIMEOUT_SECONDS
 
     @property
     def argv(self) -> list[str]:
@@ -316,6 +351,13 @@ class LaunchPlan:
         if not self.ready_dir:
             return ""
         return str(Path(self.ready_dir) / engine_key(self.model))
+
+    @property
+    def awake_file(self) -> str:
+        """This engine's own awake marker, or "" when there is nowhere."""
+        if not self.awake_dir:
+            return ""
+        return str(Path(self.awake_dir) / engine_key(self.model))
 
     @property
     def watches(self) -> bool:
@@ -643,6 +685,8 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         spec_file=spec_file,
         state_file=str(Path(state_dir) / ACTIVE_MODEL_FILENAME) if state_dir else "",
         ready_dir=str(Path(state_dir) / ENGINE_READY_DIRNAME) if state_dir else "",
+        awake_dir=str(Path(state_dir) / ENGINE_AWAKE_DIRNAME) if state_dir else "",
+        engines_dir=str(Path(spec_file).parent) if spec_file else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=str(document.get("load_lock_file") or ""),
         health_timeout_seconds=spec_int(document, "health_timeout_seconds", 1800),
@@ -650,10 +694,10 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         watch_poll_seconds=env_float(
             environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
         ),
-        active_ready_timeout_seconds=env_int(
+        pool_load_timeout_seconds=env_int(
             environ,
-            "VIF_ACTIVE_READY_TIMEOUT_SECONDS",
-            DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS,
+            "VIF_POOL_LOAD_TIMEOUT_SECONDS",
+            DEFAULT_POOL_LOAD_TIMEOUT_SECONDS,
         ),
     )
 
@@ -771,6 +815,7 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
         desired_state=DesiredState.AWAKE,
         state_file=state_file,
         ready_dir=str(Path(state_dir) / ENGINE_READY_DIRNAME) if state_dir else "",
+        awake_dir=str(Path(state_dir) / ENGINE_AWAKE_DIRNAME) if state_dir else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=load_lock_file,
         health_timeout_seconds=health_timeout,
@@ -778,10 +823,10 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
         watch_poll_seconds=env_float(
             environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
         ),
-        active_ready_timeout_seconds=env_int(
+        pool_load_timeout_seconds=env_int(
             environ,
-            "VIF_ACTIVE_READY_TIMEOUT_SECONDS",
-            DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS,
+            "VIF_POOL_LOAD_TIMEOUT_SECONDS",
+            DEFAULT_POOL_LOAD_TIMEOUT_SECONDS,
         ),
     )
 
@@ -900,6 +945,7 @@ class Engine:
         self._spec_digest: str = _digest_of(plan.spec_file)
         self._log_warned: bool = False
         self._announced_awake: bool | None = None
+        self._guard_announced: bool = False
         # The hot move (sleep or wake) that last failed, and the digest of the
         # decision it failed under. It is not tried again until that changes.
         self._failed_move: tuple[DesiredState, str] | None = None
@@ -952,62 +998,151 @@ class Engine:
         self._lock_file = None
         log("load lock released.")
 
-    def wait_for_active_engine(self, target: DesiredState) -> None:
+    def _peer_specs(self) -> list[tuple[str, DesiredState | None]]:
         """
-        Lock priority: whoever should be serving loads first.
+        Every OTHER engine's model id and effective desired state.
 
-        `flock` has no fairness, so a neighbour that asks at the wrong moment
-        takes the lock ahead of the engine every stream is waiting for and
-        makes it load last. A non-active engine therefore does not even ask
-        until the active one has published its readiness marker. The wait is
-        bounded: an active engine that never arrives must not wedge the pool.
+        None stands for a spec that cannot be read right now -- most likely a
+        write in flight. An `asleep` spec without sleep mode counts as parked,
+        which is what that engine's own launcher makes of it.
         """
-        if target is DesiredState.AWAKE or not self.plan.ready_dir:
+        if not self.plan.engines_dir:
+            return []
+        own: str = engine_key(self.plan.model)
+        peers: list[tuple[str, DesiredState | None]] = []
+        for path in sorted(Path(self.plan.engines_dir).glob("*.json")):
+            if path.stem == own:
+                continue
+            try:
+                document: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+                model: str = str(document.get("model") or path.stem)
+                desired: DesiredState = read_desired_state(document)
+                if desired is DesiredState.ASLEEP and not document.get("sleep_mode"):
+                    desired = DesiredState.PARKED
+            except (OSError, json.JSONDecodeError, KeyError, ConfigError):
+                peers.append((path.stem, None))
+                continue
+            peers.append((model, desired))
+        return peers
+
+    def pool_still_loading(self) -> list[str]:
+        """The other engines that should be asleep and are not loaded yet."""
+        pending: list[str] = []
+        for model, desired in self._peer_specs():
+            if desired is DesiredState.PARKED or desired is DesiredState.AWAKE:
+                continue
+            if (
+                desired is None
+                or not (Path(self.plan.ready_dir) / engine_key(model)).exists()
+            ):
+                pending.append(model)
+        return pending
+
+    def wait_for_pool(self, target: DesiredState) -> None:
+        """
+        Boot order: the engine that should be serving loads last.
+
+        Every engine's memory reservation assumes the others are asleep while
+        it loads, and an engine that loads awake stays awake. So before it
+        asks for the load lock, the engine that should be serving waits for
+        every other engine whose spec says `asleep` to be loaded (its
+        readiness marker) or to rest parked. Bounded: an engine that never
+        arrives must not keep the pool from serving.
+        """
+        if target is not DesiredState.AWAKE or not self.plan.ready_dir:
             return
-        active: str = self.read_active_model()
-        if not active or active == self.plan.model:
-            return
-        marker: Path = Path(self.plan.ready_dir) / engine_key(active)
-        deadline: float = time.monotonic() + self.plan.active_ready_timeout_seconds
-        announced: bool = False
-        while not marker.exists():
+        deadline: float = time.monotonic() + self.plan.pool_load_timeout_seconds
+        announced: list[str] = []
+        while True:
+            pending: list[str] = self.pool_still_loading()
+            if not pending:
+                if announced:
+                    log("the rest of the pool is loaded.")
+                return
             if self.terminating:
                 return
             if time.monotonic() >= deadline:
                 warn(
-                    f"the active engine ({active}) was not ready within "
-                    f"{self.plan.active_ready_timeout_seconds}s; taking the load "
-                    "lock anyway."
+                    "WARNING: the rest of the pool did not load within "
+                    f"{self.plan.pool_load_timeout_seconds}s; giving up on "
+                    f"{', '.join(pending)} and taking the load lock anyway."
                 )
                 return
-            if not announced:
+            if pending != announced:
                 log(
-                    f"waiting for the active engine ({active}) to be ready "
-                    "before asking for the load lock..."
+                    "the serving engine loads last; waiting for "
+                    f"{', '.join(pending)} to load first..."
                 )
-                announced = True
+                announced = pending
             pause(READY_POLL_SECONDS)
-        log(f"the active engine ({active}) is ready.")
 
-    def mark_ready(self) -> None:
-        """Publish "this engine is loaded", for the neighbours waiting on it."""
-        path: str = self.plan.ready_file
+    def serving_elsewhere(self) -> list[str]:
+        """The other engines whose awake marker exists."""
+        if not self.plan.awake_dir:
+            return []
+        own: str = engine_key(self.plan.model)
+        try:
+            names: list[str] = sorted(
+                path.name
+                for path in Path(self.plan.awake_dir).iterdir()
+                if path.name != own
+            )
+        except OSError:
+            return []
+        return names
+
+    def load_guarded(self, target: DesiredState) -> bool:
+        """
+        The load guard: an engine that should be asleep does not load beside a
+        serving one, because the card has no room for it. An `awake` spec is
+        never guarded -- the manager puts the previous engine to sleep before
+        it asks.
+        """
+        if target is not DesiredState.ASLEEP:
+            return False
+        serving: list[str] = self.serving_elsewhere()
+        if not serving:
+            self._guard_announced = False
+            return False
+        if not self._guard_announced:
+            log(
+                f"{', '.join(serving)} is awake; staying parked until nothing "
+                "else is serving or this engine is asked to serve."
+            )
+            self._guard_announced = True
+        return True
+
+    def _write_marker(self, path: str, what: str) -> None:
         if not path:
             return
         try:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(f"{self.plan.model}\n", encoding="utf-8")
         except OSError as exc:
-            warn(f"the readiness marker {path} could not be written ({exc}).")
+            warn(f"the {what} marker {path} could not be written ({exc}).")
 
-    def clear_ready(self) -> None:
-        path: str = self.plan.ready_file
+    @staticmethod
+    def _remove_marker(path: str) -> None:
         if not path:
             return
         try:
             Path(path).unlink(missing_ok=True)
         except OSError:
             pass
+
+    def mark_ready(self) -> None:
+        """Publish "this engine is loaded", for the neighbours waiting on it."""
+        self._write_marker(self.plan.ready_file, "readiness")
+
+    def clear_ready(self) -> None:
+        self._remove_marker(self.plan.ready_file)
+
+    def mark_awake(self) -> None:
+        """Publish "this engine is serving", which the load guard reads."""
+        self._write_marker(self.plan.awake_file, "awake")
+
+    def clear_awake(self) -> None:
+        self._remove_marker(self.plan.awake_file)
 
     # -- health -------------------------------------------------------------
 
@@ -1126,7 +1261,9 @@ class Engine:
         log(f"sleeping at level {self.plan.sleep_level}.")
         if self._control(f"/sleep?level={self.plan.sleep_level}", "/sleep"):
             self.state = DesiredState.ASLEEP
-            self.clear_ready()
+            # Still loaded, so the readiness marker stays; it is no longer
+            # serving, so a neighbour may load beside it.
+            self.clear_awake()
             log("asleep.")
             return True
         warn("this engine stays awake and keeps its GPU memory.")
@@ -1138,6 +1275,7 @@ class Engine:
         if self._control("/wake_up", "/wake_up"):
             self.state = DesiredState.AWAKE
             self.mark_ready()
+            self.mark_awake()
             log("awake.")
             return True
         warn("this engine stays asleep; VIS decides what happens next.")
@@ -1271,6 +1409,7 @@ class Engine:
                 self.child.wait()
         self._join_tee()
         self.child = None
+        self.clear_awake()
         self.clear_ready()
         # The lock is never held across a park: whoever loads next must not
         # wait on an engine that no longer exists.
@@ -1290,12 +1429,18 @@ class Engine:
 
         Returns an exit code only when the container itself should stop.
         """
-        self.wait_for_active_engine(target)
+        self.wait_for_pool(target)
         if self.terminating or not self.take_load_lock():
             return 0
         if self.terminating:
             self.release_load_lock()
             return 0
+        # Another engine may have started serving while this one waited for
+        # the lock; loading beside it is what the guard exists to prevent.
+        if self.load_guarded(target):
+            self.release_load_lock()
+            self.hold_parked()
+            return None
         self.start()
         # A stop that landed while the child was being spawned found no child
         # to forward to; hand it over now.
@@ -1319,8 +1464,17 @@ class Engine:
         self.mark_ready()
         if target is DesiredState.ASLEEP:
             self.move_hot(target)
+        if self.state is DesiredState.AWAKE:
+            # Loaded awake, or a self-sleep that failed: either way it holds
+            # the card, and the load guard must know.
+            self.mark_awake()
         self.release_load_lock()
         return None
+
+    def hold_parked(self) -> None:
+        """Rest parked, with the health stub up, until the guard lifts."""
+        self.state = DesiredState.PARKED
+        self._stub.start(self.plan.port, self.plan.model)
 
     def enter(self, target: DesiredState) -> int | None:
         """One desired-state transition. An exit code means the container stops."""
@@ -1328,6 +1482,8 @@ class Engine:
             return None
         hot: bool = DesiredState.PARKED not in (target, self.state)
         if hot and self._already_failed(target):
+            return None
+        if self.state is DesiredState.PARKED and self.load_guarded(target):
             return None
         log(f"desired state: {self.state} -> {target}.")
         if target is DesiredState.PARKED:
@@ -1348,12 +1504,14 @@ class Engine:
         The loop is the whole cold tier: VIS moves an engine between awake,
         asleep and parked by rewriting its spec, and this is what acts on it.
         """
-        # A marker left by a launcher that died without cleaning up (SIGKILL,
-        # OOM, a host crash) would tell the neighbours this engine is loaded.
+        # Markers left by a launcher that died without cleaning up (SIGKILL,
+        # OOM, a host crash) would tell the neighbours this engine is loaded,
+        # or serving.
         self.clear_ready()
+        self.clear_awake()
         target: DesiredState = self.poll_desired()
-        if target is DesiredState.PARKED:
-            self._stub.start(self.plan.port, self.plan.model)
+        if target is DesiredState.PARKED or self.load_guarded(target):
+            self.hold_parked()
         else:
             code: int | None = self.start_engine(target)
             if code is not None:
@@ -1373,6 +1531,7 @@ class Engine:
         return 0
 
     def close(self) -> None:
+        self.clear_awake()
         self.clear_ready()
         self.release_load_lock()
         self._stub.stop()
@@ -1405,6 +1564,7 @@ def describe(plan: LaunchPlan) -> dict[str, Any]:
             "spec_file": plan.spec_file,
             "state_file": plan.state_file,
             "ready_file": plan.ready_file,
+            "awake_file": plan.awake_file,
             "log_file": plan.log_file,
             "load_lock_file": plan.load_lock_file,
             "health_timeout_seconds": plan.health_timeout_seconds,
