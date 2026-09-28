@@ -156,6 +156,10 @@ THE POOL DUTIES, when several engines share one card:
     well as to this container's stdout, which is how the Manager shows engine
     logs without VIS ever holding a Docker socket.
 
+AN EMPTY VALUE COUNTS AS UNSET, for every variable above, as it did for the
+bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
+is a configuration error, exit 78, naming the variable.
+
 EXIT CODES: 75 health-check timeout, 78 bad configuration (including a spec
 that never arrives); anything else is vLLM's own.
 """
@@ -181,7 +185,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-22"
+LAUNCHER_REVISION: str = "2026-09-28"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -305,12 +309,48 @@ def engine_log_file(environ: dict[str, str], state_dir: str, model: str) -> str:
     VIS reads this file to show engine logs in the Manager, which is how that
     works without VIS ever holding a Docker socket.
     """
-    explicit: str = environ.get("VIF_ENGINE_LOG_FILE", "").strip()
+    explicit: str = env_value(environ, "VIF_ENGINE_LOG_FILE")
     if explicit:
         return explicit
     if not state_dir:
         return ""
     return str(Path(state_dir) / ENGINE_LOG_DIRNAME / f"{engine_key(model)}.log")
+
+
+def env_value(environ: dict[str, str], name: str, default: str = "") -> str:
+    """
+    A knob's value, stripped, or `default` when it is unset OR blank.
+
+    Compose passes a variable listed in the service but empty in .env as "",
+    and the bash launcher this replaces read every knob as ${VAR:-default}:
+    an empty value counts as unset, for every knob.
+    """
+    value: str = environ.get(name, "").strip()
+    return value if value else default
+
+
+def env_int(environ: dict[str, str], name: str, default: int) -> int:
+    raw: str = env_value(environ, name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigError(f"{name}='{raw}' is not an integer.") from None
+
+
+def env_float(environ: dict[str, str], name: str, default: float) -> float:
+    raw: str = env_value(environ, name)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        raise ConfigError(f"{name}='{raw}' is not a number.") from None
+
+
+def env_bool(environ: dict[str, str], name: str) -> bool:
+    return parse_bool(name, env_value(environ, name))
 
 
 def parse_bool(name: str, raw: str) -> bool:
@@ -405,11 +445,11 @@ def warn_if_sleep_mode_cannot_work() -> None:
 
 
 def spec_path_from_env(environ: dict[str, str]) -> str:
-    explicit: str = environ.get("VIF_ENGINE_SPEC_FILE", "").strip()
+    explicit: str = env_value(environ, "VIF_ENGINE_SPEC_FILE")
     if explicit:
         return explicit
-    state_dir: str = environ.get("VIF_STATE_DIR", "").strip()
-    model: str = environ.get("VLM_MODEL", "").strip()
+    state_dir: str = env_value(environ, "VIF_STATE_DIR")
+    model: str = env_value(environ, "VLM_MODEL")
     if state_dir and model:
         return str(Path(state_dir) / ENGINE_SPEC_DIRNAME / f"{engine_key(model)}.json")
     return ""
@@ -422,7 +462,7 @@ def state_dir_from_env(environ: dict[str, str], spec_file: str) -> str:
     Normally VIF_STATE_DIR; when only an explicit spec path was given, the
     volume is that file's grandparent (<dir>/engines/<key>.json).
     """
-    state_dir: str = environ.get("VIF_STATE_DIR", "").strip()
+    state_dir: str = env_value(environ, "VIF_STATE_DIR")
     if state_dir:
         return state_dir
     if spec_file:
@@ -499,7 +539,7 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         str(k): str(v) for k, v in (document.get("env") or {}).items()
     }
     gpu_ids: str = str(
-        document.get("gpu_ids") or environ.get("VLM_GPU_IDS", "")
+        document.get("gpu_ids") or env_value(environ, "VLM_GPU_IDS")
     ).strip()
     env.update(pin_gpus(gpu_ids))
 
@@ -535,15 +575,14 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=str(document.get("load_lock_file") or ""),
         health_timeout_seconds=int(document.get("health_timeout_seconds", 1800)),
-        health_poll_seconds=float(environ.get("VLM_HEALTH_POLL_SECONDS", "2")),
-        watch_poll_seconds=float(
-            environ.get("VIF_WATCH_POLL_SECONDS", str(DEFAULT_WATCH_POLL_SECONDS))
+        health_poll_seconds=env_float(environ, "VLM_HEALTH_POLL_SECONDS", 2.0),
+        watch_poll_seconds=env_float(
+            environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
         ),
-        active_ready_timeout_seconds=int(
-            environ.get(
-                "VIF_ACTIVE_READY_TIMEOUT_SECONDS",
-                str(DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS),
-            )
+        active_ready_timeout_seconds=env_int(
+            environ,
+            "VIF_ACTIVE_READY_TIMEOUT_SECONDS",
+            DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS,
         ),
     )
 
@@ -552,25 +591,30 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
 
 
 def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
-    model: str = environ.get("VLM_MODEL", "Qwen/Qwen3-VL-4B-Instruct-FP8")
-    max_model_len: str = environ.get("VLM_MAX_MODEL_LEN", "16384")
-    gpu_memory_utilization: str = environ.get("VLM_GPU_MEMORY_UTILIZATION", "0.90")
-    max_num_batched_tokens: str = environ.get("VLM_MAX_NUM_BATCHED_TOKENS", "8192")
-    max_num_seqs: str = environ.get("VLM_MAX_NUM_SEQS", "auto")
-    tensor_parallel_size: str = environ.get("VLM_TENSOR_PARALLEL_SIZE", "1")
+    model: str = env_value(environ, "VLM_MODEL", "Qwen/Qwen3-VL-4B-Instruct-FP8")
+    max_model_len: str = env_value(environ, "VLM_MAX_MODEL_LEN", "16384")
+    gpu_memory_utilization: str = env_value(
+        environ, "VLM_GPU_MEMORY_UTILIZATION", "0.90"
+    )
+    max_num_batched_tokens: str = env_value(
+        environ, "VLM_MAX_NUM_BATCHED_TOKENS", "8192"
+    )
+    max_num_seqs: str = env_value(environ, "VLM_MAX_NUM_SEQS", "auto")
+    tensor_parallel_size: str = env_value(environ, "VLM_TENSOR_PARALLEL_SIZE", "1")
     # Per-image pixel caps are Qwen-style PROCESSOR kwargs -- other processors
     # (e.g. Nemotron's) reject them, so there is no default here.
-    min_pixels: str = environ.get("VLM_MIN_PIXELS", "")
-    max_pixels: str = environ.get("VLM_MAX_PIXELS", "")
-    max_images: str = environ.get("VLM_MAX_IMAGES_PER_PROMPT", "8")
-    port: str = environ.get("VLM_PORT", "8000")
+    min_pixels: str = env_value(environ, "VLM_MIN_PIXELS")
+    max_pixels: str = env_value(environ, "VLM_MAX_PIXELS")
+    max_images: str = env_value(environ, "VLM_MAX_IMAGES_PER_PROMPT", "8")
+    port: int = env_int(environ, "VLM_PORT", 8000)
 
-    load_lock_file: str = environ.get("VLM_LOAD_LOCK_FILE", "")
-    state_file: str = environ.get("VLM_STATE_FILE", "")
-    health_timeout: str = environ.get("VLM_HEALTH_TIMEOUT_SECONDS", "1800")
-    health_poll: str = environ.get("VLM_HEALTH_POLL_SECONDS", "2")
-    sleep_level: str = environ.get("VLM_SLEEP_LEVEL", "1")
-    sleep_mode: bool = parse_bool("VLM_SLEEP_MODE", environ.get("VLM_SLEEP_MODE", ""))
+    load_lock_file: str = env_value(environ, "VLM_LOAD_LOCK_FILE")
+    state_file: str = env_value(environ, "VLM_STATE_FILE")
+    health_timeout: int = env_int(environ, "VLM_HEALTH_TIMEOUT_SECONDS", 1800)
+    health_poll: float = env_float(environ, "VLM_HEALTH_POLL_SECONDS", 2.0)
+    sleep_level: int = env_int(environ, "VLM_SLEEP_LEVEL", 1)
+    sleep_mode: bool = env_bool(environ, "VLM_SLEEP_MODE")
+    gpu_ids: str = env_value(environ, "VLM_GPU_IDS")
 
     # Self-sleep goes through /sleep, which only exists in dev mode. Refuse the
     # combination up front rather than leaving an engine awake that the pool is
@@ -580,13 +624,13 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
             "VLM_STATE_FILE needs VLM_SLEEP_MODE=1 (the /sleep endpoint)."
         )
 
-    env: dict[str, str] = pin_gpus(environ.get("VLM_GPU_IDS", ""))
+    env: dict[str, str] = pin_gpus(gpu_ids)
 
     # fp8 KV cache halves KV memory (more concurrency per GB) but is not
     # supported on pre-Ada GPUs. Unless VLM_KV_CACHE_DTYPE is set, pick fp8
     # only when the hardware supports it.
-    kv_cache_dtype: str = environ.get("VLM_KV_CACHE_DTYPE", "")
-    capability: float | None = probe_gpus(environ.get("VLM_GPU_IDS", ""))
+    kv_cache_dtype: str = env_value(environ, "VLM_KV_CACHE_DTYPE")
+    capability: float | None = probe_gpus(gpu_ids)
     if not kv_cache_dtype:
         if capability is not None and capability >= FP8_KV_CACHE_MIN_COMPUTE_CAPABILITY:
             kv_cache_dtype = "fp8"
@@ -639,33 +683,32 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
         log("VLM_SLEEP_MODE -> --enable-sleep-mode, VLLM_SERVER_DEV_MODE=1.")
 
     # Escape hatch for vLLM flags not exposed above (e.g. --quantization).
-    args.extend(environ.get("VLM_EXTRA_ARGS", "").split())
+    args.extend(env_value(environ, "VLM_EXTRA_ARGS").split())
 
-    state_dir: str = environ.get("VIF_STATE_DIR", "").strip()
+    state_dir: str = env_value(environ, "VIF_STATE_DIR")
     return LaunchPlan(
         source="env",
         model=model,
         args=args,
         env=env,
-        port=int(port),
+        port=port,
         sleep_mode=sleep_mode,
-        sleep_level=int(sleep_level),
+        sleep_level=sleep_level,
         # The state file decides from here on; awake is only where it starts.
         desired_state=DesiredState.AWAKE,
         state_file=state_file,
         ready_dir=str(Path(state_dir) / ENGINE_READY_DIRNAME) if state_dir else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=load_lock_file,
-        health_timeout_seconds=int(health_timeout),
-        health_poll_seconds=float(health_poll),
-        watch_poll_seconds=float(
-            environ.get("VIF_WATCH_POLL_SECONDS", str(DEFAULT_WATCH_POLL_SECONDS))
+        health_timeout_seconds=health_timeout,
+        health_poll_seconds=health_poll,
+        watch_poll_seconds=env_float(
+            environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
         ),
-        active_ready_timeout_seconds=int(
-            environ.get(
-                "VIF_ACTIVE_READY_TIMEOUT_SECONDS",
-                str(DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS),
-            )
+        active_ready_timeout_seconds=env_int(
+            environ,
+            "VIF_ACTIVE_READY_TIMEOUT_SECONDS",
+            DEFAULT_ACTIVE_READY_TIMEOUT_SECONDS,
         ),
     )
 
@@ -673,8 +716,8 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
 def build_plan(environ: dict[str, str]) -> LaunchPlan:
     spec_file: str = spec_path_from_env(environ)
     if spec_file:
-        timeout: int = int(
-            environ.get("VIF_SPEC_TIMEOUT_SECONDS", str(DEFAULT_SPEC_TIMEOUT_SECONDS))
+        timeout: int = env_int(
+            environ, "VIF_SPEC_TIMEOUT_SECONDS", DEFAULT_SPEC_TIMEOUT_SECONDS
         )
         log(f"engine spec: {spec_file}")
         return plan_from_spec(wait_for_spec(spec_file, timeout), environ)
@@ -964,7 +1007,7 @@ class Engine:
         request: urllib.request.Request = urllib.request.Request(
             f"http://127.0.0.1:{self.plan.port}{path}", method="POST"
         )
-        api_key: str = self.environ.get("VLLM_API_KEY", "")
+        api_key: str = env_value(self.environ, "VLLM_API_KEY")
         if api_key:
             request.add_header("Authorization", f"Bearer {api_key}")
         try:
@@ -1220,9 +1263,7 @@ def describe(plan: LaunchPlan) -> dict[str, Any]:
 def main() -> int:
     global _LOG_STREAM
     try:
-        dry_run: bool = parse_bool(
-            "VIF_LAUNCHER_DRY_RUN", os.environ.get("VIF_LAUNCHER_DRY_RUN", "")
-        )
+        dry_run: bool = env_bool(dict(os.environ), "VIF_LAUNCHER_DRY_RUN")
         if dry_run:
             _LOG_STREAM = sys.stderr
         log(f"revision {LAUNCHER_REVISION}")

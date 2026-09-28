@@ -398,6 +398,95 @@ class TestConfigRefusals:
             launcher.plan_from_env({"VLM_STATE_FILE": "/vif-state/active-model"})
 
 
+class TestBlankMeansUnset:
+    """An empty value counts as unset, as ${VAR:-default} did in bash."""
+
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_a_blank_string_flag_takes_its_default(self, blank: str) -> None:
+        plan: Any = launcher.plan_from_env(
+            {
+                "VLM_KV_CACHE_DTYPE": "auto",
+                "VLM_MODEL": blank,
+                "VLM_MAX_MODEL_LEN": blank,
+                "VLM_MAX_NUM_SEQS": blank,
+                "VLM_MIN_PIXELS": blank,
+                "VLM_EXTRA_ARGS": blank,
+            }
+        )
+        defaults: Any = launcher.plan_from_env({"VLM_KV_CACHE_DTYPE": "auto"})
+        assert plan.argv == defaults.argv
+        assert plan.model == "Qwen/Qwen3-VL-4B-Instruct-FP8"
+        assert "--max-model-len=16384" in plan.args
+        assert [arg for arg in plan.args if arg.startswith("--max-num-seqs")] == []
+
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_a_blank_integer_takes_its_default(self, blank: str) -> None:
+        plan: Any = launcher.plan_from_env(
+            {
+                "VLM_KV_CACHE_DTYPE": "auto",
+                "VLM_PORT": blank,
+                "VLM_SLEEP_LEVEL": blank,
+                "VLM_HEALTH_TIMEOUT_SECONDS": blank,
+                "VLM_HEALTH_POLL_SECONDS": blank,
+                "VIF_WATCH_POLL_SECONDS": blank,
+                "VIF_ACTIVE_READY_TIMEOUT_SECONDS": blank,
+            }
+        )
+        assert plan.port == 8000
+        assert plan.args[0] == "--port=8000"
+        assert plan.sleep_level == 1
+        assert plan.health_timeout_seconds == 1800
+        assert plan.health_poll_seconds == 2.0
+        assert plan.watch_poll_seconds == 2.0
+        assert plan.active_ready_timeout_seconds == 1800
+
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_a_blank_boolean_is_false(self, blank: str) -> None:
+        plan: Any = launcher.plan_from_env(
+            {"VLM_KV_CACHE_DTYPE": "auto", "VLM_SLEEP_MODE": blank}
+        )
+        assert plan.sleep_mode is False
+        assert "--enable-sleep-mode" not in plan.args
+        assert plan.env == {}
+
+    def test_blank_knobs_on_the_spec_path_take_their_defaults(
+        self, tmp_path: Path
+    ) -> None:
+        spec: Path = write_spec(tmp_path)
+        plan: Any = launcher.plan_from_spec(
+            json.loads(spec.read_text(encoding="utf-8")),
+            {
+                "VIF_ENGINE_SPEC_FILE": str(spec),
+                "VLM_GPU_IDS": "",
+                "VLM_HEALTH_POLL_SECONDS": "",
+                "VIF_WATCH_POLL_SECONDS": "",
+                "VIF_ACTIVE_READY_TIMEOUT_SECONDS": "",
+            },
+        )
+        assert plan.health_poll_seconds == 2.0
+        assert plan.watch_poll_seconds == 2.0
+        assert plan.active_ready_timeout_seconds == 1800
+        assert "CUDA_VISIBLE_DEVICES" not in plan.env
+
+    @pytest.mark.parametrize(
+        "name",
+        ["VLM_PORT", "VLM_SLEEP_LEVEL", "VLM_HEALTH_TIMEOUT_SECONDS"],
+    )
+    def test_an_invalid_integer_is_a_config_error_naming_the_knob(
+        self, name: str
+    ) -> None:
+        with pytest.raises(launcher.ConfigError) as caught:
+            launcher.plan_from_env({"VLM_KV_CACHE_DTYPE": "auto", name: "abc"})
+        assert str(caught.value) == f"{name}='abc' is not an integer."
+
+    def test_an_invalid_number_is_a_config_error_naming_the_knob(self) -> None:
+        with pytest.raises(launcher.ConfigError) as caught:
+            launcher.plan_from_env(
+                {"VLM_KV_CACHE_DTYPE": "auto", "VLM_HEALTH_POLL_SECONDS": "fast"}
+            )
+        assert str(caught.value) == "VLM_HEALTH_POLL_SECONDS='fast' is not a number."
+
+
 def run_launcher(
     env: dict[str, str], *, timeout: float = 60.0, path_prefix: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -431,6 +520,23 @@ class TestDryRun:
         )
         assert result.returncode == 78
         assert "is not a boolean" in result.stderr
+
+    def test_a_blank_port_launches_on_the_default(self) -> None:
+        result: subprocess.CompletedProcess[str] = run_launcher(
+            {"VIF_LAUNCHER_DRY_RUN": "1", "VLM_KV_CACHE_DTYPE": "auto", "VLM_PORT": ""}
+        )
+        assert result.returncode == 0
+        plan: dict[str, Any] = json.loads(result.stdout)
+        assert plan["duties"]["port"] == 8000
+        assert plan["argv"][3] == "--port=8000"
+
+    def test_an_invalid_port_exits_78_naming_it(self) -> None:
+        result: subprocess.CompletedProcess[str] = run_launcher(
+            {"VIF_LAUNCHER_DRY_RUN": "1", "VLM_KV_CACHE_DTYPE": "auto", "VLM_PORT": "abc"}
+        )
+        assert result.returncode == 78
+        assert "VLM_PORT='abc' is not an integer." in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 @pytest.fixture()
