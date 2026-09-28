@@ -532,7 +532,11 @@ class TestDryRun:
 
     def test_an_invalid_port_exits_78_naming_it(self) -> None:
         result: subprocess.CompletedProcess[str] = run_launcher(
-            {"VIF_LAUNCHER_DRY_RUN": "1", "VLM_KV_CACHE_DTYPE": "auto", "VLM_PORT": "abc"}
+            {
+                "VIF_LAUNCHER_DRY_RUN": "1",
+                "VLM_KV_CACHE_DTYPE": "auto",
+                "VLM_PORT": "abc",
+            }
         )
         assert result.returncode == 78
         assert "VLM_PORT='abc' is not an integer." in result.stderr
@@ -1063,9 +1067,7 @@ class TestWatchLoop:
             env={"VLLM_SERVER_DEV_MODE": "1", "VIF_TEST_MARK": "second"},
             gpu_ids="2",
         )
-        assert until(
-            lambda: engine.events() == ["start", "sleep", "sigterm", "start"]
-        )
+        assert until(lambda: engine.events() == ["start", "sleep", "sigterm", "start"])
 
         starts: list[dict[str, Any]] = [
             event["env"] for event in events(engine.log) if event["event"] == "start"
