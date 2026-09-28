@@ -449,9 +449,7 @@ def parse_bool(name: str, raw: str) -> bool:
 def middleware_args(environ: dict[str, str], args: list[str]) -> list[str]:
     """The `--middleware` flags VIF_ENGINE_MIDDLEWARE asks for, minus any in `args`."""
     named: set[str] = {
-        args[index + 1]
-        for index, arg in enumerate(args[:-1])
-        if arg == "--middleware"
+        args[index + 1] for index, arg in enumerate(args[:-1]) if arg == "--middleware"
     } | {arg.split("=", 1)[1] for arg in args if arg.startswith("--middleware=")}
     flags: list[str] = []
     for path in env_value(environ, "VIF_ENGINE_MIDDLEWARE").replace(",", " ").split():

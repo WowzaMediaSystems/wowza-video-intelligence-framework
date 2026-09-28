@@ -158,9 +158,7 @@ class TestOneServicePerModel:
                 for key, value in environment(engine).items()
                 if value is not None
             }
-            expected: str = (
-                f"{STATE_DIR}/engines/{launcher.engine_key(model_id)}.json"
-            )
+            expected: str = f"{STATE_DIR}/engines/{launcher.engine_key(model_id)}.json"
             assert launcher.spec_path_from_env(env) == expected
 
 
@@ -189,10 +187,14 @@ class TestNetwork:
         self, services: dict[str, dict[str, Any]]
     ) -> None:
         on_engine_network: list[str] = sorted(
-            name for name, service in services.items() if ENGINE_NETWORK in networks(service)
+            name
+            for name, service in services.items()
+            if ENGINE_NETWORK in networks(service)
         )
         on_egress: list[str] = sorted(
-            name for name, service in services.items() if EGRESS_NETWORK in networks(service)
+            name
+            for name, service in services.items()
+            if EGRESS_NETWORK in networks(service)
         )
         engine_names: list[str] = sorted(hostname_for(m) for m in CATALOG_MODEL_IDS)
         assert on_engine_network == sorted([VIS, *engine_names])

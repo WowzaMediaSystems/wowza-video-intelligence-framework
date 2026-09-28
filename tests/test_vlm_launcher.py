@@ -332,7 +332,11 @@ class TestSpecPath:
                 "VIF_ENGINE_MIDDLEWARE": "vif_auth.VifAuthMiddleware",
             }
         )
-        assert plan.args == ["--port=8000", "--middleware", "vif_auth.VifAuthMiddleware"]
+        assert plan.args == [
+            "--port=8000",
+            "--middleware",
+            "vif_auth.VifAuthMiddleware",
+        ]
 
     def test_the_path_can_be_derived_from_the_state_dir(self, tmp_path: Path) -> None:
         write_spec(tmp_path)
