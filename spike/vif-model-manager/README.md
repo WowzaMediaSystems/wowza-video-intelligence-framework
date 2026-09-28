@@ -1,13 +1,14 @@
 # Model Manager spike — gated checks
 
 Runnable checks for the parts of the VIF Model Manager that cannot be proved on
-CI: they need a real GPU, real weights and a real vLLM engine. They exercise the opt-in pool duties in
-[`vlm-entrypoint.sh`](../../vlm-entrypoint.sh) and the Bearer guard in
-[`vlm-patches/vif_auth.py`](../../vlm-patches/vif_auth.py).
+CI: they need a real GPU, real weights and a real vLLM engine. They exercise the
+opt-in pool duties in [`vlm-entrypoint.sh`](../../vlm-entrypoint.sh) and the
+Bearer guard in [`vlm-patches/vif_auth.py`](../../vlm-patches/vif_auth.py).
 
 They have been run against real engines on an NVIDIA L40S. Nothing here runs in
-CI, and nothing here is part of a customer deployment — the duties they exercise are off by
-default and the shipped stack never sets the variables that turn them on.
+CI, and nothing here is part of a customer deployment — the duties they exercise
+are off by default and the shipped stack never sets the variables that turn them
+on.
 
 `test_vif_auth.py` is the exception: it is a plain unit test of the middleware
 against a dummy ASGI app and needs no GPU. Run it anywhere.
