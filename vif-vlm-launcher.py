@@ -144,7 +144,8 @@ couple of seconds; a spec whose content has not changed costs one read):
            state available to an engine that cannot be woken from sleep.
 
 VIS moves an engine between those three by rewriting its spec; nothing else
-is needed on this side.
+is needed on this side. A sleep or a wake that fails is not retried until the
+spec changes: VIS decides what happens to an engine that would not move.
 
 THE POOL DUTIES, when several engines share one card:
 
@@ -826,6 +827,9 @@ class Engine:
         self._spec_digest: str = _digest_of(plan.spec_file)
         self._log_warned: bool = False
         self._announced_awake: bool | None = None
+        # The hot move (sleep or wake) that last failed, and the digest of the
+        # decision it failed under. It is not tried again until that changes.
+        self._failed_move: tuple[DesiredState, str] | None = None
 
     # -- signals ------------------------------------------------------------
 
@@ -1017,31 +1021,61 @@ class Engine:
             warn(f"{what} failed ({exc}).")
             return False
 
-    def sleep_now(self) -> None:
+    def sleep_now(self) -> bool:
         """Sleep in host RAM. A failure leaves the engine awake, and says so."""
         if not self.plan.sleep_mode:
             warn(
                 "this engine has no /sleep endpoint, so it cannot sleep; "
                 "it stays awake and keeps its GPU memory."
             )
-            return
+            return False
         log(f"sleeping at level {self.plan.sleep_level}.")
         if self._control(f"/sleep?level={self.plan.sleep_level}", "/sleep"):
             self.state = DesiredState.ASLEEP
             self.clear_ready()
             log("asleep.")
-        else:
-            warn("this engine stays awake and keeps its GPU memory.")
+            return True
+        warn("this engine stays awake and keeps its GPU memory.")
+        return False
 
-    def wake_now(self) -> None:
+    def wake_now(self) -> bool:
         """Come back from host RAM. A failure leaves it asleep, and says so."""
         log("waking.")
         if self._control("/wake_up", "/wake_up"):
             self.state = DesiredState.AWAKE
             self.mark_ready()
             log("awake.")
-        else:
-            warn("this engine stays asleep; VIS decides what happens next.")
+            return True
+        warn("this engine stays asleep; VIS decides what happens next.")
+        return False
+
+    def _decision_digest(self) -> str:
+        """The digest of what the desired state is read from right now."""
+        if self.plan.spec_file:
+            return self._spec_digest
+        return _digest_of(self.plan.state_file)
+
+    def _already_failed(self, target: DesiredState) -> bool:
+        return self._failed_move == (target, self._decision_digest())
+
+    def move_hot(self, target: DesiredState) -> None:
+        """
+        Sleep or wake, at most once per decision.
+
+        A failed move is not retried on the next poll: an engine that would
+        not wake is one VIS has already given up on, and waking it again every
+        couple of seconds, forever, helps nobody. A new spec (or state file)
+        is a new decision, and gets a new attempt.
+        """
+        digest: str = self._decision_digest()
+        moved: bool = (
+            self.sleep_now() if target is DesiredState.ASLEEP else self.wake_now()
+        )
+        if moved:
+            self._failed_move = None
+            return
+        self._failed_move = (target, digest)
+        warn("not trying again until the desired state is rewritten.")
 
     # -- process lifecycle --------------------------------------------------
 
@@ -1181,13 +1215,16 @@ class Engine:
         self.state = DesiredState.AWAKE
         self.mark_ready()
         if target is DesiredState.ASLEEP:
-            self.sleep_now()
+            self.move_hot(target)
         self.release_load_lock()
         return None
 
     def enter(self, target: DesiredState) -> int | None:
         """One desired-state transition. An exit code means the container stops."""
         if target is self.state:
+            return None
+        hot: bool = DesiredState.PARKED not in (target, self.state)
+        if hot and self._already_failed(target):
             return None
         log(f"desired state: {self.state} -> {target}.")
         if target is DesiredState.PARKED:
@@ -1198,10 +1235,7 @@ class Engine:
         if self.state is DesiredState.PARKED:
             self._stub.stop()
             return self.start_engine(target)
-        if target is DesiredState.ASLEEP:
-            self.sleep_now()
-        else:
-            self.wake_now()
+        self.move_hot(target)
         return None
 
     def run(self) -> int:

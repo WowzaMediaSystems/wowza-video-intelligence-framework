@@ -1083,6 +1083,28 @@ class TestWatchLoop:
             },
         ]
 
+    def test_a_failed_wake_is_tried_once_per_spec(self, engine: ManagedEngine) -> None:
+        """An engine VIS has given up on is not woken again on every poll."""
+        engine.extra_env["FAKE_VLLM_WAKE_FAILS"] = "1"
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: engine.events() == ["start", "sleep"])
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: engine.events() == ["start", "sleep", "wake"])
+        # Ten polls' worth: the spec has not changed, so neither does anything.
+        time.sleep(2)
+        assert engine.events() == ["start", "sleep", "wake"]
+        assert not engine.ready_marker.exists()
+
+        engine.spec(
+            desired_state="awake", active=True, generated_at="2026-09-22T12:05:00Z"
+        )
+        assert until(lambda: engine.events() == ["start", "sleep", "wake", "wake"])
+        time.sleep(2)
+        assert engine.events() == ["start", "sleep", "wake", "wake"]
+        assert http_get(engine.port, "/is_sleeping") == (200, '{"is_sleeping": true}')
+
     def test_the_child_output_is_teed_to_the_state_volume(
         self, engine: ManagedEngine
     ) -> None:

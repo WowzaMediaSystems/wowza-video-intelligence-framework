@@ -80,6 +80,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/wake_up"):
             record("wake", path=self.path, model=MODEL)
+            if os.environ.get("FAKE_VLLM_WAKE_FAILS", "") == "1":
+                self._respond(500)
+                return
             SLEEPING = False
             self._respond(200)
             return
