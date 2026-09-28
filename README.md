@@ -28,7 +28,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 |---|---|
 | **What it is** | Ready-to-run WSE configuration with prebuilt plugin JARs for video intelligence workflows |
 | **Primary workflows** | Object detection and scene understanding |
-| **Optional workflows** | VLM analysis and synthetic video detection |
+| **Optional workflows** | VLM analysis and Synthetic Video Detection |
 | **How it runs** | `docker compose up` starts `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU). A one-shot `vis-init` helper runs first to prepare VIS mounts. |
 | **Alternative workflow (optional)** | `docker compose --profile wse up` starts only `wse` and `manager` when connecting to a remote VIS endpoint. |
 | **VI Service deployment** | Connect to a remote VI Service instance (`wss://`) or run VIF locally via Docker |
