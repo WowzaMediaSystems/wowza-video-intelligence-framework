@@ -178,6 +178,17 @@ class TestLegacyFlagResolution:
         plan: Any = launcher.plan_from_env(env)
         assert plan.args[-2:] == ["--seed", "7"]
 
+    def test_the_deployment_middleware_comes_before_the_extra_args(self) -> None:
+        env: dict[str, str] = profile_env("qwen")
+        env["VIF_ENGINE_MIDDLEWARE"] = "vif_auth.VifAuthMiddleware"
+        plan: Any = launcher.plan_from_env(env)
+        assert plan.args[-5:] == [
+            "--middleware",
+            "vif_auth.VifAuthMiddleware",
+            "--max-cudagraph-capture-size=64",
+            *XGRAMMAR,
+        ]
+
     def test_sleep_mode_adds_the_flag_and_the_dev_mode_env(self) -> None:
         env: dict[str, str] = profile_env("qwen")
         env["VLM_SLEEP_MODE"] = "1"
@@ -291,6 +302,37 @@ class TestSpecPath:
         ]
         assert plan.env == {"VLLM_SERVER_DEV_MODE": "1"}
         assert plan.port == 9000
+
+    def test_the_deployment_middleware_is_appended(self, tmp_path: Path) -> None:
+        path: Path = write_spec(tmp_path, args=["--port=8000"])
+        plan: Any = launcher.build_plan(
+            {
+                "VIF_ENGINE_SPEC_FILE": str(path),
+                "VIF_ENGINE_MIDDLEWARE": "vif_auth.VifAuthMiddleware, extra.Guard",
+            }
+        )
+        assert plan.args == [
+            "--port=8000",
+            "--middleware",
+            "vif_auth.VifAuthMiddleware",
+            "--middleware",
+            "extra.Guard",
+        ]
+
+    def test_a_middleware_the_spec_names_is_not_added_twice(
+        self, tmp_path: Path
+    ) -> None:
+        path: Path = write_spec(
+            tmp_path,
+            args=["--port=8000", "--middleware", "vif_auth.VifAuthMiddleware"],
+        )
+        plan: Any = launcher.build_plan(
+            {
+                "VIF_ENGINE_SPEC_FILE": str(path),
+                "VIF_ENGINE_MIDDLEWARE": "vif_auth.VifAuthMiddleware",
+            }
+        )
+        assert plan.args == ["--port=8000", "--middleware", "vif_auth.VifAuthMiddleware"]
 
     def test_the_path_can_be_derived_from_the_state_dir(self, tmp_path: Path) -> None:
         write_spec(tmp_path)

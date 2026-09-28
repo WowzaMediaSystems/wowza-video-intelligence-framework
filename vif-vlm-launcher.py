@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Entrypoint for the VLM engine containers (the `vlm` service in
-docker-compose.yaml, and the VIF model services from the phase-1 release).
+Entrypoint for the VLM engine containers (the `vif-model-*` services in
+docker-compose.yaml, and `vlm-2` in docker-compose.vlm-multi.yaml).
 Runs unchanged on any supported GPU and model: defaults adapt to the hardware
 at startup, and everything else comes from the engine's spec or from VLM_*
 variables -- you should not need to edit this file.
@@ -13,7 +13,8 @@ TWO SOURCES OF FLAGS, in priority order:
   1. An ENGINE SPEC written by VIS to the shared state volume
      (VIF_ENGINE_SPEC_FILE, or <VIF_STATE_DIR>/engines/<engine key>.json).
      VIS resolves the whole command from its model catalog and this script
-     runs it verbatim -- it is a dumb executor, by design.
+     runs it verbatim -- it is a dumb executor, by design. The one addition
+     is the deployment's own middleware (VIF_ENGINE_MIDDLEWARE, below).
   2. The LEGACY env-driven path: VLM_* variables from the model's env file
      (vlm-env/<name>.env, picked by VLM_CONF in .env). Bit-compatible with
      the bash entrypoint this file replaces, with one documented exception:
@@ -127,6 +128,15 @@ MANAGED PATH:
                                wedge the pool.
   VIF_ENGINE_LOG_FILE          Override for where the child's output is teed.
 
+BOTH PATHS:
+  VIF_ENGINE_MIDDLEWARE        ASGI middleware the deployment mounts into the
+                               engine, as import paths separated by spaces or
+                               commas (e.g. vif_auth.VifAuthMiddleware). Each
+                               becomes a `--middleware` flag. It belongs to the
+                               deployment rather than to the spec because the
+                               deployment is what bind-mounts the module; one
+                               the command already names is not added twice.
+
   VIF_LAUNCHER_DRY_RUN=1       Print the fully resolved command and env as
                                JSON and exit without starting anything.
 
@@ -188,7 +198,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-28"
+LAUNCHER_REVISION: str = "2026-09-28.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -392,6 +402,22 @@ def parse_bool(name: str, raw: str) -> bool:
     if lowered in _FALSE:
         return False
     raise ConfigError(f"{name}='{raw}' is not a boolean.")
+
+
+def middleware_args(environ: dict[str, str], args: list[str]) -> list[str]:
+    """The `--middleware` flags VIF_ENGINE_MIDDLEWARE asks for, minus any in `args`."""
+    named: set[str] = {
+        args[index + 1]
+        for index, arg in enumerate(args[:-1])
+        if arg == "--middleware"
+    } | {arg.split("=", 1)[1] for arg in args if arg.startswith("--middleware=")}
+    flags: list[str] = []
+    for path in env_value(environ, "VIF_ENGINE_MIDDLEWARE").replace(",", " ").split():
+        if path in named:
+            continue
+        named.add(path)
+        flags.extend(["--middleware", path])
+    return flags
 
 
 def pin_gpus(gpu_ids: str) -> dict[str, str]:
@@ -603,10 +629,12 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
 
     spec_file: str = spec_path_from_env(environ)
     state_dir: str = state_dir_from_env(environ, spec_file)
+    args: list[str] = [str(arg) for arg in document["args"]]
+    args.extend(middleware_args(environ, args))
     return LaunchPlan(
         source="spec",
         model=model,
-        args=[str(arg) for arg in document["args"]],
+        args=args,
         env=env,
         port=spec_int(document, "port"),
         sleep_mode=sleep_mode,
@@ -726,7 +754,9 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
         log("VLM_SLEEP_MODE -> --enable-sleep-mode, VLLM_SERVER_DEV_MODE=1.")
 
     # Escape hatch for vLLM flags not exposed above (e.g. --quantization).
-    args.extend(env_value(environ, "VLM_EXTRA_ARGS").split())
+    extra_args: list[str] = env_value(environ, "VLM_EXTRA_ARGS").split()
+    args.extend(middleware_args(environ, extra_args))
+    args.extend(extra_args)
 
     state_dir: str = env_value(environ, "VIF_STATE_DIR")
     return LaunchPlan(
