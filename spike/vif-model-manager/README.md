@@ -140,6 +140,6 @@ behaves; they say nothing about whether it is fast or small enough.
 Sleep mode requires vLLM's cumem allocator, which requires CUDA UVA — unavailable under WSL2.
 An engine started with `--enable-sleep-mode` on WSL2 crashes at boot (`RuntimeError: UVA is not
 available`). These checks therefore need a native-Linux GPU host; a WSL2 box
-can only exercise the lock/supervisor/flag paths with sleep mode OFF. How managed deployments
-should behave on no-UVA platforms is an OPEN design item (starting without sleep mode conflicts
-with multiple resident models — all engines would be awake at full reservation).
+can only exercise the lock/supervisor/flag paths with sleep mode OFF. On a host without UVA,
+managed engines run cold instead: their specs say `sleep_mode: false`, every engine but the
+active one is `parked`, and switching works at cold-start speed.
