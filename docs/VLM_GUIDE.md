@@ -4,7 +4,7 @@ The Video Intelligence framework can run a **vision-language model (VLM)** over 
 
 With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
-The VLM is any multi-modal model behind an **OpenAI-compatible HTTP endpoint** — one that reads the stream's frames alongside your text prompts. The framework bundles a ready-to-run [vLLM](https://docs.vllm.ai) sidecar so everything can run locally on your GPU, or you can point at a hosted provider instead. More than one model can run side by side, each in its own container — see [Choosing the model](#choosing-the-model); the bundled default is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
+The VLM is any multi-modal model behind an **OpenAI-compatible HTTP endpoint** — one that reads the stream's frames alongside your text prompts. The framework bundles **managed VLM engines**: one [vLLM](https://docs.vllm.ai) container per supported model, all resident on your GPU, with the Video Intelligence Service (VIS) deciding which one serves and switching between them in seconds. Streams reach them through VIS's own endpoint. You can also point a stream at any other endpoint instead — a hosted provider or your own server. The default model is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly); see [Choosing the model](#choosing-the-model).
 
 ---
 
@@ -12,20 +12,20 @@ The VLM is any multi-modal model behind an **OpenAI-compatible HTTP endpoint** �
 
 Prerequisites: a working framework checkout with `.env` populated (licenses, admin credentials — see [README](README.md)), an NVIDIA GPU with current drivers, and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 
-**1. Start the full stack with the VLM sidecar:**
+**1. Start the full stack with the managed VLM engines:**
 
 ```bash
 docker compose --profile default --profile vlm up -d
 ```
 
-The first boot downloads ~5 GB of model weights into `./vis/vlm-models` (reused on every later boot). Watch progress and wait for `vlm` to report healthy:
+Each engine downloads its model's weights into `./vis/vlm-models` the first time it loads, and reuses them on every later boot. The engines load one at a time, the active model first. Watch progress:
 
 ```bash
-docker compose logs -f vlm     # model download + load progress
-docker compose ps              # 'vlm' flips to (healthy) when ready
+docker compose logs -f vif-model-qwen-qwen3-vl-4b-instruct-fp8   # the default model's download + load
+docker compose ps                                                 # every vif-model-* flips to (healthy)
 ```
 
-> The `vlm` profile is additive and opt-in: a bare `docker compose up` starts everything **except** the sidecar, and `docker compose --profile vlm up` starts VIS + VLM only. Note that a bare `docker compose down` leaves the profile-gated `vlm` container running — include `--profile vlm` on the `down` as well to stop it.
+> The `vlm` profile is additive and opt-in: a bare `docker compose up` starts everything **except** the engines, and `docker compose --profile vlm up` starts VIS + the engines only. A bare `docker compose down` leaves the profile-gated engines running — include `--profile vlm` on the `down` as well to stop them.
 
 **2. Publish a stream whose name starts with `vlm`** — the default configuration ships a ready-made VLM stream entry matching `vlm.*` on the `live` application:
 
@@ -53,19 +53,19 @@ The three moving parts are the **engine** (WSE + the Video Intelligence Controll
 engine ──WebSocket──▶ VIS ──HTTP──▶ VLM endpoint
 ```
 
-Any permutation works — everything on one machine, the engine split from VIS, one engine fanning out to many VIS instances, or many engines sharing one VIS.
+Any permutation works — everything on one machine, the engine split from VIS, one engine fanning out to many VIS instances, or many engines sharing one VIS. The managed engines always run on the same machine as the VIS that manages them: they share its state volume, and only it can reach them.
 
 ### 1. Everything on one machine (default)
 
 ```
 ┌─────────────────────────────────────┐
-│  engine ──▶ VIS ──▶ vlm sidecar     │
+│  engine ──▶ VIS ──▶ VLM engines     │
 │              GPU(s)                 │
 └─────────────────────────────────────┘
 docker compose --profile default --profile vlm up -d
 ```
 
-Works out of the box — see [Defaults](#defaults-it-just-works) below. On a multi-GPU machine, give the VLM its own card with `VLM_GPU_IDS` in `.env`.
+Works out of the box — see [Defaults](#defaults-it-just-works) below.
 
 ### 2. Engine on one machine, VIS + VLM on another
 
@@ -73,7 +73,7 @@ Put inference on the GPU box and keep the engine wherever your streaming runs:
 
 ```
 ┌── box A ───────────┐      ┌── box B (GPU) ──────────┐
-│  engine + manager  │─────▶│  VIS ──▶ vlm sidecar    │
+│  engine + manager  │─────▶│  VIS ──▶ VLM engines    │
 └────────────────────┘ :5001└─────────────────────────┘
 
 box B:  docker compose --profile vi-service --profile vlm up -d   # VIS + VLM only
@@ -94,13 +94,13 @@ Spread streams or applications across several GPU boxes. `vi_service_url` is ove
 ]
 ```
 
-Run each GPU box with `docker compose --profile vi-service --profile vlm up -d` — with the default configuration, each VIS uses its own local VLM sidecar.
+Run each GPU box with `docker compose --profile vi-service --profile vlm up -d` — with the default configuration, each VIS serves its streams from its own local engines.
 
 ### 4. Many engines, one VIS
 
-Multiple engines can share one VIS deployment — point each engine's `VIS_HOST` at the same box. VIS pools models across streams, and all streams targeting the same VLM endpoint share one HTTP client pool. Note that the pool's `request_timeout_seconds` and `max_concurrent_requests` are set by the **first** stream to use that endpoint; later streams with different values keep the first ones (a WARNING is logged).
+Multiple engines can share one VIS deployment — point each engine's `VIS_HOST` at the same box. VIS pools models across streams. Streams on a bring-your-own endpoint share one HTTP client pool per endpoint, whose `request_timeout_seconds` and `max_concurrent_requests` are set by the **first** stream to use it; later streams with different values keep the first ones (a WARNING is logged).
 
-> **Splitting VIS and the VLM across machines** is also possible: uncomment the `ports:` block on the `vlm` service to publish its port, set `VLLM_API_KEY` in `.env` on the VLM box (the endpoint is otherwise unauthenticated), and point `endpoint_url` at `http://<vlm box>:8000/v1` with the same key as `api_key`.
+> **Using the managed endpoint from another machine**: the engines' own ports are never published — they sit on an internal network only VIS joins. The managed endpoint is VIS's `/v1`, on VIS's port: uncomment the `ports:` block on the VIS service to publish it, and set `VLLM_API_KEY` in `.env` (`/v1` does not use `VIS_API_KEY`, so without it the endpoint is unauthenticated), then point `endpoint_url` at `http://<VIS box>:5001/v1` with the same key as `api_key`. To run a VLM on a different machine from VIS, serve it there with any OpenAI-compatible server and point the stream's `endpoint_url` at it.
 
 ---
 
@@ -111,79 +111,62 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | What | Default | Why it works |
 |---|---|---|
 | Model | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Bundled, commercial-use friendly, fits a 24 GB GPU |
-| Endpoint | `http://vlm.docker:8000/v1` | Pre-set in the shipped `video-intelligence.json`; resolves on the compose network |
+| Endpoint | `http://video-intelligence-service.docker:5001/v1` | VIS's managed endpoint; it routes each request to the engine serving the stream's `model_name`. The address older configs carry, `http://vlm.docker:8000/v1`, is served the same way |
 | Demo stream | `vlm.*` on app `live` | Publish `live/vlm-anything` and analysis starts |
-| Weights | cached in `./vis/vlm-models` | One ~5 GB download, ever; pre-seedable for air-gapped hosts |
-| Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
-| GPU tuning | auto-probed at startup | KV-cache precision and concurrency ceiling adapt to your card |
+| Weights | cached in `./vis/vlm-models` | Each model downloads once, ever; pre-seedable for air-gapped hosts |
+| Compile cache | `./vis/vlm-cache` | vLLM's startup compile happens once per model, not on every container recreation |
+| Engine state | `./vis/vlm-state` | The active model, each engine's command and its log; the active model survives restarts |
+| GPU tuning | resolved by VIS per model and card | KV-cache precision, memory reservation and CUDA-graph settings follow the card; the small-card caps are dropped on 40 GB+ cards |
 
-> **On a 40 GB+ GPU, read [The shipped model files are tuned for small GPUs](#the-shipped-model-files-are-tuned-for-small-gpus--undo-that-on-a-big-card) first.** The files under `vlm-env/` cap CUDA graph capture (and, for two models, disable it) so each model boots on the smallest card it fits on. That trade costs throughput on a large card and is not auto-detected — remove the caps yourself.
-
-GPU placement is the one thing worth a decision on multi-GPU machines, because the VLM and the detection models claim memory differently: detection models (object detection, scene detection, …) are allocated lazily, as streams start using them, while the VLM is eager — vLLM reserves 90% of one card the moment the container starts. Give the VLM a dedicated GPU with `VLM_GPU_IDS` in `.env` (e.g. `VLM_GPU_IDS=1`) and let the detection models use the rest. To run detection models on the same card as the VLM (e.g. a single-GPU machine that must run everything), lower `VLM_GPU_MEMORY_UTILIZATION` (e.g. `0.4`–`0.5`) in a local copy of the model's env file (see [Choosing the model](#choosing-the-model)) so they still fit.
+The engines run on GPU 0. The serving engine reserves its memory when it loads, while the detection models (object detection, scene detection, …) are allocated lazily as streams start using them; the shipped reservations leave part of the card for them.
 
 ---
 
 ## Choosing the model
 
-Each supported model is a small **env file** under `vlm-env/` (e.g. `qwen.env`, `nemotron.env`) holding the model id and its tuned `VLM_*` knobs. The VLM container loads one, picked by `VLM_CONF` — set it in `.env` (default `qwen`), then bring the stack up normally:
+Every supported model has its own engine container (`vif-model-<model>`), and all of them are resident. One serves at a time; the others rest, either **asleep** (weights in host RAM, back in a second or two) or **parked** (no process, weights on disk, back in a cold start of a minute or two). VIS chooses which models may sleep from the host's RAM, and parks the rest.
+
+Switch the serving model from the Engine Manager, or through VIS's control API (`X-API-Key` as for the rest of VIS):
 
 ```bash
-# .env:  VLM_CONF=nemotron   (omit for the default, qwen)
-docker compose --profile default --profile vlm up -d
+curl -H "X-API-Key: $VIS_API_KEY" http://<VIS host>:5001/vlm/models                  # catalog, residency, state
+curl -X POST -H "X-API-Key: $VIS_API_KEY" \
+  http://<VIS host>:5001/vlm/models/nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8/activate
+curl -H "X-API-Key: $VIS_API_KEY" http://<VIS host>:5001/vlm/status                  # progress of the switch
 ```
 
-(A shell-level `VLM_CONF=... docker compose ...` overrides `.env` for a one-off run, but the `.env` entry is the intended home so every later `up` keeps serving the same model.)
+The active model persists across restarts. A stream's `model_name` must be the model that is serving: a request for a model that is resting is refused rather than waking it, and the stream reports itself degraded until that model is activated. The Manager UI's **Verify** button reads the models the endpoint serves and adopts the served model into the stream's config.
 
-| Conf (`VLM_CONF`) | Model | Notes |
+| Model | Notes | Pre-upgrade `VLM_CONF` |
 |---|---|---|
-| `qwen` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card |
-| `nemotron` | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM; needs `trust-remote-code` + eager mode |
-| `gemma` | `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env`; fits a 24 GB card |
-| `cosmos-edge` | `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load, fits an 8 GB card. Needs the `v0.26.0` sidecar image + bundled patch mount, both already wired in `docker-compose.yaml` |
-| `cosmos-nano` | `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B, ~32 GB of BF16 weights); needs a 40 GB+ card, or two 24 GB cards with `VLM_TENSOR_PARALLEL_SIZE=2` |
+| `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card | `qwen` |
+| `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM. Cannot sleep, so it always rests parked | `nemotron` |
+| `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env`; fits a 24 GB card | `gemma` |
+| `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load, fits an 8 GB card. Uses the bundled patch mount, already wired in `docker-compose.yaml` | `cosmos-edge` |
+| `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B, ~32 GB of BF16 weights); needs a 40 GB+ card | `cosmos-nano` |
 
-The VLM serves on `http://vlm.docker:8000/v1`; each stream's `model_name` must match the served model. The Manager UI's **Verify** button handles this for you: it queries the endpoint for the models it actually serves (a `GET /models` issued server-side by the Engine, so compose-internal hostnames work) and adopts the served model into the stream's config automatically.
+**Upgrading from the single `vlm` sidecar:** on the first start, VIS makes the model your `.env`'s `VLM_CONF` named the active one, so the stack keeps serving what it served; without `VLM_CONF`, Qwen. `VLM_CONF` is read only for that and can be removed afterwards. The `vlm-env/` files and their `VLM_*` knobs no longer configure the managed engines. Stream configs that point at `http://vlm.docker:8000/v1` keep working with no edit.
 
-To tune the settings of one of the models we provide, copy its file to a local name instead of editing it in place (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local` in `.env`) — local copies survive framework upgrades untouched.
-
-### The shipped model files are tuned for small GPUs — undo that on a big card
-
-**Every file in `vlm-env/` is tuned to _boot_ on the smallest card its model fits on, not to run _fastest_ on the largest.** If you have a 40 GB+ GPU, the two CUDA-graph flags below leave performance on the table: both trade throughput for VRAM, and the container has no way to detect that you don't need the trade.
-
-| Flag, as shipped | Why it's there | On a 40 GB+ card |
-|---|---|---|
-| `--max-cudagraph-capture-size=64` in `VLM_EXTRA_ARGS` (all files except `cosmos-nano`) | vLLM captures CUDA graphs for batch sizes up to 512 by default, costing extra VRAM and startup time. Capping capture at batch 64 buys that memory back so the model fits at all | **Remove it.** With the cap in place, any batch above 64 runs on the slower eager path instead of a captured graph — a throughput ceiling you're paying for nothing |
-| `--enforce-eager` in `VLM_EXTRA_ARGS` (`nemotron`, `cosmos-nano`) | Disables CUDA graph capture outright — the last resort for models whose weights leave no room even for capped capture | **Remove it.** This costs per-request latency on *every* request, not just large batches. It also makes `--max-cudagraph-capture-size` a no-op, so the two flags are never both useful |
-
-To undo them, edit the model file you serve — `vlm-env/<VLM_CONF>.env`, so `vlm-env/qwen.env` by default — and delete the flag from `VLM_EXTRA_ARGS`. If it was the only flag on the line, drop the whole line; then recreate the container (`docker compose --profile default --profile vlm up -d`) so vLLM restarts with the new arguments.
+**Hosts without sleep mode:** vLLM's sleep mode needs CUDA UVA, which some platforms (e.g. WSL2) do not provide. Set `VLM_FORCE_ALL_COLD=true` in `.env` there: every resting model is parked, and switches take a cold start.
 
 ### Structured output
 
-Every shipped model file also carries `--structured-outputs-config {"backend":"xgrammar","disable_any_whitespace":true}` in `VLM_EXTRA_ARGS`, and a file you add should keep it. It only affects requests that carry a JSON schema (VIS's class-based detection and verification, any stream `response_schema`), and it does two things:
+Every shipped model is served with `--structured-outputs-config {"backend":"xgrammar","disable_any_whitespace":true}`. It only affects requests that carry a JSON schema (VIS's class-based detection and verification, any stream `response_schema`), and it does two things:
 
 - **No free whitespace between JSON tokens.** By default the grammar lets the model emit any amount of spaces and newlines between tokens, and small models can fall into padding an answer with spaces until `max_tokens` runs out — the answer arrives truncated, fails to parse, and the window counts as unanswered. Compact JSON removes that failure mode, saves tokens and speeds requests up (measured: a fifth of Cosmos3-Edge's answers truncated with the default grammar, none without, at three times the throughput; Qwen3-VL unchanged in quality).
-- **The xgrammar backend, named explicitly.** vLLM requires a named backend for the whitespace setting. xgrammar compiles every schema the Manager UI's schema builder can produce and every schema VIS generates. A hand-written schema that uses `multipleOf`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `patternProperties`, `propertyNames`, or an unusual string `format` is rejected by the endpoint instead of silently routed to another backend; VIS reports the window as degraded. If you need one of those features, drop the setting from your model file.
+- **The xgrammar backend, named explicitly.** vLLM requires a named backend for the whitespace setting. xgrammar compiles every schema the Manager UI's schema builder can produce and every schema VIS generates. A hand-written schema that uses `multipleOf`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `patternProperties`, `propertyNames`, or an unusual string `format` is rejected by the endpoint instead of silently routed to another backend; VIS reports the window as degraded. If you need one of those features, serve the model from your own endpoint without the setting.
 
-### Running two models at the same time
+### Serving another model at the same time
 
-The default is one VLM container per host. vLLM serves one model per process, so a second model needs a second container — layer the example override `docker-compose.vlm-multi.yaml`, which adds `vlm-2`:
+The managed engines serve one model at a time. To serve a second model simultaneously, on another GPU, layer the example override `docker-compose.vlm-multi.yaml`: it adds `vlm-2`, a plain vLLM container that VIS does not manage, which streams reach directly at `http://vlm-2.docker:8000/v1`:
 
 ```bash
-# .env:  VLM_CONF=<model for vlm>   VLM_2_CONF=<model for vlm-2>
-#        (defaults: qwen + nemotron; any pair of supported models works)
+# .env:  VLM_2_CONF=<model file in vlm-env/>   (default nemotron)   VLM_2_GPU_IDS=1
 docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
   --profile default --profile vlm up -d
 ```
 
-`vlm` runs `VLM_CONF` on GPU 0 (`http://vlm.docker:8000/v1`) and `vlm-2` runs `VLM_2_CONF` on GPU 1 (`http://vlm-2.docker:8000/v1`); point each stream's endpoint and `model_name` at the container serving its model (the stream config's **Verify** button shows which model an endpoint serves). Override the GPUs with `VLM_GPU_IDS` / `VLM_2_GPU_IDS`; to co-locate both on one big GPU, point them at the same card and lower `VLM_GPU_MEMORY_UTILIZATION` in local copies of each model file so they sum to under 1.0. Copy the `vlm-2` block for a third simultaneous container.
-
-Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml --profile vlm down`.
-
-### Adding a supported model
-
-1. Add `vlm-env/<name>.env` — `VLM_MODEL=<hf id>` plus any tuned `VLM_*` knobs (copy an existing file; flags with no dedicated knob go in `VLM_EXTRA_ARGS`, and keep the shipped `--structured-outputs-config` there — see [Structured output](#structured-output)).
-2. Serve it: set `VLM_CONF=<name>` in `.env` and `docker compose --profile default --profile vlm up -d`.
-3. Set the stream's `model_name` to the model id.
+Keep `vlm-2` off GPU 0: VIS sizes the managed engines against the whole card. Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml --profile vlm down`.
 
 ---
 
@@ -191,39 +174,23 @@ Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-c
 
 ### Deployment settings (`.env`)
 
-All knobs are environment variables read by `vif-vlm-launcher.py` at the repo root (which also documents them in detail — defaults adapt to your hardware, and you should never need to edit the file itself; `vlm-entrypoint.sh` beside it is a one-line shim that runs it). Unlike the other services, the `vlm` container does not load the whole `.env`: only the variables below (`VLM_*`, `VLLM_API_KEY`, `HF_*`) are passed through, keeping engine/VIS credentials out of the third-party image — and an empty value counts as unset for all of them. Two vLLM flags are pinned in the launcher and deliberately not exposed as knobs: `--no-enable-prefix-caching` and `--mm-processor-cache-gb 0` (workload correctness for a stream of ever-changing frames). The launcher's first boot-log line is a revision marker (`[vlm-launcher] revision <date>`) that identifies which copy of the bind-mounted script a deployment is running.
+The managed engines take no model configuration from `.env`: VIS resolves each engine's whole command from its model catalog and the card it runs on, and `vif-vlm-launcher.py` at the repo root runs it. The engine containers do not load the whole `.env` — only the variables below are passed to them, keeping Engine/VIS credentials out of the third-party image. Two vLLM flags are always set and deliberately not configurable: `--no-enable-prefix-caching` and `--mm-processor-cache-gb 0` (workload correctness for a stream of ever-changing frames). The launcher's first boot-log line is a revision marker (`[vlm-launcher] revision <date>`) that identifies which copy of the bind-mounted script a deployment is running.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VLM_CONF` | `qwen` | Model env file the `vlm` container serves (any name in `vlm-env/`, without `.env`) |
-| `VLM_GPU_IDS` | unset (GPU 0) | Pin the `vlm` container to specific card(s), e.g. `1` or `2,3`; indices match `nvidia-smi` |
-| `VLM_2_CONF` | `nemotron` | Model env file for the second container (`vlm-2`, only with `docker-compose.vlm-multi.yaml`) |
-| `VLM_2_GPU_IDS` | `1` | Card(s) for the second container |
-| `VLLM_API_KEY` | unset | Require an API key on the endpoint (set when publishing the port) |
-| `HF_TOKEN` | unset | HuggingFace token for the first-boot weight download (higher rate limits) |
+| `VLLM_API_KEY` | unset | Optional, never generated. When set, the engines require it, VIS sends it on its own calls to them, and the managed `/v1` passes the caller's key through — streams set the same value as `api_key`. Set it before publishing VIS's port |
+| `HF_TOKEN` | unset | HuggingFace token for the first-boot weight downloads (higher rate limits; required for gated models) |
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
+| `VLM_FORCE_ALL_COLD` | unset | `true` parks every resting engine instead of putting it to sleep — for hosts where sleep mode cannot run |
+| `VLM_RAM_RESERVE_MIB` | derived | Host RAM kept back from sleeping engines; unset = the larger of 40% of host RAM and 8 GiB |
 
-### Model config (`vlm-env/<name>.env`)
+**Network:** the engines and VIS share the internal `vif-engines` network, which nothing else joins, so Engine, Manager and every other service cannot reach an engine. The engines also sit on `vif-engines-egress`, which only they join, for their weight downloads. No engine port is published.
 
-A model's config lives in a per-model env file, `vlm-env/<name>.env` (`KEY=VALUE`), not `.env`, so it travels with the model and never cross-wires between containers. The entrypoint reads these knobs (all optional; defaults fit Qwen3-VL-4B on a 24 GB card):
+**Sizing concurrency:** at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — the engine's real ceiling on this GPU (`docker compose logs vif-model-<model>`, or `./vis/vlm-state/logs/`). Use it to size `max_concurrent_requests` (below).
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `VLM_MODEL` | `Qwen/Qwen3-VL-4B-Instruct-FP8` | HuggingFace model id vLLM serves |
-| `VLM_MAX_MODEL_LEN` | `16384` | Context window per request |
-| `VLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the GPU vLLM reserves; lower it to co-locate two models on one card |
-| `VLM_MAX_NUM_SEQS` | `auto` | Concurrency ceiling; `auto` lets vLLM size it to KV capacity |
-| `VLM_MAX_NUM_BATCHED_TOKENS` | `8192` | Scheduler batch size |
-| `VLM_KV_CACHE_DTYPE` | probed | `fp8` on Ada/Hopper+ GPUs, `auto` on older cards; set to force |
-| `VLM_TENSOR_PARALLEL_SIZE` | `1` | Shard the model across N GPUs |
-| `VLM_MAX_PIXELS` / `VLM_MIN_PIXELS` | unset | Per-image resolution caps (Qwen-style processor kwargs; some processors reject them). `qwen.env` sets `401408` / `3136` ≈ 512 vision tokens/image |
-| `VLM_MAX_IMAGES_PER_PROMPT` | `8` | Max frames per request; keep `inference_fps × duration` at or below this |
-| `VLM_PORT` | `8000` | Served port; the container healthcheck follows it. If you publish the endpoint, mirror the value in `.env` so the `ports:` mapping matches |
-| `VLM_EXTRA_ARGS` | unset | Any other `vllm serve` flags, space-separated (e.g. `--quantization modelopt --trust-remote-code --enforce-eager`). The shipped files put their small-GPU CUDA-graph caps here — [drop them on a big GPU](#the-shipped-model-files-are-tuned-for-small-gpus--undo-that-on-a-big-card) — and the [structured output](#structured-output) setting, which stays |
+**Air-gapped hosts:** pre-seed the weights on a connected machine — `pip install -U huggingface_hub && HF_HOME=./vis/vlm-models hf download <model id>` for each model you will activate (every resident model that is allowed to sleep is loaded at boot) — copy `./vis/vlm-models` to the target, and set `HF_HUB_OFFLINE=1` in `.env` so boots skip HuggingFace Hub probes. (Running the stack once on a connected machine and copying the populated directory works too.) The same pre-seeding shortens a first boot on a slow link, where the resident set's weights are tens of GB.
 
-Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request: <Y>x` — that's your endpoint's real ceiling on this GPU. Use it to size `max_concurrent_requests` (below); vLLM doesn't expose it over HTTP, so VIS can't read it automatically.
-
-**Air-gapped hosts:** pre-seed the weights on a connected machine — `pip install -U huggingface_hub && HF_HOME=./vis/vlm-models hf download Qwen/Qwen3-VL-4B-Instruct-FP8` — copy `./vis/vlm-models` to the target, and set `HF_HUB_OFFLINE=1` in `.env` so boots skip HuggingFace Hub probes. (Running the stack once on a connected machine and copying the populated directory works too.)
+**Downgrading** to a framework release with the single `vlm` sidecar: stop the engines with this release's files first (`docker compose --profile default --profile vlm down`), then bring the older release up with the same `.env`. Put `VLM_CONF=<name>` back in `.env` if the model you were serving was not Qwen. The older release reuses `./vis/vlm-models` and `./vis/vlm-cache` as they are and ignores `./vis/vlm-state`.
 
 ### Stream configuration (`wse/conf/video-intelligence.json`)
 
@@ -255,7 +222,7 @@ The prompts and output schema behind each level are built into the service — s
 |---|---|---|
 | `model_name` | from global block | Model name sent to the endpoint |
 | `endpoint_url` | from global block | OpenAI-compatible endpoint URL |
-| `api_key` | none | Bearer token; omit for the bundled sidecar |
+| `api_key` | none | Bearer token; for the managed endpoint, the `VLLM_API_KEY` value (omit when it is unset) |
 | `class_names` | none | Open-vocabulary classes (Detect, or Custom with `{class_list}`). In Detect mode the engine surfaces per-class verdicts; leave unset for a free-text Describe |
 | `reasoning_level` | `"high"` | Detect only: `"high"` (default) / `"medium"` / `"low"` picks how much the model deliberates (see above). Ignored when custom prompts or a `response_schema` are set |
 | `class_hints` | none | Optional map of *class → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). **Render-only**: each hint is inlined next to its class in the prompt's `{class_list}` (as `- fire: …`); it never changes the result shape and costs only a few prompt tokens. Keys must be members of `class_names` (case-insensitive) |
@@ -272,4 +239,4 @@ The prompts and output schema behind each level are built into the service — s
 ### What you receive
 
 - **Standalone VLM** results depend on the mode: **Detect** carries per class the class name and the model's `reasoning`; **Describe** carries a free-text `description`; **Custom** carries whatever your `response_schema` defines (flattened onto the result). Delivered through the same event listeners as every detector: ID3 tags, webhooks, log files, and video overlays (overlays show class names / text — VLM results have no bounding boxes).
-- **Resilience**: VLM streams stay alive while the endpoint is unreachable — VIS emits empty results (with a periodic status log) and resumes analysis automatically once the endpoint is up, so a stream started during the sidecar's multi-minute first boot simply begins analyzing when the model finishes loading. While the endpoint is down the overlay shows a read-only **"AI offline"** badge, so an outage is distinguishable from a genuinely quiet scene. The same outage is also surfaced off the overlay: it raises a throttled **WARNING** in the WSE log (with an INFO on recovery) and sets a `vlm_degraded` flag on the stream's status that the Manager dashboard renders as a distinct **"AI offline — VLM endpoint unreachable"** line — all three signals reuse the one wire flag and stay separate from the VIS connection `status`, which remains `connected` during a VLM-endpoint outage.
+- **Resilience**: VLM streams stay alive while the endpoint is unreachable — VIS emits empty results (with a periodic status log) and resumes analysis automatically once the endpoint is up, so a stream started during the engines' multi-minute first boot simply begins analyzing when the model finishes loading. While the endpoint is down the overlay shows a read-only **"AI offline"** badge, so an outage is distinguishable from a genuinely quiet scene. The same outage is also surfaced off the overlay: it raises a throttled **WARNING** in the WSE log (with an INFO on recovery) and sets a `vlm_degraded` flag on the stream's status that the Manager dashboard renders as a distinct **"AI offline — VLM endpoint unreachable"** line — all three signals reuse the one wire flag and stay separate from the VIS connection `status`, which remains `connected` during a VLM-endpoint outage.

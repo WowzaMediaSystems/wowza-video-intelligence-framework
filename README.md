@@ -207,7 +207,7 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
 ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/scene_mystream1"
 ```
 
-6. For VLM analysis, start the full stack with the VLM sidecar and publish a stream matching the default `vlm.*` rule:
+6. For VLM analysis, start the full stack with the managed VLM engines and publish a stream matching the default `vlm.*` rule:
 
 ```bash
 docker compose --profile default --profile vlm up -d
