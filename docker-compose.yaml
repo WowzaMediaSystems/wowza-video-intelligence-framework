@@ -51,8 +51,8 @@ x-vif-model-engine: &vif-model-engine
       # skips the recompile whenever a container is recreated. Safe to
       # delete -- the next load just recompiles.
       - ./vis/vlm-cache:/root/.cache/vllm
-      # Specs, readiness markers, engine logs and the load lock that
-      # serializes cold loads on the card. Shared with VIS.
+      # Specs, readiness and awake markers, engine logs and the load lock
+      # that serializes cold loads on the card. Shared with VIS.
       - ./vis/vlm-state:/vif-state
     ipc: host   # vLLM workers need large shared memory (esp. tensor parallel)
     # `vif-engines` is how VIS reaches the engine; nothing else is on it.
@@ -68,14 +68,13 @@ x-vif-model-engine: &vif-model-engine
       interval: 30s
       timeout: 10s
       retries: 5
-      # Engines load one at a time, and each launcher gives its own load
-      # 1800 s before it gives up and restarts. The last of the five
-      # resident engines can therefore wait for four loads and then do its
-      # own: 5 x 1800 s, plus the wait for VIS to write the spec and each
-      # engine's step into sleep, rounded up. A healthy engine is marked
-      # healthy on its first passing check, so this only delays reporting
-      # an engine that never comes up.
-      start_period: 9600s
+      # Engines load one at a time, and the serving one loads last: it
+      # waits up to 7800 s for the rest of the pool (four loads of up to
+      # 1800 s each, plus their steps into sleep), then gives its own load
+      # 1800 s, after up to 300 s waiting for VIS to write its spec. 9900 s,
+      # rounded up. A healthy engine is marked healthy on its first passing
+      # check, so this only delays reporting an engine that never comes up.
+      start_period: 10200s
     deploy:
       resources:
         reservations:

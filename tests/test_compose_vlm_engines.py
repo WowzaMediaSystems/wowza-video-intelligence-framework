@@ -285,5 +285,12 @@ class TestHealthcheck:
                 "CMD-SHELL",
                 "curl -fsS http://localhost:8000/health",
             ]
-            assert healthcheck["start_period"] == "9600s"
-            assert 9600 >= len(CATALOG_MODEL_IDS) * per_load
+            assert healthcheck["start_period"] == "10200s"
+            # The serving engine loads last: the whole wait for the rest of
+            # the pool, then its own load, after waiting for its spec.
+            assert 10200 >= (
+                launcher.DEFAULT_SPEC_TIMEOUT_SECONDS
+                + launcher.DEFAULT_POOL_LOAD_TIMEOUT_SECONDS
+                + per_load
+            )
+            assert 10200 >= len(CATALOG_MODEL_IDS) * per_load

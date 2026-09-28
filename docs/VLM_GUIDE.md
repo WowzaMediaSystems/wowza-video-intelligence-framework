@@ -126,6 +126,8 @@ The engines run on GPU 0. The serving engine reserves its memory when it loads, 
 
 Every supported model has its own engine container (`vif-model-<model>`), and all of them are resident. One serves at a time; the others rest, either **asleep** (weights in host RAM, back in a second or two) or **parked** (no process, weights on disk, back in a cold start of a minute or two). VIS chooses which models may sleep from the host's RAM, and parks the rest.
 
+**Startup order.** Every model's GPU reservation assumes the others are asleep while it loads, so after a restart the models that rest asleep load first, one at a time, each going to sleep as soon as it is loaded, and the serving model loads last. Streams therefore wait for the whole pool to load before analysis starts: about 12 minutes with a warm compile cache (`./vis/vlm-cache`), longer on a first boot, when every model also compiles. Parked models are not loaded at startup. A resting model whose container restarts while another model serves stays parked until nothing is serving or it is activated, rather than loading beside the serving one.
+
 Switch the serving model from the Engine Manager, or through VIS's control API (`X-API-Key` as for the rest of VIS):
 
 ```bash
