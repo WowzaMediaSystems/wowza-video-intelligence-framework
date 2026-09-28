@@ -451,7 +451,7 @@ class TestBlankMeansUnset:
                 "VLM_HEALTH_TIMEOUT_SECONDS": blank,
                 "VLM_HEALTH_POLL_SECONDS": blank,
                 "VIF_WATCH_POLL_SECONDS": blank,
-                "VIF_ACTIVE_READY_TIMEOUT_SECONDS": blank,
+                "VIF_POOL_LOAD_TIMEOUT_SECONDS": blank,
             }
         )
         assert plan.port == 8000
@@ -460,7 +460,7 @@ class TestBlankMeansUnset:
         assert plan.health_timeout_seconds == 1800
         assert plan.health_poll_seconds == 2.0
         assert plan.watch_poll_seconds == 2.0
-        assert plan.active_ready_timeout_seconds == 1800
+        assert plan.pool_load_timeout_seconds == 7800
 
     @pytest.mark.parametrize("blank", ["", "  "])
     def test_a_blank_boolean_is_false(self, blank: str) -> None:
@@ -482,12 +482,12 @@ class TestBlankMeansUnset:
                 "VLM_GPU_IDS": "",
                 "VLM_HEALTH_POLL_SECONDS": "",
                 "VIF_WATCH_POLL_SECONDS": "",
-                "VIF_ACTIVE_READY_TIMEOUT_SECONDS": "",
+                "VIF_POOL_LOAD_TIMEOUT_SECONDS": "",
             },
         )
         assert plan.health_poll_seconds == 2.0
         assert plan.watch_poll_seconds == 2.0
-        assert plan.active_ready_timeout_seconds == 1800
+        assert plan.pool_load_timeout_seconds == 7800
         assert "CUDA_VISIBLE_DEVICES" not in plan.env
 
     @pytest.mark.parametrize(
@@ -909,6 +909,10 @@ class ManagedEngine:
         return self.state_dir / "ready" / engine_key(self.model)
 
     @property
+    def awake_marker(self) -> Path:
+        return self.state_dir / "awake" / engine_key(self.model)
+
+    @property
     def engine_log(self) -> Path:
         return self.state_dir / "logs" / f"{engine_key(self.model)}.log"
 
@@ -976,7 +980,9 @@ class TestWatchLoop:
 
         engine.spec(desired_state="asleep", active=False)
         assert until(lambda: "sleep" in engine.events())
-        assert until(lambda: not engine.ready_marker.exists())
+        assert until(lambda: not engine.awake_marker.exists())
+        # Asleep is still loaded.
+        assert engine.ready_marker.exists()
         assert http_get(engine.port, "/is_sleeping") == (200, '{"is_sleeping": true}')
 
     def test_asleep_to_awake(self, engine: ManagedEngine) -> None:
@@ -1034,7 +1040,8 @@ class TestWatchLoop:
 
         engine.spec(desired_state="asleep", active=False)
         assert until(lambda: engine.events() == ["start", "sleep"])
-        assert not engine.ready_marker.exists()
+        assert until(lambda: engine.ready_marker.exists())
+        assert not engine.awake_marker.exists()
 
     def test_a_spec_that_does_not_parse_is_ignored(self, engine: ManagedEngine) -> None:
         """A write in flight is a snapshot, not a decision."""
@@ -1054,7 +1061,7 @@ class TestWatchLoop:
     def test_a_stale_ready_marker_is_cleared_at_start(
         self, engine: ManagedEngine
     ) -> None:
-        """A launcher killed outright leaves its marker behind; the next one clears it."""
+        """A launcher killed outright leaves its marker; the next one clears it."""
         engine.ready_marker.parent.mkdir(parents=True)
         engine.ready_marker.write_text(f"{engine.model}\n", encoding="utf-8")
         engine.spec(desired_state="parked", active=False)
@@ -1130,7 +1137,7 @@ class TestWatchLoop:
         # Ten polls' worth: the spec has not changed, so neither does anything.
         time.sleep(2)
         assert engine.events() == ["start", "sleep", "wake"]
-        assert not engine.ready_marker.exists()
+        assert not engine.awake_marker.exists()
 
         engine.spec(
             desired_state="awake", active=True, generated_at="2026-09-22T12:05:00Z"
@@ -1158,52 +1165,173 @@ class TestWatchLoop:
         assert "serving now" in output
 
 
-class TestLoadLockPriority:
-    """The engine that should be serving loads first, whoever asked first."""
+class TestBootOrder:
+    """The engine that should be serving loads last, after the hot pool."""
 
-    @pytest.fixture()
-    def engines(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
-        (state_dir / "active-model").write_text("acme/model-a\n", encoding="utf-8")
-        lock: Path = state_dir / "load.lock"
-        active: ManagedEngine = ManagedEngine(
-            tmp_path, stub_path, state_dir, "acme/model-a"
-        )
-        other: ManagedEngine = ManagedEngine(
-            tmp_path, stub_path, state_dir, "acme/model-b"
-        )
-        for engine in (active, other):
-            engine.extra_env["FAKE_VLLM_READY_AFTER"] = "2"
-        active.spec(desired_state="awake", load_lock_file=str(lock))
-        other.spec(desired_state="asleep", active=False, load_lock_file=str(lock))
-        yield active, other
-        for engine in (active, other):
+    def _pool(
+        self,
+        tmp_path: Path,
+        stub_path: Path,
+        state_dir: Path,
+        models: list[str],
+    ) -> list[ManagedEngine]:
+        engines: list[ManagedEngine] = [
+            ManagedEngine(tmp_path, stub_path, state_dir, model) for model in models
+        ]
+        self._engines = engines
+        return engines
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self) -> Any:
+        self._engines: list[ManagedEngine] = []
+        yield
+        for engine in self._engines:
             if engine.process is not None:
                 engine.stop()
 
-    def test_a_non_active_engine_waits_for_the_active_one(
-        self, engines: tuple[ManagedEngine, ManagedEngine]
+    def test_the_serving_engine_loads_after_the_rest_of_the_hot_pool(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
     ) -> None:
-        active, other = engines
-        # The neighbour asks first and still loads second: flock alone would
-        # have handed it the lock two seconds before the active engine asked.
-        other.start()
-        time.sleep(2)
+        lock: Path = state_dir / "load.lock"
+        active, *others = self._pool(
+            tmp_path,
+            stub_path,
+            state_dir,
+            ["acme/model-a", "acme/model-b", "acme/model-c", "acme/model-d"],
+        )
+        active.spec(desired_state="awake", load_lock_file=str(lock))
+        for other in others:
+            other.spec(desired_state="asleep", active=False, load_lock_file=str(lock))
+        for engine in (active, *others):
+            engine.extra_env["FAKE_VLLM_READY_AFTER"] = "1"
+        # The serving engine asks first and still loads last.
         active.start()
+        time.sleep(1)
+        for other in others:
+            other.start()
 
-        assert until(lambda: other.events() == ["start", "sleep"], timeout=60)
-        assert active.started_at() < other.started_at()
+        assert until(lambda: active.events() == ["start"], timeout=90)
+        for other in others:
+            assert other.events() == ["start", "sleep"]
+            assert other.ready_marker.stat().st_mtime < active.started_at()
+            assert not other.awake_marker.exists()
+        assert until(lambda: active.awake_marker.exists())
         assert active.ready_marker.exists()
 
-    def test_the_active_engine_never_waits(
-        self, engines: tuple[ManagedEngine, ManagedEngine]
+    def test_parked_engines_are_not_waited_for(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
     ) -> None:
-        active, _ = engines
-        # Nothing has published a readiness marker, and the active engine is
-        # not supposed to care: it is the one everyone else waits for.
+        active, parked, sleepless = self._pool(
+            tmp_path,
+            stub_path,
+            state_dir,
+            ["acme/model-a", "acme/model-b", "acme/model-c"],
+        )
+        active.spec(desired_state="awake")
+        parked.spec(desired_state="parked", active=False)
+        # Asked to sleep without sleep mode: its launcher parks it.
+        sleepless.spec(desired_state="asleep", active=False, sleep_mode=False)
         launched: float = time.time()
         active.start()
         assert until(lambda: active.events() == ["start"], timeout=30)
         assert active.started_at() - launched < 5
+
+    def test_the_wait_gives_up_after_its_timeout(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        active, missing = self._pool(
+            tmp_path, stub_path, state_dir, ["acme/model-a", "acme/model-b"]
+        )
+        active.spec(desired_state="awake")
+        # Its spec says asleep, but its container never comes.
+        missing.spec(desired_state="asleep", active=False)
+        active.extra_env["VIF_POOL_LOAD_TIMEOUT_SECONDS"] = "2"
+        launched: float = time.time()
+        active.start()
+        assert until(lambda: active.events() == ["start"], timeout=30)
+        assert active.started_at() - launched >= 2
+        output: str = active.stop()
+        assert (
+            "WARNING: the rest of the pool did not load within 2s; giving up on "
+            "acme/model-b and taking the load lock anyway."
+        ) in output
+
+
+class TestLoadGuard:
+    """An engine that should be asleep never loads beside a serving one."""
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    @staticmethod
+    def serving(state_dir: Path, model: str) -> Path:
+        marker: Path = state_dir / "awake" / engine_key(model)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{model}\n", encoding="utf-8")
+        return marker
+
+    def test_it_stays_parked_while_another_engine_is_awake(
+        self, engine: ManagedEngine, state_dir: Path
+    ) -> None:
+        marker: Path = self.serving(state_dir, "acme/model-b")
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert http_get(engine.port, "/health")[0] == 200
+        time.sleep(2)
+        assert engine.events() == []
+
+        marker.unlink()
+        assert until(lambda: engine.events() == ["start", "sleep"])
+        assert until(lambda: engine.ready_marker.exists())
+        assert not engine.awake_marker.exists()
+
+    def test_a_spec_turning_awake_loads_despite_an_awake_marker(
+        self, engine: ManagedEngine, state_dir: Path
+    ) -> None:
+        self.serving(state_dir, "acme/model-b")
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: engine.events() == ["start"])
+        assert until(lambda: engine.awake_marker.exists())
+        assert http_get(engine.port, "/vif/parked")[0] == 404
+
+    def test_a_stale_awake_marker_is_cleared_at_start(
+        self, engine: ManagedEngine, state_dir: Path
+    ) -> None:
+        self.serving(state_dir, engine.model)
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert not engine.awake_marker.exists()
+
+    def test_the_awake_marker_follows_the_engine(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.awake_marker.exists())
+        assert engine.ready_marker.exists()
+
+        engine.spec(desired_state="asleep", active=False)
+        assert until(lambda: not engine.awake_marker.exists())
+        assert engine.ready_marker.exists()
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: engine.awake_marker.exists())
+        assert engine.events() == ["start", "sleep", "wake"]
+
+        engine.spec(desired_state="parked", active=False)
+        assert until(lambda: not engine.awake_marker.exists())
+        assert until(lambda: not engine.ready_marker.exists())
+        assert engine.events() == ["start", "sleep", "wake", "sigterm"]
 
 
 def launch(env: dict[str, str], output: Path, stub_path: Path) -> subprocess.Popen[str]:
