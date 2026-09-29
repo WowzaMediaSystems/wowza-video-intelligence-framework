@@ -228,6 +228,16 @@ class TestStateVolume:
             assert mounts(engine)["/root/.cache/huggingface"] == "./vis/vlm-models"
             assert mounts(engine)["/root/.cache/vllm"] == "./vis/vlm-cache"
 
+    def test_vis_reads_the_engines_weights_read_only(
+        self, services: dict[str, dict[str, Any]]
+    ) -> None:
+        weights: list[str] = [
+            str(volume)
+            for volume in services[VIS].get("volumes") or []
+            if str(volume).split(":")[1] == "/vif-weights"
+        ]
+        assert weights == ["./vis/vlm-models:/vif-weights:ro"]
+
     def test_vis_init_hands_the_state_volume_to_vis(
         self, services: dict[str, dict[str, Any]]
     ) -> None:

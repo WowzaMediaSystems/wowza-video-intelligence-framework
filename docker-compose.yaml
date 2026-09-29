@@ -271,6 +271,9 @@ services:
         # The managed VLM engines' state volume, shared with every
         # vif-model-* service (the vis-init service above makes it writable).
           - ./vis/vlm-state:/vif-state
+        # The engines' weights, read-only: VIS reads a LoRA adapter's config
+        # and tensor names here before any engine loads it (VIF_WEIGHTS_DIR).
+          - ./vis/vlm-models:/vif-weights:ro
         # The service is only reachable on the internal compose network by
         # default. Engine reaches it by hostname
         # (VIS_HOST=video-intelligence-service.docker) on the bridge, so the
