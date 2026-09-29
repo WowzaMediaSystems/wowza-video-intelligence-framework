@@ -1507,7 +1507,9 @@ class ParkedStub:
             target=self._server.serve_forever, daemon=True, name="parked-stub"
         )
         self._thread.start()
-        log(f"parked: no engine process; serving the health stub on {self._host}:{port}.")
+        log(
+            f"parked: no engine process; serving the health stub on {self._host}:{port}."
+        )
 
     def stop(self) -> None:
         if self._server is None:
