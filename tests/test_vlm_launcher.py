@@ -952,6 +952,7 @@ class ManagedEngine:
         self.port: int = free_port()
         self.log: Path = tmp_path / f"events-{engine_key(model)}.jsonl"
         self.stub_path: Path = stub_path
+        self.starting_file: Path = tmp_path / f"starting-{engine_key(model)}"
         self.process: subprocess.Popen[str] | None = None
         self.extra_env: dict[str, str] = {}
 
@@ -995,6 +996,7 @@ class ManagedEngine:
             "VLM_HEALTH_POLL_SECONDS": "0.2",
             "VLM_HEALTH_TIMEOUT_SECONDS": "30",
             "FAKE_VLLM_EVENT_LOG": str(self.log),
+            "VIF_STARTING_FILE": str(self.starting_file),
             **self.extra_env,
         }
         self.process = subprocess.Popen(
@@ -1099,6 +1101,36 @@ class TestWatchLoop:
         # The stub is gone: the engine owns the port again.
         assert http_get(engine.port, "/vif/parked")[0] == 404
         assert http_get(engine.port, "/health")[0] == 200
+
+    def test_a_start_from_parked_is_marked_until_the_engine_answers(
+        self, engine: ManagedEngine
+    ) -> None:
+        """The stub gives up the port before vLLM opens it; for that stretch the
+        starting file is what keeps the container healthy."""
+        engine.extra_env["FAKE_VLLM_READY_AFTER"] = "3"
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert not engine.starting_file.exists()
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: engine.events() == ["start"])
+        assert engine.starting_file.read_text(encoding="utf-8") == "acme/model-a\n"
+        assert until(lambda: engine.ready_marker.exists())
+        assert not engine.starting_file.exists()
+        assert http_get(engine.port, "/health")[0] == 200
+
+    def test_a_boot_is_never_marked_as_starting(self, engine: ManagedEngine) -> None:
+        """At boot the healthcheck's start period covers the load; marking it
+        would call an engine healthy before it ever loaded."""
+        engine.extra_env["FAKE_VLLM_READY_AFTER"] = "3"
+        engine.starting_file.write_text("left by a launcher that died\n")
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.events() == ["start"])
+        assert not engine.starting_file.exists()
+        assert until(lambda: engine.ready_marker.exists())
+        assert not engine.starting_file.exists()
 
     def test_parked_to_asleep(self, engine: ManagedEngine) -> None:
         engine.spec(desired_state="parked", active=False)

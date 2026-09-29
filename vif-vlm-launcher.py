@@ -130,6 +130,11 @@ MANAGED PATH:
                                that never arrives cannot keep the pool from
                                serving.
   VIF_ENGINE_LOG_FILE          Override for where the child's output is teed.
+  VIF_STARTING_FILE            Present while an engine brought back from parked
+                               is starting (default /tmp/vif-engine-starting):
+                               the stub has given up the port and vLLM has not
+                               opened it yet, so the container healthcheck
+                               accepts this file in place of /health.
 
 BOTH PATHS:
   VIF_ENGINE_MIDDLEWARE        ASGI middleware the deployment mounts into the
@@ -153,8 +158,10 @@ couple of seconds; a spec whose content has not changed costs one read):
            in a second or two.
   parked   no engine process at all -- the weights are on disk and this script
            answers /health itself, so the container stays healthy. Back in a
-           cold start (a minute or two). This is the cold tier, and the only
-           state available to an engine that cannot be woken from sleep.
+           cold start (a minute or two), during which nothing answers /health
+           and VIF_STARTING_FILE keeps the container healthy instead. This is
+           the cold tier, and the only state available to an engine that
+           cannot be woken from sleep.
 
 VIS moves an engine between those three by rewriting its spec; nothing else
 is needed on this side. A sleep or a wake that fails is not retried until the
@@ -248,7 +255,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-29.1"
+LAUNCHER_REVISION: str = "2026-09-29.2"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -264,6 +271,8 @@ ENGINE_LOADING_DIRNAME: str = "loading"
 ENGINE_CRASHED_DIRNAME: str = "crashed"
 ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
+# Inside the container, not on the state volume: the healthcheck reads it.
+DEFAULT_STARTING_FILE: str = "/tmp/vif-engine-starting"
 DEFAULT_SPEC_TIMEOUT_SECONDS: int = 300
 # How often the desired state is re-read. Fast enough that a switch is not
 # noticeably slower for it, slow enough to be free.
@@ -1042,6 +1051,9 @@ class Engine:
         # crash digest already announced as the reason for staying parked.
         self._load_digest: str = ""
         self._crash_announced: str = ""
+        self._starting_file: str = env_value(
+            environ, "VIF_STARTING_FILE", DEFAULT_STARTING_FILE
+        )
 
     # -- signals ------------------------------------------------------------
 
@@ -1247,6 +1259,13 @@ class Engine:
 
     def clear_awake(self) -> None:
         self._remove_marker(self.plan.awake_file)
+
+    def mark_starting(self) -> None:
+        """Publish "starting from parked", which the container healthcheck reads."""
+        self._write_marker(self._starting_file, "starting")
+
+    def clear_starting(self) -> None:
+        self._remove_marker(self._starting_file)
 
     # -- the load that died -------------------------------------------------
 
@@ -1723,8 +1742,13 @@ class Engine:
             self._stub.start(self.plan.port, self.plan.model)
             return None
         if self.state is DesiredState.PARKED:
+            # From here until vLLM answers /health, nothing answers it.
+            self.mark_starting()
             self._stub.stop()
-            return self.start_engine(target)
+            try:
+                return self.start_engine(target)
+            finally:
+                self.clear_starting()
         self.move_hot(target)
         return None
 
@@ -1743,6 +1767,7 @@ class Engine:
         )
         self.clear_ready()
         self.clear_awake()
+        self.clear_starting()
         target: DesiredState = self.poll_desired()
         self.reconcile_dead_load(was_loaded)
         if (
@@ -1772,6 +1797,7 @@ class Engine:
     def close(self) -> None:
         self.clear_awake()
         self.clear_ready()
+        self.clear_starting()
         self.clear_loading()
         self.release_load_lock()
         self._stub.stop()
