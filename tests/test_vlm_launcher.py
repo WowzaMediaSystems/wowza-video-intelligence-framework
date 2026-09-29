@@ -37,6 +37,7 @@ import pytest
 REPO: Path = Path(__file__).resolve().parent.parent
 LAUNCHER: Path = REPO / "vif-vlm-launcher.py"
 FAKE_VLLM: Path = Path(__file__).resolve().parent / "fake_vllm.py"
+FAKE_NVML: Path = Path(__file__).resolve().parent / "fake_nvml"
 VLM_ENV: Path = REPO / "vlm-env"
 
 XGRAMMAR: list[str] = [
@@ -931,8 +932,9 @@ def put_spec(state_dir: Path, model: str, **overrides: Any) -> Path:
         "generated_by": "VIS 1.1.0",
         "generated_at": "2026-09-22T12:00:00Z",
     }
+    extra_args: list[str] = overrides.pop("extra_args", [])
     document.update(overrides)
-    document["args"] = [f"--port={document['port']}"]
+    document["args"] = [f"--port={document['port']}", *extra_args]
     path: Path = state_dir / "engines" / f"{engine_key(model)}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path = path.with_suffix(".json.tmp")
@@ -971,6 +973,14 @@ class ManagedEngine:
     @property
     def crashed_marker(self) -> Path:
         return self.state_dir / "crashed" / engine_key(self.model)
+
+    @property
+    def sized_marker(self) -> Path:
+        return self.state_dir / "sized" / engine_key(self.model)
+
+    def sized(self) -> dict[str, Any]:
+        record: dict[str, Any] = json.loads(self.sized_marker.read_text("utf-8"))
+        return record
 
     def spec_digest(self) -> str:
         spec: Path = self.state_dir / "engines" / f"{engine_key(self.model)}.json"
@@ -2118,3 +2128,380 @@ class TestSharedDirectories:
         ]
         launcher.make_shared_dir(volume / "crashed")
         assert len(calls) == 2
+
+
+# The spec VIS writes for Gemma on the gate's L40S: a modelled 0.74, and the
+# inputs to size it again at load.
+GEMMA_SIZING: dict[str, Any] = {
+    "max_utilization": 0.74,
+    "headroom_mib": 1024,
+    "extra_mib": 5893,
+    "weights_mib": 8202,
+}
+
+
+class TestLoadSizingArithmetic:
+    """The formula VIS decides, as this script evaluates it."""
+
+    SIZING: Any = launcher.LoadSizing(
+        max_utilization=0.74, headroom_mib=1024, extra_mib=5893, weights_mib=8202
+    )
+
+    def test_beside_resident_sleepers_it_takes_what_is_free(self) -> None:
+        sized: Any = launcher.size_load(
+            "google/gemma-3-4b-it",
+            self.SIZING,
+            launcher.CardMemory(free_mib=39331, total_mib=45486),
+        )
+        assert (sized.approved, sized.utilization, sized.usable_mib) == (
+            True,
+            0.71,
+            32414,
+        )
+        assert sized.predicted_peak_mib == 39213
+        assert sized.reason == (
+            "google/gemma-3-4b-it loads at utilization 0.71 of 45486 MiB (39331 "
+            "MiB free as CUDA reports it - 1024 MiB cold-load headroom - 5893 MiB "
+            "the engine holds outside its pool = 32414 MiB for its pool); "
+            "predicted peak 39213 MiB."
+        )
+
+    def test_an_empty_card_gets_the_cap(self) -> None:
+        sized: Any = launcher.size_load(
+            "google/gemma-3-4b-it",
+            self.SIZING,
+            launcher.CardMemory(free_mib=45486, total_mib=45486),
+        )
+        assert sized.utilization == 0.74
+        assert sized.reason.endswith(
+            "= 38569 MiB for its pool, capped at 0.74); predicted peak 40577 MiB."
+        )
+
+    def test_a_card_too_full_for_the_weights_is_refused(self) -> None:
+        sized: Any = launcher.size_load(
+            "google/gemma-3-4b-it",
+            self.SIZING,
+            launcher.CardMemory(free_mib=15000, total_mib=45486),
+        )
+        assert (sized.approved, sized.usable_mib) == (False, 8083)
+        assert sized.reason == (
+            "google/gemma-3-4b-it cannot be loaded on the card as it is now: "
+            "15000 MiB free as CUDA reports it - 1024 MiB cold-load headroom - "
+            "5893 MiB the engine holds outside its pool = 8083 MiB for its pool, "
+            "less than its 8202 MiB of weights."
+        )
+
+    def test_the_spec_s_inputs_are_read(self) -> None:
+        assert launcher.load_sizing_from_spec(
+            {"load_sizing": GEMMA_SIZING}
+        ) == launcher.LoadSizing(
+            max_utilization=0.74, headroom_mib=1024, extra_mib=5893, weights_mib=8202
+        )
+        assert launcher.load_sizing_from_spec({"load_sizing": None}) is None
+        assert launcher.load_sizing_from_spec({}) is None
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"max_utilization": 0.74},
+            {**GEMMA_SIZING, "max_utilization": 0.0},
+            {**GEMMA_SIZING, "extra_mib": "lots"},
+            "0.74",
+        ],
+    )
+    def test_unusable_inputs_are_a_config_error(self, raw: Any) -> None:
+        with pytest.raises(launcher.ConfigError, match="engine spec load_sizing"):
+            launcher.load_sizing_from_spec({"load_sizing": raw})
+
+    def test_the_utilization_flag_is_replaced_or_added(self) -> None:
+        assert launcher.with_utilization(
+            ["--port=8000", "--gpu-memory-utilization=0.74", "--x"], 0.71
+        ) == ["--port=8000", "--gpu-memory-utilization=0.71", "--x"]
+        assert launcher.with_utilization(["--port=8000"], 0.71) == [
+            "--port=8000",
+            "--gpu-memory-utilization=0.71",
+        ]
+
+
+class TestReadingTheCard:
+    """NVML's free, and its total less the driver's reserve: CUDA's numbers."""
+
+    def _nvml(
+        self, monkeypatch: pytest.MonkeyPatch, cards: dict[int, tuple[int, int, int]]
+    ) -> None:
+        mib: int = 1024 * 1024
+
+        def memory(handle: int, version: int | None = None) -> Any:
+            assert version == 0x02000028
+            free, total, reserved = cards[handle]
+            return types.SimpleNamespace(
+                free=free * mib, total=total * mib, reserved=reserved * mib
+            )
+
+        module: types.ModuleType = types.ModuleType("pynvml")
+        functions: dict[str, Any] = {
+            "nvmlInit": lambda: None,
+            "nvmlShutdown": lambda: None,
+            "nvmlDeviceGetHandleByIndex": lambda index: index,
+            "nvmlDeviceGetMemoryInfo": memory,
+            "nvmlMemory_v2": 0x02000028,
+        }
+        for name, function in functions.items():
+            setattr(module, name, function)
+        monkeypatch.setitem(sys.modules, "pynvml", module)
+
+    def test_one_card_less_its_reserve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._nvml(monkeypatch, {0: (39331, 46068, 582), 1: (100, 46068, 582)})
+        assert launcher.read_card_memory("", 1) == (
+            launcher.CardMemory(free_mib=39331, total_mib=45486),
+            "",
+        )
+
+    def test_the_pinned_cards_and_the_least_of_each(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._nvml(
+            monkeypatch,
+            {0: (100, 46068, 582), 2: (40000, 46068, 582), 3: (39000, 46068, 600)},
+        )
+        assert launcher.read_card_memory("2,3", 2) == (
+            launcher.CardMemory(free_mib=39000, total_mib=45468),
+            "",
+        )
+
+    def test_no_pynvml_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setitem(sys.modules, "pynvml", None)
+        assert launcher.read_card_memory("", 1) == (None, "pynvml is not available")
+
+
+class TestEveryLoadIsSizedFromTheCard:
+    """Under the load lock, just before vLLM starts, from the card as it is."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self) -> Any:
+        self._engines: list[ManagedEngine] = []
+        yield
+        for engine in self._engines:
+            if engine.process is not None:
+                engine.stop()
+
+    def _engine(
+        self,
+        tmp_path: Path,
+        stub_path: Path,
+        state_dir: Path,
+        model: str,
+        card: Path | None,
+    ) -> ManagedEngine:
+        engine: ManagedEngine = ManagedEngine(tmp_path, stub_path, state_dir, model)
+        engine.extra_env["PYTHONPATH"] = str(FAKE_NVML)
+        if card is not None:
+            engine.extra_env["FAKE_NVML_MEMORY"] = str(card)
+        self._engines.append(engine)
+        return engine
+
+    @staticmethod
+    def _card(tmp_path: Path, free_mib: int) -> Path:
+        card: Path = tmp_path / "card.json"
+        card.write_text(
+            json.dumps({"free_mib": free_mib, "total_mib": 45486, "reserved_mib": 582}),
+            encoding="utf-8",
+        )
+        return card
+
+    @staticmethod
+    def _started_utilization(engine: ManagedEngine) -> list[str]:
+        return [
+            arg
+            for event in events(engine.log)
+            if event["event"] == "start"
+            for arg in event["argv"]
+            if arg.startswith("--gpu-memory-utilization=")
+        ]
+
+    def test_a_load_runs_at_what_the_card_affords(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        engine: ManagedEngine = self._engine(
+            tmp_path,
+            stub_path,
+            state_dir,
+            "google/gemma-3-4b-it",
+            self._card(tmp_path, 39331),
+        )
+        engine.spec(
+            desired_state="asleep",
+            active=False,
+            extra_args=["--gpu-memory-utilization=0.74"],
+            load_sizing=GEMMA_SIZING,
+        )
+        engine.start()
+        assert until(lambda: engine.events() == ["start", "sleep"])
+        assert self._started_utilization(engine) == ["--gpu-memory-utilization=0.71"]
+        record: dict[str, Any] = engine.sized()
+        assert abs(record.pop("at") - time.time()) < 60
+        assert record == {
+            "spec_digest": engine.spec_digest(),
+            "decision_digest": engine.decision_digest(),
+            "max_utilization": 0.74,
+            "headroom_mib": 1024,
+            "extra_mib": 5893,
+            "weights_mib": 8202,
+            "measured": True,
+            "approved": True,
+            "utilization": 0.71,
+            "free_mib": 39331,
+            "total_mib": 45486,
+            "usable_mib": 32414,
+            "predicted_peak_mib": 39213,
+            "reason": (
+                "google/gemma-3-4b-it loads at utilization 0.71 of 45486 MiB "
+                "(39331 MiB free as CUDA reports it - 1024 MiB cold-load headroom "
+                "- 5893 MiB the engine holds outside its pool = 32414 MiB for its "
+                "pool); predicted peak 39213 MiB."
+            ),
+        }
+        assert (
+            "[vlm-launcher] load sized from the card: google/gemma-3-4b-it loads "
+            "at utilization 0.71 of 45486 MiB"
+        ) in engine.stop()
+
+    def test_an_empty_card_runs_the_spec_s_own_value(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        engine: ManagedEngine = self._engine(
+            tmp_path,
+            stub_path,
+            state_dir,
+            "google/gemma-3-4b-it",
+            self._card(tmp_path, 45486),
+        )
+        engine.spec(
+            desired_state="awake",
+            extra_args=["--gpu-memory-utilization=0.74"],
+            load_sizing=GEMMA_SIZING,
+        )
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+        assert self._started_utilization(engine) == ["--gpu-memory-utilization=0.74"]
+        assert (engine.sized()["utilization"], engine.sized()["free_mib"]) == (
+            0.74,
+            45486,
+        )
+
+    def test_each_sleeper_is_measured_after_the_one_before_it(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        """Both specs land at once, as at boot; the second load finds the
+        first one's residual on the card."""
+        lock: Path = state_dir / "load.lock"
+        card: Path = self._card(tmp_path, 45486)
+        engines: list[ManagedEngine] = [
+            self._engine(tmp_path, stub_path, state_dir, model, card)
+            for model in ("acme/model-a", "acme/model-b")
+        ]
+        for engine in engines:
+            engine.extra_env["FAKE_VLLM_HOLDS_MIB"] = "6000"
+            engine.spec(
+                desired_state="asleep",
+                active=False,
+                load_lock_file=str(lock),
+                extra_args=["--gpu-memory-utilization=0.74"],
+                load_sizing=GEMMA_SIZING,
+            )
+        for engine in engines:
+            engine.start()
+        assert until(
+            lambda: all(engine.events() == ["start", "sleep"] for engine in engines),
+            timeout=60,
+        )
+        first, second = sorted(
+            (engine.sized() for engine in engines), key=lambda record: record["at"]
+        )
+        assert (first["free_mib"], first["utilization"]) == (45486, 0.74)
+        assert (second["free_mib"], second["utilization"]) == (39486, 0.71)
+
+    def test_a_card_too_full_for_the_weights_starts_nothing(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        engine: ManagedEngine = self._engine(
+            tmp_path,
+            stub_path,
+            state_dir,
+            "google/gemma-3-4b-it",
+            self._card(tmp_path, 15000),
+        )
+        engine.spec(
+            desired_state="awake",
+            extra_args=["--gpu-memory-utilization=0.74"],
+            load_sizing=GEMMA_SIZING,
+        )
+        engine.start()
+        assert until(lambda: engine.crashed_marker.exists())
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        refused: str = (
+            "google/gemma-3-4b-it cannot be loaded on the card as it is now: "
+            "15000 MiB free as CUDA reports it - 1024 MiB cold-load headroom - "
+            "5893 MiB the engine holds outside its pool = 8083 MiB for its pool, "
+            "less than its 8202 MiB of weights."
+        )
+        note: dict[str, Any] = engine.crash_note()
+        assert abs(note.pop("at") - time.time()) < 60
+        assert note == {
+            "spec_digest": engine.spec_digest(),
+            "decision_digest": engine.decision_digest(),
+            "exit_code": None,
+            "signal": None,
+            "reason": refused,
+        }
+        record: dict[str, Any] = engine.sized()
+        assert (
+            record["approved"],
+            record["utilization"],
+            record["predicted_peak_mib"],
+            record["reason"],
+        ) == (False, None, None, refused)
+        time.sleep(1)
+        assert engine.events() == []
+        assert not engine.loading_marker.exists()
+        assert f"[vlm-launcher] not loading: {refused}" in engine.stop()
+
+    def test_a_card_that_cannot_be_read_leaves_the_spec_s_value(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        engine: ManagedEngine = self._engine(
+            tmp_path, stub_path, state_dir, "google/gemma-3-4b-it", None
+        )
+        engine.spec(
+            desired_state="awake",
+            extra_args=["--gpu-memory-utilization=0.74"],
+            load_sizing=GEMMA_SIZING,
+        )
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+        assert self._started_utilization(engine) == ["--gpu-memory-utilization=0.74"]
+        record: dict[str, Any] = engine.sized()
+        assert (record["measured"], record["utilization"], record["reason"]) == (
+            False,
+            0.74,
+            "the card could not be read (NVML init failed (Driver Not Loaded)); "
+            "the spec's utilization 0.74 stands",
+        )
+
+    def test_a_spec_without_sizing_runs_its_args_and_leaves_no_record(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        engine: ManagedEngine = self._engine(
+            tmp_path,
+            stub_path,
+            state_dir,
+            "google/gemma-3-4b-it",
+            self._card(tmp_path, 15000),
+        )
+        engine.sized_marker.parent.mkdir(parents=True)
+        engine.sized_marker.write_text("{}", encoding="utf-8")
+        engine.spec(desired_state="awake", extra_args=["--gpu-memory-utilization=0.74"])
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+        assert self._started_utilization(engine) == ["--gpu-memory-utilization=0.74"]
+        assert not engine.sized_marker.exists()

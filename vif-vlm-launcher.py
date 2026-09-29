@@ -205,6 +205,7 @@ THE STATE VOLUME, shared with VIS and every other engine:
   <state dir>/awake/<key>         awake and serving           (written here)
   <state dir>/loading/<key>       a load is under way         (written here)
   <state dir>/crashed/<key>       the last load died          (written here)
+  <state dir>/sized/<key>         how the last load was sized (written here)
   <state dir>/logs/<key>.log      this engine's output        (written here)
 
 The awake marker is created after a load that is not followed by a sleep and
@@ -232,6 +233,26 @@ the spec in force and no `ready/<key>` writes the crash marker itself. A clean
 stop, or a load that succeeds, removes it. These two markers apply to engines
 run from a spec.
 
+EVERY LOAD IS SIZED FROM THE CARD, when the spec carries `load_sizing`. Under
+the load lock, just before vLLM starts, this script reads the card through
+NVML and replaces the spec's --gpu-memory-utilization with
+
+  floor2( (free - headroom_mib - extra_mib) / total ), at most max_utilization
+
+where free and total are what CUDA reports: NVML's free, and NVML's total less
+the driver's reserve (the least of each across the engine's GPUs). The spec's
+utilization was decided when VIS wrote it; at boot every spec lands at once
+and the engines load one after another, each beside the residuals of the ones
+before it, so only this moment sees the card the load will find. VIS decides
+every input and the formula; this is its copy, pinned by VIS's tests. When
+what is left for the pool is less than weights_mib, vLLM is not started: the
+refusal is a crash note carrying the arithmetic, and the engine rests parked
+until its spec asks for something else. A card that cannot be read leaves the
+spec's own utilization. Each load's sizing is logged ("load sized from the
+card: ...") and written to `sized/<key>` as JSON: the digests of the spec it
+sized, `measured`, `approved`, the `utilization` vLLM was started with, the
+card's numbers and the `reason`.
+
 AN EMPTY VALUE COUNTS AS UNSET, for every variable above, as it did for the
 bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
 is a configuration error, exit 78, naming the variable.
@@ -245,6 +266,7 @@ else is vLLM's own.
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import signal
@@ -256,7 +278,7 @@ import time
 import urllib.error
 import urllib.request
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -264,7 +286,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-29.4"
+LAUNCHER_REVISION: str = "2026-09-29.5"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -278,6 +300,7 @@ ENGINE_READY_DIRNAME: str = "ready"
 ENGINE_AWAKE_DIRNAME: str = "awake"
 ENGINE_LOADING_DIRNAME: str = "loading"
 ENGINE_CRASHED_DIRNAME: str = "crashed"
+ENGINE_SIZED_DIRNAME: str = "sized"
 ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
 # Inside the container, not on the state volume: the healthcheck reads it.
@@ -351,6 +374,16 @@ def warn(message: str) -> None:
 
 
 @dataclass(frozen=True)
+class LoadSizing:
+    """The spec's `load_sizing`: VIS's inputs for sizing a load from the card."""
+
+    max_utilization: float
+    headroom_mib: int
+    extra_mib: int
+    weights_mib: int
+
+
+@dataclass(frozen=True)
 class LaunchPlan:
     """Everything needed to run one engine and do its pool duties."""
 
@@ -376,6 +409,12 @@ class LaunchPlan:
     # only: the digest they carry is the spec's.
     loading_dir: str = ""
     crashed_dir: str = ""
+    # Where each load's sizing is recorded, and what it is sized with; None
+    # runs `args` as they are. Spec path only.
+    sized_dir: str = ""
+    load_sizing: LoadSizing | None = None
+    gpu_ids: str = ""
+    tensor_parallel_size: int = 1
     # The other engines' specs, which the boot order reads. Spec path only.
     engines_dir: str = ""
     log_file: str = ""
@@ -416,6 +455,13 @@ class LaunchPlan:
         if not self.crashed_dir:
             return ""
         return str(Path(self.crashed_dir) / engine_key(self.model))
+
+    @property
+    def sized_file(self) -> str:
+        """This engine's load-sizing record, or "" when there is nowhere."""
+        if not self.sized_dir:
+            return ""
+        return str(Path(self.sized_dir) / engine_key(self.model))
 
     @property
     def watches(self) -> bool:
@@ -619,6 +665,169 @@ def warn_if_sleep_mode_cannot_work() -> None:
     )
 
 
+# ── load sizing: the spec's inputs, against the card as it is now ─────────
+
+UTILIZATION_FLAG: str = "--gpu-memory-utilization="
+BYTES_PER_MIB: int = 1024 * 1024
+_UTILIZATION_DECIMALS: int = 2
+
+
+@dataclass(frozen=True)
+class CardMemory:
+    """The card as CUDA sees it: NVML's free, and its total less the reserve."""
+
+    free_mib: int
+    total_mib: int
+
+
+@dataclass(frozen=True)
+class SizedLoad:
+    """One load sized from the card, in the same terms VIS's `size_load` uses."""
+
+    approved: bool
+    utilization: float
+    usable_mib: int
+    predicted_peak_mib: int
+    reason: str
+
+
+def load_sizing_from_spec(document: dict[str, Any]) -> LoadSizing | None:
+    """The spec's `load_sizing`, or None when it has none (null or absent)."""
+    raw: Any = document.get("load_sizing")
+    if raw is None:
+        return None
+    try:
+        sizing: LoadSizing = LoadSizing(
+            max_utilization=float(raw["max_utilization"]),
+            headroom_mib=int(raw["headroom_mib"]),
+            extra_mib=int(raw["extra_mib"]),
+            weights_mib=int(raw["weights_mib"]),
+        )
+    except (TypeError, KeyError, ValueError):
+        raise ConfigError(f"engine spec load_sizing={raw!r} is not usable.") from None
+    if not 0.0 < sizing.max_utilization <= 1.0:
+        raise ConfigError(
+            f"engine spec load_sizing max_utilization={sizing.max_utilization} "
+            "is not in (0, 1]."
+        )
+    return sizing
+
+
+def size_load(model: str, sizing: LoadSizing, card: CardMemory) -> SizedLoad:
+    """
+    `(free - headroom - extra) / total`, floored to two decimals and capped.
+
+    A copy of the Video Intelligence Service's own, reason string included:
+    VIS decides the formula, and its tests pin this one to it.
+    """
+    usable: int = card.free_mib - sizing.headroom_mib - sizing.extra_mib
+    factor: int = 10**_UTILIZATION_DECIMALS
+    utilization: float = min(
+        math.floor(max(usable, 0) / card.total_mib * factor) / factor,
+        sizing.max_utilization,
+    )
+    # vLLM's own rounding of its request.
+    pool: int = math.ceil(utilization * card.total_mib)
+    predicted: int = pool + sizing.extra_mib + sizing.headroom_mib
+    arithmetic: str = (
+        f"{card.free_mib} MiB free as CUDA reports it - "
+        f"{sizing.headroom_mib} MiB cold-load headroom - {sizing.extra_mib} MiB "
+        f"the engine holds outside its pool = {usable} MiB for its pool"
+    )
+    approved: bool = usable >= sizing.weights_mib
+    reason: str
+    if not approved:
+        reason = (
+            f"{model} cannot be loaded on the card as it is now: "
+            f"{arithmetic}, less than its {sizing.weights_mib} MiB of weights."
+        )
+    else:
+        cap: str = (
+            f", capped at {sizing.max_utilization:g}"
+            if utilization >= sizing.max_utilization
+            else ""
+        )
+        reason = (
+            f"{model} loads at utilization {utilization:g} of "
+            f"{card.total_mib} MiB ({arithmetic}{cap}); predicted peak "
+            f"{predicted} MiB."
+        )
+    return SizedLoad(
+        approved=approved,
+        utilization=utilization,
+        usable_mib=usable,
+        predicted_peak_mib=predicted,
+        reason=reason,
+    )
+
+
+def read_card_memory(gpu_ids: str, shards: int) -> tuple[CardMemory | None, str]:
+    """
+    The engine's card(s) right now, or None and why not.
+
+    NVML's v2 memory info gives what vLLM's CUDA sees without a CUDA context
+    of our own: its free matches CUDA's, and CUDA's total is NVML's less the
+    driver's reserve. Across several GPUs, the least of each.
+    """
+    try:
+        import pynvml
+    except ImportError:
+        return None, "pynvml is not available"
+    try:
+        pynvml.nvmlInit()
+    except Exception as exc:  # nvmlInit raises NVMLError, which needs the import
+        return None, f"NVML init failed ({exc})"
+    try:
+        cards: list[CardMemory] = []
+        for index in _gpu_indices(gpu_ids, shards):
+            handle: Any = pynvml.nvmlDeviceGetHandleByIndex(index)
+            memory: Any = pynvml.nvmlDeviceGetMemoryInfo(
+                handle, version=pynvml.nvmlMemory_v2
+            )
+            cards.append(
+                CardMemory(
+                    free_mib=int(memory.free) // BYTES_PER_MIB,
+                    total_mib=(int(memory.total) - int(memory.reserved))
+                    // BYTES_PER_MIB,
+                )
+            )
+    except Exception as exc:
+        return None, f"NVML could not read the card's memory ({exc})"
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+    if not cards:
+        return None, "no GPU to read"
+    return (
+        CardMemory(
+            free_mib=min(card.free_mib for card in cards),
+            total_mib=min(card.total_mib for card in cards),
+        ),
+        "",
+    )
+
+
+def utilization_in(args: list[str]) -> float | None:
+    """The --gpu-memory-utilization the spec's args carry, if any."""
+    for arg in args:
+        if arg.startswith(UTILIZATION_FLAG):
+            try:
+                return float(arg.removeprefix(UTILIZATION_FLAG))
+            except ValueError:
+                return None
+    return None
+
+
+def with_utilization(args: list[str], utilization: float) -> list[str]:
+    """`args` with its --gpu-memory-utilization replaced, or added."""
+    flag: str = f"{UTILIZATION_FLAG}{utilization}"
+    if not any(arg.startswith(UTILIZATION_FLAG) for arg in args):
+        return [*args, flag]
+    return [flag if arg.startswith(UTILIZATION_FLAG) else arg for arg in args]
+
+
 # ── source 1: the engine spec VIS writes ───────────────────────────────────
 
 
@@ -766,6 +975,10 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         awake_dir=str(Path(state_dir) / ENGINE_AWAKE_DIRNAME) if state_dir else "",
         loading_dir=str(Path(state_dir) / ENGINE_LOADING_DIRNAME) if state_dir else "",
         crashed_dir=str(Path(state_dir) / ENGINE_CRASHED_DIRNAME) if state_dir else "",
+        sized_dir=str(Path(state_dir) / ENGINE_SIZED_DIRNAME) if state_dir else "",
+        load_sizing=load_sizing_from_spec(document),
+        gpu_ids=gpu_ids,
+        tensor_parallel_size=spec_int(document, "tensor_parallel_size", 1),
         engines_dir=str(Path(spec_file).parent) if spec_file else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=str(document.get("load_lock_file") or ""),
@@ -1556,6 +1769,85 @@ class Engine:
             self._crash_announced = digest
         return True
 
+    # -- load sizing --------------------------------------------------------
+
+    def size_load(self) -> list[str] | None:
+        """
+        The command this load runs, sized from the card as it is now.
+
+        Called under the load lock, so no other engine's load is in flight and
+        what is free is what vLLM will find. None when the card cannot hold
+        the weights: nothing is started, and the refusal is a crash note, so
+        the engine rests parked until its spec asks for something else.
+        """
+        sizing: LoadSizing | None = self.plan.load_sizing
+        if sizing is None:
+            self._remove_marker(self.plan.sized_file)
+            return self.plan.argv
+        record: dict[str, Any] = {
+            "spec_digest": self._decision_digest(),
+            "decision_digest": self._decision,
+            "max_utilization": sizing.max_utilization,
+            "headroom_mib": sizing.headroom_mib,
+            "extra_mib": sizing.extra_mib,
+            "weights_mib": sizing.weights_mib,
+        }
+        card, why = read_card_memory(self.plan.gpu_ids, self.plan.tensor_parallel_size)
+        if card is None:
+            standing: float | None = utilization_in(self.plan.args)
+            reason: str = (
+                f"the card could not be read ({why}); the spec's utilization "
+                f"{standing:g} stands"
+                if standing is not None
+                else f"the card could not be read ({why}); vLLM's default stands"
+            )
+            warn(f"{reason}.")
+            self._write_json_marker(
+                self.plan.sized_file,
+                {
+                    **record,
+                    "measured": False,
+                    "approved": True,
+                    "utilization": standing,
+                    "reason": reason,
+                    "at": time.time(),
+                },
+                "load sizing",
+            )
+            return self.plan.argv
+        sized: SizedLoad = size_load(self.plan.model, sizing, card)
+        self._write_json_marker(
+            self.plan.sized_file,
+            {
+                **record,
+                "measured": True,
+                "approved": sized.approved,
+                "utilization": sized.utilization if sized.approved else None,
+                "free_mib": card.free_mib,
+                "total_mib": card.total_mib,
+                "usable_mib": sized.usable_mib,
+                "predicted_peak_mib": (
+                    sized.predicted_peak_mib if sized.approved else None
+                ),
+                "reason": sized.reason,
+                "at": time.time(),
+            },
+            "load sizing",
+        )
+        if not sized.approved:
+            self.record_crash(
+                self._decision_digest(), self._decision, None, None, sized.reason
+            )
+            warn(
+                f"not loading: {sized.reason} Staying parked until its spec asks "
+                "for something else."
+            )
+            return None
+        log(f"load sized from the card: {sized.reason}")
+        return replace(
+            self.plan, args=with_utilization(self.plan.args, sized.utilization)
+        ).argv
+
     # -- health -------------------------------------------------------------
 
     def wait_for_health(self) -> int:
@@ -1777,12 +2069,12 @@ class Engine:
         """
         return {**self.environ, **self.plan.env}
 
-    def start(self) -> None:
+    def start(self, argv: list[str]) -> None:
         if not self.plan.log_file:
-            self.child = subprocess.Popen(self.plan.argv, env=self.child_env)
+            self.child = subprocess.Popen(argv, env=self.child_env)
             return
         self.child = subprocess.Popen(
-            self.plan.argv,
+            argv,
             env=self.child_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1865,8 +2157,13 @@ class Engine:
             self.release_load_lock()
             self.hold_parked()
             return None
+        argv: list[str] | None = self.size_load()
+        if argv is None:
+            self.release_load_lock()
+            self.hold_parked()
+            return None
         self.mark_loading()
-        self.start()
+        self.start(argv)
         # A stop that landed while the child was being spawned found no child
         # to forward to; hand it over now.
         if self.terminating and not self._forwarded and self.child is not None:
@@ -2015,6 +2312,10 @@ def describe(plan: LaunchPlan) -> dict[str, Any]:
             "awake_file": plan.awake_file,
             "log_file": plan.log_file,
             "load_lock_file": plan.load_lock_file,
+            "load_sizing": (
+                None if plan.load_sizing is None else asdict(plan.load_sizing)
+            ),
+            "sized_file": plan.sized_file,
             "health_timeout_seconds": plan.health_timeout_seconds,
             "watches": plan.watches,
             "supervised": plan.needs_supervision,

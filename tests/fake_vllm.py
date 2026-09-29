@@ -16,11 +16,15 @@ Knobs (env):
                            as an engine that runs out of memory while loading
   FAKE_VLLM_CRASH_CODE     the exit code of that crash (1)
   FAKE_VLLM_CRASH_SIGNAL   a signal number to die by instead of exiting
+  FAKE_VLLM_HOLDS_MIB      MiB taken off the fake card's free memory (the
+                           FAKE_NVML_MEMORY file) at startup, as the residual
+                           a real engine leaves on the card
 
 It also answers /is_sleeping, /sleep and /wake_up, so the launcher's desired
 state can be read back the way VIS reads it.
 """
 
+import fcntl
 import json
 import os
 import signal
@@ -93,6 +97,20 @@ class Handler(BaseHTTPRequestHandler):
         self._respond(404)
 
 
+def hold_memory() -> None:
+    held: str = os.environ.get("FAKE_VLLM_HOLDS_MIB", "")
+    card_file: str = os.environ.get("FAKE_NVML_MEMORY", "")
+    if not held or not card_file:
+        return
+    with open(card_file, "r+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        card: dict[str, int] = json.loads(handle.read())
+        card["free_mib"] -= int(held)
+        handle.seek(0)
+        handle.truncate()
+        handle.write(json.dumps(card))
+
+
 def on_sigterm(_signum: int, _frame: FrameType | None) -> None:
     record("sigterm", model=MODEL)
     sys.exit(EXIT_CODE)
@@ -111,6 +129,7 @@ if __name__ == "__main__":
         if name
     }
     record("start", model=MODEL, argv=argv, port=port, env=recorded)
+    hold_memory()
     for line in os.environ.get("FAKE_VLLM_STDOUT", "").splitlines():
         print(line, flush=True)
     if os.environ.get("FAKE_VLLM_IGNORE_SIGTERM", "") == "1":
