@@ -204,7 +204,8 @@ THE STATE VOLUME, shared with VIS and every other engine:
   <state dir>/ready/<key>         loaded, awake or asleep     (written here)
   <state dir>/awake/<key>         awake and serving           (written here)
   <state dir>/loading/<key>       a load is under way         (written here)
-  <state dir>/crashed/<key>       the last load died          (written here)
+  <state dir>/crashed/<key>       the last load died, or was  (written here)
+                                  refused before it started
   <state dir>/phase/<key>         where a load in progress is (written here)
   <state dir>/sized/<key>         how the last load was sized (written here)
   <state dir>/logs/<key>.log      this engine's output        (written here)
@@ -265,8 +266,9 @@ and the engines load one after another, each beside the residuals of the ones
 before it, so only this moment sees the card the load will find. VIS decides
 every input and the formula; this is its copy, pinned by VIS's tests. When
 what is left for the pool is less than weights_mib, vLLM is not started: the
-refusal is a crash note carrying the arithmetic, and the engine rests parked
-until its spec asks for something else. A card that cannot be read leaves the
+refusal is a crash note carrying the arithmetic and `sizing_refused: true`, so
+that it reads as a refusal for memory rather than a load that died, and the
+engine rests parked until its spec asks for something else. A card that cannot be read leaves the
 spec's own utilization. Each load's sizing is logged ("load sized from the
 card: ...") and written to `sized/<key>` as JSON: the digests of the spec it
 sized, `measured`, `approved`, the `utilization` vLLM was started with, the
@@ -1342,6 +1344,19 @@ def _decision_of(path: str) -> str:
     return decision_digest(document) if isinstance(document, dict) else ""
 
 
+def last_load_words(model: str, note: dict[str, Any]) -> str:
+    """What a crash note says the last load did: died, or was refused."""
+    reason: str = str(note.get("reason") or "no reason recorded")
+    if note.get("sizing_refused"):
+        return (
+            f"the last load of {model} was refused for lack of free memory on "
+            f"the card, and nothing was started ({reason})"
+        )
+    if note.get("access_problem"):
+        return f"the last load of {model} was refused ({reason})"
+    return f"the last load of {model} died ({reason})"
+
+
 def crash_matches(note: dict[str, Any], spec_digest: str, decision: str) -> bool:
     """
     Whether a crash note is about the spec now in force.
@@ -1877,6 +1892,7 @@ class Engine:
         signal_number: int | None,
         reason: str,
         access_problem: AccessProblem | None = None,
+        sizing_refused: bool = False,
     ) -> None:
         document: dict[str, Any] = {
             "spec_digest": digest,
@@ -1888,6 +1904,8 @@ class Engine:
         }
         if access_problem is not None:
             document["access_problem"] = access_problem.value
+        if sizing_refused:
+            document["sizing_refused"] = True
         self._write_json_marker(self.plan.crashed_file, document, "crashed")
 
     # -- the phase of a load ------------------------------------------------
@@ -2050,9 +2068,8 @@ class Engine:
             return False
         if self._crash_announced != digest:
             warn(
-                f"the last load of {self.plan.model} died "
-                f"({marker.get('reason') or 'no reason recorded'}); staying "
-                "parked until its spec asks for something else."
+                f"{last_load_words(self.plan.model, marker)}; staying parked "
+                "until its spec asks for something else."
             )
             self._crash_announced = digest
         return True
@@ -2124,11 +2141,18 @@ class Engine:
         )
         if not sized.approved:
             self.record_crash(
-                self._spec_file_digest(), self._decision, None, None, sized.reason
+                self._spec_file_digest(),
+                self._decision,
+                None,
+                None,
+                sized.reason,
+                sizing_refused=True,
             )
             warn(
-                f"not loading: {sized.reason} Staying parked until its spec asks "
-                "for something else."
+                f"not loading: {sized.reason} Nothing was started, so nothing "
+                "crashed: the card has too little free memory for the weights. "
+                "Staying parked until its spec asks for something else; "
+                "activating the model again sizes it anew."
             )
             return None
         log(f"load sized from the card: {sized.reason}")

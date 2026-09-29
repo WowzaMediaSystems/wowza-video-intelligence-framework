@@ -1937,6 +1937,35 @@ def launch(env: dict[str, str], output: Path, stub_path: Path) -> subprocess.Pop
     )
 
 
+class TestTheLastLoadIsNamedForWhatItWas:
+    """A crash note stands for a load that died, or one refused before it started."""
+
+    def test_a_load_that_died(self) -> None:
+        assert launcher.last_load_words(
+            "acme/model-a", {"exit_code": 1, "reason": "vLLM exited with code 1"}
+        ) == "the last load of acme/model-a died (vLLM exited with code 1)"
+
+    def test_a_load_refused_for_memory(self) -> None:
+        assert launcher.last_load_words(
+            "acme/model-a",
+            {"sizing_refused": True, "reason": "8083 MiB for its pool"},
+        ) == (
+            "the last load of acme/model-a was refused for lack of free memory "
+            "on the card, and nothing was started (8083 MiB for its pool)"
+        )
+
+    def test_a_load_refused_for_its_license(self) -> None:
+        assert launcher.last_load_words(
+            "acme/model-a",
+            {"access_problem": "token_missing", "reason": "no HF_TOKEN is set"},
+        ) == "the last load of acme/model-a was refused (no HF_TOKEN is set)"
+
+    def test_a_note_with_no_reason(self) -> None:
+        assert launcher.last_load_words("acme/model-a", {}) == (
+            "the last load of acme/model-a died (no reason recorded)"
+        )
+
+
 class TestStopSignals:
     """A stop that arrives before there is an engine still stops the container."""
 
@@ -2929,6 +2958,7 @@ class TestEveryLoadIsSizedFromTheCard:
             "exit_code": None,
             "signal": None,
             "reason": refused,
+            "sizing_refused": True,
         }
         record: dict[str, Any] = engine.sized()
         assert (
@@ -2940,7 +2970,23 @@ class TestEveryLoadIsSizedFromTheCard:
         time.sleep(1)
         assert engine.events() == []
         assert not engine.loading_marker.exists()
-        assert f"[vlm-launcher] not loading: {refused}" in engine.stop()
+        output: str = engine.stop()
+        assert (
+            f"[vlm-launcher] not loading: {refused} Nothing was started, so "
+            "nothing crashed: the card has too little free memory for the "
+            "weights. Staying parked until its spec asks for something else; "
+            "activating the model again sizes it anew."
+        ) in output
+
+        # What a restart finds: the refusal, not a load that died.
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert (
+            "[vlm-launcher] the last load of google/gemma-3-4b-it was refused "
+            "for lack of free memory on the card, and nothing was started "
+            f"({refused}); staying parked until its spec asks for something else."
+        ) in engine.stop()
+        assert engine.events() == []
 
     def test_a_card_that_cannot_be_read_leaves_the_spec_s_value(
         self, tmp_path: Path, stub_path: Path, state_dir: Path
