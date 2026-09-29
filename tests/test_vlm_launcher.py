@@ -1338,6 +1338,118 @@ class TestLoadGuard:
         assert engine.events() == ["start", "sleep", "wake", "sigterm"]
 
 
+def children_of(pid: int) -> list[int]:
+    """The live child processes of `pid`, read from /proc."""
+    found: list[int] = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields: list[str] = (
+                (entry / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+            )
+        except OSError:
+            continue
+        if int(fields[1]) == pid:
+            found.append(int(entry.name))
+    return found
+
+
+def kill_outright(engine: ManagedEngine) -> None:
+    """SIGKILL a launcher and its engine, as Docker does once its grace runs out."""
+    assert engine.process is not None
+    children: list[int] = children_of(engine.process.pid)
+    engine.process.kill()
+    engine.process.wait(timeout=30)
+    for child in children:
+        try:
+            os.kill(child, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+class TestAStopClearsTheMarkers:
+    """A stop that outlasts the container's grace period ends in a SIGKILL, so
+    the markers go when the stop arrives, not when the engine has exited."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self) -> Any:
+        self._engines: list[ManagedEngine] = []
+        yield
+        for engine in self._engines:
+            if engine.process is not None and engine.process.poll() is None:
+                kill_outright(engine)
+
+    def _engine(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path, model: str
+    ) -> ManagedEngine:
+        engine: ManagedEngine = ManagedEngine(tmp_path, stub_path, state_dir, model)
+        self._engines.append(engine)
+        return engine
+
+    def test_the_markers_are_gone_while_the_engine_is_still_stopping(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        engine: ManagedEngine = self._engine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        # Deaf to SIGTERM: its launcher keeps waiting, as on a slow shutdown.
+        engine.extra_env["FAKE_VLLM_IGNORE_SIGTERM"] = "1"
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.awake_marker.exists())
+        assert engine.ready_marker.exists()
+
+        assert engine.process is not None
+        engine.process.send_signal(signal.SIGTERM)
+        assert until(lambda: not engine.ready_marker.exists(), timeout=5)
+        assert not engine.awake_marker.exists()
+        assert engine.process.poll() is None
+
+        kill_outright(engine)
+        assert not engine.ready_marker.exists()
+        assert not engine.awake_marker.exists()
+
+    def test_the_serving_engine_waits_for_a_neighbour_that_is_being_restarted(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        """A restart of the whole pool: the neighbour is still stopping when
+        the serving engine's new launcher looks at the pool."""
+        lock: Path = state_dir / "load.lock"
+        active: ManagedEngine = self._engine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        neighbour: ManagedEngine = self._engine(
+            tmp_path, stub_path, state_dir, "acme/model-b"
+        )
+        active.spec(desired_state="awake", load_lock_file=str(lock))
+        neighbour.spec(desired_state="asleep", active=False, load_lock_file=str(lock))
+        neighbour.extra_env["FAKE_VLLM_IGNORE_SIGTERM"] = "1"
+        neighbour.start()
+        assert until(lambda: neighbour.events() == ["start", "sleep"])
+        assert until(lambda: neighbour.ready_marker.exists())
+
+        assert neighbour.process is not None
+        neighbour.process.send_signal(signal.SIGTERM)
+        time.sleep(1)
+        active.start()
+        time.sleep(2)
+        assert active.events() == []
+
+        kill_outright(neighbour)
+        neighbour.extra_env.pop("FAKE_VLLM_IGNORE_SIGTERM")
+        neighbour.start()
+        assert until(lambda: active.events() == ["start"], timeout=60)
+        assert neighbour.ready_marker.stat().st_mtime < active.started_at()
+        assert neighbour.events() == ["start", "sleep", "start", "sleep"]
+        output: str = active.stop()
+        assert (
+            "[vlm-launcher] the serving engine loads last; waiting for "
+            "acme/model-b to load first..."
+        ) in output
+        assert "[vlm-launcher] the rest of the pool is loaded." in output
+
+
 def launch(env: dict[str, str], output: Path, stub_path: Path) -> subprocess.Popen[str]:
     """A launcher whose output goes to a file, so a test can wait on a line."""
     return subprocess.Popen(
