@@ -255,7 +255,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-29.2"
+LAUNCHER_REVISION: str = "2026-09-29.3"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -507,6 +507,28 @@ def middleware_args(environ: dict[str, str], args: list[str]) -> list[str]:
         named.add(path)
         flags.extend(["--middleware", path])
     return flags
+
+
+def make_shared_dir(directory: Path) -> None:
+    """
+    Create a marker directory owned like the directory it sits in.
+
+    The engines run as root and VIS as the state volume's owner; VIS removes
+    what the launcher writes (a crash note before a new cold start), which
+    needs write access to the directory it sits in. The compose's init step
+    chowns the volume only when the stack starts, so a directory created
+    after that would otherwise stay root's.
+    """
+    if directory.is_dir():
+        return
+    make_shared_dir(directory.parent)
+    directory.mkdir(exist_ok=True)
+    owner: os.stat_result = directory.parent.stat()
+    try:
+        os.chown(directory, owner.st_uid, owner.st_gid)
+    except PermissionError:
+        # Not root: whatever this process creates is its own already.
+        pass
 
 
 def pin_gpus(gpu_ids: str) -> dict[str, str]:
@@ -1229,7 +1251,7 @@ class Engine:
         if not path or self.terminating:
             return
         try:
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            make_shared_dir(Path(path).parent)
             Path(path).write_text(f"{self.plan.model}\n", encoding="utf-8")
         except OSError as exc:
             warn(f"the {what} marker {path} could not be written ({exc}).")
@@ -1289,7 +1311,7 @@ class Engine:
         target: Path = Path(path)
         temporary: Path = target.with_name(f".{target.name}.tmp")
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            make_shared_dir(target.parent)
             temporary.write_text(json.dumps(document) + "\n", encoding="utf-8")
             os.replace(temporary, target)
         except OSError as exc:
@@ -1557,7 +1579,7 @@ class Engine:
         if not self.plan.log_file:
             return None
         try:
-            Path(self.plan.log_file).parent.mkdir(parents=True, exist_ok=True)
+            make_shared_dir(Path(self.plan.log_file).parent)
             return open(self.plan.log_file, "ab", buffering=0)
         except OSError as exc:
             if not self._log_warned:
