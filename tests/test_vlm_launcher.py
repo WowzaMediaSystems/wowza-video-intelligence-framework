@@ -1891,3 +1891,28 @@ class TestParkedStubConnections:
         fake_engine(port)
         assert http_get(port, "/vif/parked") == (404, '{"engine": true}')
         assert http_get(port, "/health") == (200, '{"engine": true}')
+
+
+class TestSharedDirectories:
+    def test_a_marker_directory_takes_the_owner_of_the_volume(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """VIS runs as the volume's owner and removes crash notes, so a
+        directory the (root) launcher creates must be the volume owner's."""
+        volume: Path = tmp_path / "vif-state"
+        volume.mkdir()
+        owner: os.stat_result = volume.stat()
+        calls: list[tuple[str, int, int]] = []
+        monkeypatch.setattr(
+            launcher.os,
+            "chown",
+            lambda path, uid, gid: calls.append((str(path), uid, gid)),
+        )
+        launcher.make_shared_dir(volume / "crashed" / "nested")
+        assert (volume / "crashed" / "nested").is_dir()
+        assert calls == [
+            (str(volume / "crashed"), owner.st_uid, owner.st_gid),
+            (str(volume / "crashed" / "nested"), owner.st_uid, owner.st_gid),
+        ]
+        launcher.make_shared_dir(volume / "crashed")
+        assert len(calls) == 2
