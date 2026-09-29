@@ -229,14 +229,16 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
 ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/scene_mystream1"
 ```
 
-6. For VLM analysis, start the full stack with the VLM sidecar and publish a stream matching the default `vlm.*` rule:
+6. To build a custom detector from your own footage, open the **Harvest** tab in the VIF Manager pages: a project takes two example images per class, scores a file from the On-Demand library against them, and queues the closest frames for you to confirm. The confirmed frames export as a folder ready for the [RF-DETR fine-tuning notebook](how_to_finetune_rf_detr_on_detection_dataset.ipynb) in this repository; the resulting `.pth` goes into `./vis/models` and, after a VIS restart, appears as a custom model in the stream configuration. Projects live under `./vis/harvest` (see [VIS deployment](docs/VIS_DEPLOYMENT.md#volumes)).
+
+7. For VLM analysis, start the full stack with the VLM sidecar and publish a stream matching the default `vlm.*` rule:
 
 ```bash
 docker compose --profile default --profile vlm up -d
 ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
 ```
 
-7. Expected output for streams analyzed by VIF:
+8. Expected output for streams analyzed by VIF:
 
    - The `-vi` rendition includes overlays. For example, publish `object_mystream1`, then play `http://localhost/live/object_mystream1-vi/playlist.m3u8` in an HLS player.
    - **VIF live dashboard:** View all incoming live VIF streams at `http://localhost:8088/Home.htm#plugin/server/vif/shm.html`.
@@ -263,7 +265,7 @@ By default, VIF uses RF-DETR models for object detection (Nano, Small, Medium, L
 
 The objects to detect and scene descriptions to analyze can be configured in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or through the WSE REST API, allowing you to tailor detection behavior, routing, and analysis workflows to your deployment.
 
-VIF also supports importing custom RF-DETR-based object detection models, enabling domain-specific detection beyond the default COCO classes.
+VIF also supports importing custom RF-DETR-based object detection models, enabling domain-specific detection beyond the default COCO classes. The **Harvest** tab (step 6 above) is the fastest way to build the labelled frame set such a model is trained on.
 
 To test a custom model, copy your model weights/checkpoint file (`.pth`) into `./vis/models/`, set `checkpoint_path` for the matching stream in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or REST API, and restart VIS so the service loads the new model.
 

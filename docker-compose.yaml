@@ -85,9 +85,10 @@ services:
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
         restart: "no"
-        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}"]
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "/build/harvest", "${LOG_DIR:-/logs}"]
         volumes:
           - ./vis/models:/build/models
+          - ./vis/harvest:/build/harvest
           - ./vis/logs:${LOG_DIR:-/logs}
 
     video-intelligence-service-gpu:
@@ -117,6 +118,15 @@ services:
         # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
         # - TRT_MODELS=object-detection-medium
         # - TRT_MODELS=object-detection-nano,my-custom-model.pth
+        # Frame Harvest: where projects, example banks and exported packages
+        # live (the ./vis/harvest mount below). The upload cap must fit the
+        # largest export package the Engine sends back to VIS; the default
+        # (16 MB) fits examples, not a package.
+          - HARVEST_STORE_DIR=/build/harvest
+          - HARVEST_MAX_UPLOAD_MB=${HARVEST_MAX_UPLOAD_MB:-512}
+        # Optional: cap the examples per class and pin the encoder's GPU
+        # - HARVEST_MAX_EXAMPLES=200
+        # - HARVEST_DEVICE=cuda:0
         # License key string required to run VIS
           - VIS_LICENSE=${VIS_LICENSE}
         # Optional: Enable SSL/TLS for HTTPS and WSS
@@ -146,6 +156,10 @@ services:
         # engines, or write the cache at runtime. Swap the line below for:
         #   - ./vis/models:/build/models:ro
           - ./vis/models:/build/models
+        # Frame Harvest projects, example banks and exports. Always writable:
+        # VIS writes here on every example upload and bank rebuild, so the
+        # read-only hardening above does not extend to this mount.
+          - ./vis/harvest:/build/harvest
         # Optional: Mount SSL certificates for HTTPS/WSS
         # - ./certs:/certs:ro
         # Optional: Mount for RT-DETR v2 model cache (for offline usage).

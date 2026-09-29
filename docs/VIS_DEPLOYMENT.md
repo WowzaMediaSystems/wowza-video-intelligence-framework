@@ -58,6 +58,10 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `NVIDIA_VISIBLE_DEVICES` | `all` | GPU devices to expose (e.g., `0,1`) |
 | `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` | Required NVIDIA capabilities |
 | `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`); default is to scan the `models/` folder |
+| `HARVEST_STORE_DIR` | `./harvest` (`/build/harvest` in the compose stack) | Frame Harvest store: projects, example banks and exported packages. Must be writable; see the `./vis/harvest` mount |
+| `HARVEST_MAX_UPLOAD_MB` | `16` (`512` in the compose stack) | Cap per upload body on the harvest HTTP API: an example image, a judged frame during a bank rebuild, or an export package. Size it for the largest package the Engine sends back |
+| `HARVEST_MAX_EXAMPLES` | `200` | Maximum example images per class |
+| `HARVEST_DEVICE` | — | GPU the harvest encoder loads on (e.g., `cuda:1`); unset picks the first CUDA device |
 | `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
 | `SSL_KEYFILE_PASSWORD` | — | Password for encrypted SSL key |
@@ -69,6 +73,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | Host Path | Container Path | Purpose |
 |---|---|---|
 | `./vis/models` | `/build/models` | Model checkpoints and cached TensorRT engines |
+| `./vis/harvest` | `/build/harvest` | Frame Harvest projects, example banks and exported packages (always writable) |
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
 
@@ -78,8 +83,8 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 
 > **Non-root user (handled automatically).** The image runs as the non-root
 > `vis` user (uid/gid **1001**). A bundled one-shot `vis-init` service `chown`s
-> the `./vis/models` and `./vis/logs` mounts to `1001` before VIS starts, so no
-> manual `chown` is required.
+> the `./vis/models`, `./vis/harvest` and `./vis/logs` mounts to `1001` before
+> VIS starts, so no manual `chown` is required.
 
 > **Hardening — read-only models mount (optional).** VIS deserializes `.pth`
 > files under `./vis/models` at startup, so write access to that host directory
@@ -88,7 +93,14 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 > the directory read-only in `docker-compose.yaml`:
 > `- ./vis/models:/build/models:ro`. Read-only, VIS cannot download weights,
 > build/refresh engines, or write the cache at runtime — so seed everything
-> first.
+> first. The `./vis/harvest` mount stays writable either way: it holds no
+> model weights, only images and vectors, and VIS writes it at runtime.
+
+> **Frame Harvest and shared VIS instances.** Harvest projects are keyed by
+> the shared `VIS_API_KEY`, not by the Engine that created them: two Engines
+> pointed at one VIS see, and can delete, each other's projects. Run one VIS
+> per Engine when that matters. A harvest also loads one more model (the CLIP
+> encoder, about 0.4 GB) on the GPU while its projects are in use.
 
 ## Air-Gapped Deployments
 
