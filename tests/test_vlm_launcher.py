@@ -976,6 +976,10 @@ class ManagedEngine:
         spec: Path = self.state_dir / "engines" / f"{engine_key(self.model)}.json"
         return hashlib.sha256(spec.read_bytes()).hexdigest()
 
+    def decision_digest(self) -> str:
+        spec: Path = self.state_dir / "engines" / f"{engine_key(self.model)}.json"
+        return str(launcher.decision_digest(json.loads(spec.read_text("utf-8"))))
+
     def crash_note(self) -> dict[str, Any]:
         note: dict[str, Any] = json.loads(self.crashed_marker.read_text("utf-8"))
         return note
@@ -1355,6 +1359,67 @@ class TestBootOrder:
             "acme/model-b and taking the load lock anyway."
         ) in output
 
+    def test_a_neighbour_parked_on_its_crash_note_is_not_waited_for(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        active, crashed = self._pool(
+            tmp_path, stub_path, state_dir, ["acme/model-a", "acme/model-b"]
+        )
+        active.spec(desired_state="awake")
+        crashed.spec(desired_state="asleep", active=False)
+        write_crash_note(crashed)
+        # VIS rewrites the whole pool after a rollback; the neighbour's decision
+        # is unchanged, so its launcher still will not load it.
+        crashed.spec(
+            desired_state="asleep", active=False, generated_at="2026-09-22T12:05:00Z"
+        )
+        launched: float = time.time()
+        active.start()
+        assert until(lambda: active.events() == ["start"], timeout=30)
+        assert active.started_at() - launched < 5
+
+    def test_a_spec_that_stops_asking_for_awake_ends_the_wait(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        active, missing = self._pool(
+            tmp_path, stub_path, state_dir, ["acme/model-a", "acme/model-b"]
+        )
+        active.spec(desired_state="awake")
+        missing.spec(desired_state="asleep", active=False)
+        active.start()
+        time.sleep(1.5)
+        assert http_get(active.port, "/health")[0] == 0
+
+        # VIS gave up on this cold start and parked it.
+        active.spec(desired_state="parked", active=False)
+        assert until(lambda: http_get(active.port, "/vif/parked")[0] == 200)
+        # The neighbour it was waiting for arrives: nothing loads on the old ask.
+        missing.ready_marker.parent.mkdir(parents=True, exist_ok=True)
+        missing.ready_marker.write_text("acme/model-b\n", encoding="utf-8")
+        time.sleep(1.5)
+        assert active.events() == []
+
+
+def write_crash_note(engine: "ManagedEngine") -> None:
+    """The note a launcher leaves when a load of the spec now in force died."""
+    spec: Path = engine.state_dir / "engines" / f"{engine_key(engine.model)}.json"
+    engine.crashed_marker.parent.mkdir(parents=True, exist_ok=True)
+    engine.crashed_marker.write_text(
+        json.dumps(
+            {
+                "spec_digest": engine.spec_digest(),
+                "decision_digest": launcher.decision_digest(
+                    json.loads(spec.read_text("utf-8"))
+                ),
+                "exit_code": 1,
+                "signal": None,
+                "at": 1.0,
+                "reason": "vLLM exited with code 1 during its load",
+            }
+        ),
+        encoding="utf-8",
+    )
+
 
 class TestLoadGuard:
     """An engine that should be asleep never loads beside a serving one."""
@@ -1403,6 +1468,55 @@ class TestLoadGuard:
         assert until(lambda: engine.events() == ["start"])
         assert until(lambda: engine.awake_marker.exists())
         assert http_get(engine.port, "/vif/parked")[0] == 404
+
+    def test_a_neighbour_being_woken_counts_as_serving_before_its_marker(
+        self, engine: ManagedEngine, state_dir: Path
+    ) -> None:
+        # VIS writes the neighbour's `awake` spec before its /wake_up and
+        # rewrites the rest of the pool as soon as the call returns; the
+        # neighbour's awake marker only follows at its launcher's next poll.
+        put_spec(state_dir, "acme/model-b", port=free_port(), desired_state="awake")
+        ready: Path = state_dir / "ready" / engine_key("acme/model-b")
+        ready.parent.mkdir(parents=True, exist_ok=True)
+        ready.write_text("acme/model-b\n", encoding="utf-8")
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        time.sleep(2)
+        assert engine.events() == []
+
+        put_spec(
+            state_dir,
+            "acme/model-b",
+            port=free_port(),
+            desired_state="asleep",
+            active=False,
+        )
+        assert until(lambda: engine.events() == ["start", "sleep"])
+
+    def test_a_neighbour_asked_to_serve_but_not_loaded_does_not_guard(
+        self, engine: ManagedEngine, state_dir: Path
+    ) -> None:
+        # The boot order: the engine that should serve waits for this one.
+        put_spec(state_dir, "acme/model-b", port=free_port(), desired_state="awake")
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert until(lambda: engine.events() == ["start", "sleep"])
+
+    def test_a_spec_change_during_the_lock_wait_is_followed(
+        self, engine: ManagedEngine, state_dir: Path
+    ) -> None:
+        lock: Path = state_dir / "load.lock"
+        engine.spec(desired_state="awake", load_lock_file=str(lock))
+        with open(lock, "a", encoding="utf-8") as held:
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+            engine.start()
+            time.sleep(1.5)
+            engine.spec(desired_state="parked", active=False, load_lock_file=str(lock))
+            assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        time.sleep(1.5)
+        assert engine.events() == []
 
     def test_a_stale_awake_marker_is_cleared_at_start(
         self, engine: ManagedEngine, state_dir: Path
@@ -1556,6 +1670,15 @@ class TestTheSpecDigest:
             "a84625f35f4c63cdb74af89d5e2daac6df1b0da9143b676dcafaafc73d4f9a11"
         )
 
+    def test_the_decision_digest_leaves_out_who_wrote_it_and_when(self) -> None:
+        decision: str = launcher.decision_digest(
+            {"model": "x", "generated_by": "VIS 1.2.0", "generated_at": "then"}
+        )
+        assert decision == launcher.decision_digest({"model": "x"})
+        assert decision == (
+            "78b0e11c6754fc9671c2034f4a068d3a0e53c1c22a5a33900dd46bc8cd9136f3"
+        )
+
     def test_the_marker_directories_are_pinned(self) -> None:
         assert launcher.ENGINE_LOADING_DIRNAME == "loading"
         assert launcher.ENGINE_CRASHED_DIRNAME == "crashed"
@@ -1585,6 +1708,7 @@ class TestALoadThatDies:
         engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_CODE": "3"}
         engine.spec(desired_state="awake")
         digest: str = engine.spec_digest()
+        decision: str = engine.decision_digest()
         engine.start()
 
         assert engine.process is not None
@@ -1593,6 +1717,7 @@ class TestALoadThatDies:
         assert abs(note.pop("at") - time.time()) < 60
         assert note == {
             "spec_digest": digest,
+            "decision_digest": decision,
             "exit_code": 3,
             "signal": None,
             "reason": "vLLM exited with code 3 during its load",
@@ -1606,6 +1731,7 @@ class TestALoadThatDies:
         engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_SIGNAL": "9"}
         engine.spec(desired_state="awake")
         digest: str = engine.spec_digest()
+        decision: str = engine.decision_digest()
         engine.start()
 
         assert engine.process is not None
@@ -1614,6 +1740,7 @@ class TestALoadThatDies:
         assert abs(note.pop("at") - time.time()) < 60
         assert note == {
             "spec_digest": digest,
+            "decision_digest": decision,
             "exit_code": None,
             "signal": 9,
             "reason": "vLLM was killed by signal 9 during its load",
@@ -1633,16 +1760,17 @@ class TestALoadThatDies:
         engine.start()
 
         assert until(lambda: engine.loading_marker.exists())
-        assert (
-            json.loads(engine.loading_marker.read_text("utf-8"))["spec_digest"]
-            == digest
+        loading: dict[str, Any] = json.loads(engine.loading_marker.read_text("utf-8"))
+        assert (loading["spec_digest"], loading["decision_digest"]) == (
+            digest,
+            engine.decision_digest(),
         )
         assert not engine.ready_marker.exists()
         assert until(lambda: engine.ready_marker.exists())
         assert not engine.loading_marker.exists()
         assert not engine.crashed_marker.exists()
 
-    def test_a_restart_with_the_same_spec_stays_parked_until_it_is_rewritten(
+    def test_a_restart_with_the_same_spec_stays_parked_until_it_changes(
         self, engine: ManagedEngine
     ) -> None:
         engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_CODE": "3"}
@@ -1661,16 +1789,43 @@ class TestALoadThatDies:
         assert engine.crash_note()["exit_code"] == 3
         assert not engine.loading_marker.exists()
 
-        engine.spec(desired_state="awake", generated_at="2026-09-22T12:05:00Z")
+        engine.spec(desired_state="awake", tuning_tier="full")
         assert until(lambda: engine.ready_marker.exists())
         assert engine.events() == ["start", "crash", "start"]
         assert not engine.crashed_marker.exists()
         output: str = engine.stop()
         assert (
             "[vlm-launcher] the last load of acme/model-a died (vLLM exited with "
-            "code 3 during its load); staying parked until the desired state is "
-            "rewritten."
+            "code 3 during its load); staying parked until its spec asks for "
+            "something else."
         ) in output
+
+    def test_a_rewrite_that_changes_only_its_stamp_does_not_load_again(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_CODE": "1"}
+        engine.spec(desired_state="asleep", active=False)
+        engine.start()
+        assert engine.process is not None
+        assert engine.process.wait(timeout=30) == 1
+
+        engine.extra_env = {}
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        # What VIS writes for every resident after a rollback.
+        engine.spec(
+            desired_state="asleep",
+            active=False,
+            generated_by="VIS 1.2.0",
+            generated_at="2026-09-22T12:05:00Z",
+        )
+        time.sleep(1.5)
+        assert engine.events() == ["start", "crash"]
+        assert http_get(engine.port, "/vif/parked")[0] == 200
+
+        engine.spec(desired_state="asleep", active=False, tuning_tier="full")
+        assert until(lambda: engine.events() == ["start", "crash", "start", "sleep"])
+        assert not engine.crashed_marker.exists()
 
     def test_a_spec_rewritten_before_the_restart_loads_normally(
         self, engine: ManagedEngine
@@ -1682,7 +1837,7 @@ class TestALoadThatDies:
         assert engine.process.wait(timeout=30) == 3
 
         engine.extra_env = {}
-        engine.spec(desired_state="awake", generated_at="2026-09-22T12:05:00Z")
+        engine.spec(desired_state="awake", tuning_tier="full")
         engine.start()
         assert until(lambda: engine.ready_marker.exists())
         assert engine.events() == ["start", "crash", "start"]
@@ -1707,6 +1862,7 @@ class TestALoadThatDies:
         assert abs(note.pop("at") - time.time()) < 60
         assert note == {
             "spec_digest": digest,
+            "decision_digest": engine.decision_digest(),
             "exit_code": None,
             "signal": None,
             "reason": (

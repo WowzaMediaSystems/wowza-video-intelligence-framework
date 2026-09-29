@@ -177,15 +177,21 @@ THE POOL DUTIES, when several engines share one card:
     first. Before it asks for the lock it waits until every other engine whose
     spec says `asleep` has published its readiness marker (loaded, and asleep)
     or rests parked (spec `parked`, or `asleep` without sleep mode). Engines
-    whose spec says `parked` are never waited for. The wait is bounded by
+    whose spec says `parked`, and engines held parked by a crash note about
+    their current spec, are never waited for. The wait is bounded by
     VIF_POOL_LOAD_TIMEOUT_SECONDS, then it loads anyway with a WARNING naming
-    who it gave up on.
+    who it gave up on. It ends early, parked, if the spec stops saying
+    `awake`, and so does the wait for the load lock: an engine never loads on
+    an ask VIS has since withdrawn.
   * the LOAD GUARD: an engine whose spec says `asleep` and that is not loaded
-    does not start loading while another engine's `awake/` marker exists --
-    there is no room for it beside a serving engine. It serves the parked
-    health stub instead and loads once no awake marker remains, or when its
-    spec turns to `awake` (the manager puts the previous engine to sleep
-    before it asks). This is what keeps an engine restarted beside a serving
+    does not start loading while another engine holds the card: its `awake/`
+    marker exists, or it is loaded (`ready/`) and its spec says `awake`. VIS
+    writes that spec before it wakes the engine over HTTP, and the awake
+    marker only follows at that engine's launcher's next poll. There is no
+    room beside a serving engine, so this one serves the parked health stub
+    instead and loads once no engine holds the card, or when its spec turns
+    to `awake` (the manager puts the previous engine to sleep before it
+    asks). This is what keeps an engine restarted beside a serving
     one from crash-looping.
   * the LOG TEE copies the engine's output to <state dir>/logs/<key>.log as
     well as to this container's stdout, which is how the Manager shows engine
@@ -210,16 +216,19 @@ starts, so one left by a launcher that was killed outright never misleads the
 pool.
 
 A load that dies leaves `crashed/<key>`: JSON with the digest of the spec the
-load started from (the SHA-256 of the spec file's bytes), vLLM's exit code or
-the signal that killed it, and a reason. VIS reads it to fail a cold start
-without waiting out its budget. A restarted launcher whose spec still has that
-digest does not load again -- it serves the parked health stub, the way a failed
-sleep or wake is not retried, until the spec is rewritten -- so an engine that
-crashes while loading does not crash-loop under Docker's restart policy. A load
+load started from (`spec_digest`, the SHA-256 of the spec file's bytes), the
+digest of what that spec asks for (`decision_digest`: the same spec without
+`generated_by` and `generated_at`), vLLM's exit code or the signal that killed
+it, and a reason. VIS reads it to fail a cold start without waiting out its
+budget. A restarted launcher whose spec still asks for the same thing does not
+load again -- it serves the parked health stub, the way a failed sleep or wake
+is not retried, until the spec asks for something else; a rewrite that only
+restamps it does not count -- so an engine that crashes while loading does
+not crash-loop under Docker's restart policy. A load
 that succeeds removes the marker; VIS removes it before a new cold start.
 `loading/<key>` is what tells a launcher that died mid-load (SIGKILL, the
-container's OOM kill) from one that never loaded: a restart that finds it with
-the current digest and no `ready/<key>` writes the crash marker itself. A clean
+container's OOM kill) from one that never loaded: a restart that finds it for
+the spec in force and no `ready/<key>` writes the crash marker itself. A clean
 stop, or a load that succeeds, removes it. These two markers apply to engines
 run from a spec.
 
@@ -255,7 +264,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-29.3"
+LAUNCHER_REVISION: str = "2026-09-29.4"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -916,6 +925,70 @@ def build_plan(environ: dict[str, str]) -> LaunchPlan:
 # ── the supervisor and its duties ──────────────────────────────────────────
 
 
+# Who wrote a spec and when: part of the file, never part of what it decides.
+SPEC_PROVENANCE_FIELDS: frozenset[str] = frozenset({"generated_by", "generated_at"})
+
+
+def decision_digest(document: dict[str, Any]) -> str:
+    """
+    The digest of what a spec asks for, leaving out who wrote it and when.
+
+    VIS stamps every write, so a rewrite that asks for nothing new still
+    changes the file's own digest. A crash note is matched on this one, so that
+    such a rewrite does not load again a model whose load just died.
+    """
+    decision: dict[str, Any] = {
+        key: value
+        for key, value in document.items()
+        if key not in SPEC_PROVENANCE_FIELDS
+    }
+    return hashlib.sha256(
+        json.dumps(decision, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _decision_of(path: str) -> str:
+    """The decision digest of the spec at `path`; "" when it cannot be read."""
+    if not path:
+        return ""
+    try:
+        document: Any = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return decision_digest(document) if isinstance(document, dict) else ""
+
+
+def crash_matches(note: dict[str, Any], spec_digest: str, decision: str) -> bool:
+    """
+    Whether a crash note is about the spec now in force.
+
+    A note carries the decision digest from this revision on; an older one only
+    the file's, which is then what it is compared on.
+    """
+    noted: Any = note.get("decision_digest")
+    if noted:
+        return bool(decision) and noted == decision
+    return bool(spec_digest) and note.get("spec_digest") == spec_digest
+
+
+@dataclass(frozen=True)
+class Peer:
+    """Another engine on the state volume, as its spec and markers show it."""
+
+    model: str
+    # None stands for a spec that cannot be read right now.
+    desired: DesiredState | None
+    spec_digest: str = ""
+    decision: str = ""
+
+
+class LockWait(StrEnum):
+    TAKEN = "taken"
+    STOPPED = "stopped"
+    # The spec stopped asking for the state the lock was wanted for.
+    SUPERSEDED = "superseded"
+
+
 def _digest_of(path: str) -> str:
     """A file's content hash, or "" when there is nothing to hash."""
     if not path:
@@ -1063,15 +1136,17 @@ class Engine:
         self._lock_file: TextIO | None = None
         self._tee: threading.Thread | None = None
         self._spec_digest: str = _digest_of(plan.spec_file)
+        self._decision: str = _decision_of(plan.spec_file)
         self._log_warned: bool = False
         self._announced_awake: bool | None = None
         self._guard_announced: bool = False
         # The hot move (sleep or wake) that last failed, and the digest of the
         # decision it failed under. It is not tried again until that changes.
         self._failed_move: tuple[DesiredState, str] | None = None
-        # The digest of the spec the load in progress started from, and the
+        # The digests of the spec the load in progress started from, and the
         # crash digest already announced as the reason for staying parked.
         self._load_digest: str = ""
+        self._load_decision: str = ""
         self._crash_announced: str = ""
         self._starting_file: str = env_value(
             environ, "VIF_STARTING_FILE", DEFAULT_STARTING_FILE
@@ -1099,29 +1174,38 @@ class Engine:
 
     # -- load lock ----------------------------------------------------------
 
-    def take_load_lock(self) -> bool:
+    def take_load_lock(self, target: DesiredState) -> LockWait:
         """
-        Wait for the load lock. False means a stop came first.
+        Wait for the load lock, for as long as the spec still asks for `target`.
 
-        Polled rather than blocking, so that a stop never waits for a
-        neighbour to finish loading.
+        Polled rather than blocking, so that neither a stop nor a new spec
+        waits for a neighbour to finish loading.
         """
         if not self.plan.load_lock_file or self._lock_file is not None:
-            return True
+            return LockWait.TAKEN
         self._lock_file = open(self.plan.load_lock_file, "a", encoding="utf-8")
         log(f"waiting for the load lock ({self.plan.load_lock_file})...")
+        next_look: float = time.monotonic() + self.plan.watch_poll_seconds
         while True:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
+                outcome: LockWait | None = None
                 if pause(LOCK_POLL_SECONDS):
+                    log("stopped while waiting for the load lock.")
+                    outcome = LockWait.STOPPED
+                elif time.monotonic() >= next_look:
+                    next_look = time.monotonic() + self.plan.watch_poll_seconds
+                    if self.poll_desired() is not target:
+                        log("the spec changed while waiting for the load lock.")
+                        outcome = LockWait.SUPERSEDED
+                if outcome is not None:
                     self._lock_file.close()
                     self._lock_file = None
-                    log("stopped while waiting for the load lock.")
-                    return False
+                    return outcome
         log("load lock acquired.")
-        return True
+        return LockWait.TAKEN
 
     def release_load_lock(self) -> None:
         # flock also drops when the process dies; releasing explicitly is what
@@ -1133,47 +1217,74 @@ class Engine:
         self._lock_file = None
         log("load lock released.")
 
-    def _peer_specs(self) -> list[tuple[str, DesiredState | None]]:
+    def _peer_specs(self) -> list[Peer]:
         """
-        Every OTHER engine's model id and effective desired state.
+        Every OTHER engine's spec.
 
-        None stands for a spec that cannot be read right now -- most likely a
-        write in flight. An `asleep` spec without sleep mode counts as parked,
-        which is what that engine's own launcher makes of it.
+        An unreadable spec is most likely a write in flight. An `asleep` spec
+        without sleep mode counts as parked, which is what that engine's own
+        launcher makes of it.
         """
         if not self.plan.engines_dir:
             return []
         own: str = engine_key(self.plan.model)
-        peers: list[tuple[str, DesiredState | None]] = []
+        peers: list[Peer] = []
         for path in sorted(Path(self.plan.engines_dir).glob("*.json")):
             if path.stem == own:
                 continue
             try:
-                document: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+                raw: str = path.read_text(encoding="utf-8")
+                document: dict[str, Any] = json.loads(raw)
                 model: str = str(document.get("model") or path.stem)
                 desired: DesiredState = read_desired_state(document)
                 if desired is DesiredState.ASLEEP and not document.get("sleep_mode"):
                     desired = DesiredState.PARKED
             except (OSError, json.JSONDecodeError, KeyError, ConfigError):
-                peers.append((path.stem, None))
+                peers.append(Peer(model=path.stem, desired=None))
                 continue
-            peers.append((model, desired))
+            peers.append(
+                Peer(
+                    model=model,
+                    desired=desired,
+                    spec_digest=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                    decision=decision_digest(document),
+                )
+            )
         return peers
 
+    def _peer_loaded(self, peer: Peer) -> bool:
+        return (Path(self.plan.ready_dir) / engine_key(peer.model)).exists()
+
+    def _peer_crash_parked(self, peer: Peer) -> bool:
+        """Whether the peer's launcher holds it parked on a note about its spec."""
+        if not self.plan.crashed_dir:
+            return False
+        note: dict[str, Any] | None = self._read_marker(
+            str(Path(self.plan.crashed_dir) / engine_key(peer.model))
+        )
+        return note is not None and crash_matches(note, peer.spec_digest, peer.decision)
+
     def pool_still_loading(self) -> list[str]:
-        """The other engines that should be asleep and are not loaded yet."""
+        """
+        The other engines that should be asleep and are not loaded yet.
+
+        One whose last load of this very spec died is not coming: its launcher
+        stays parked until the spec asks for something else.
+        """
         pending: list[str] = []
-        for model, desired in self._peer_specs():
-            if desired is DesiredState.PARKED or desired is DesiredState.AWAKE:
-                continue
+        for peer in self._peer_specs():
             if (
-                desired is None
-                or not (Path(self.plan.ready_dir) / engine_key(model)).exists()
+                peer.desired is DesiredState.PARKED
+                or peer.desired is DesiredState.AWAKE
             ):
-                pending.append(model)
+                continue
+            if peer.desired is None:
+                pending.append(peer.model)
+            elif not self._peer_loaded(peer) and not self._peer_crash_parked(peer):
+                pending.append(peer.model)
         return pending
 
-    def wait_for_pool(self, target: DesiredState) -> None:
+    def wait_for_pool(self, target: DesiredState) -> bool:
         """
         Boot order: the engine that should be serving loads last.
 
@@ -1183,26 +1294,31 @@ class Engine:
         every other engine whose spec says `asleep` to be loaded (its
         readiness marker) or to rest parked. Bounded: an engine that never
         arrives must not keep the pool from serving.
+
+        False when the spec stopped asking for `target` meanwhile.
         """
         if target is not DesiredState.AWAKE or not self.plan.ready_dir:
-            return
+            return True
         deadline: float = time.monotonic() + self.plan.pool_load_timeout_seconds
         announced: list[str] = []
         while True:
+            if self.poll_desired() is not target:
+                log("the spec changed while waiting for the rest of the pool.")
+                return False
             pending: list[str] = self.pool_still_loading()
             if not pending:
                 if announced:
                     log("the rest of the pool is loaded.")
-                return
+                return True
             if self.terminating:
-                return
+                return True
             if time.monotonic() >= deadline:
                 warn(
                     "WARNING: the rest of the pool did not load within "
                     f"{self.plan.pool_load_timeout_seconds}s; giving up on "
                     f"{', '.join(pending)} and taking the load lock anyway."
                 )
-                return
+                return True
             if pending != announced:
                 log(
                     "the serving engine loads last; waiting for "
@@ -1212,19 +1328,34 @@ class Engine:
             pause(READY_POLL_SECONDS)
 
     def serving_elsewhere(self) -> list[str]:
-        """The other engines whose awake marker exists."""
-        if not self.plan.awake_dir:
-            return []
+        """
+        The other engines holding the card: an awake marker, or a loaded
+        engine whose spec says `awake`.
+
+        The second is a wake in progress. VIS writes the `awake` spec before
+        its own `/wake_up`, and rewrites the rest of the pool the moment that
+        call returns, while the woken engine's launcher writes its awake
+        marker only at its next poll. An `awake` spec that is not loaded yet
+        is the boot order's serving engine, waiting for this one to load first.
+        """
         own: str = engine_key(self.plan.model)
-        try:
-            names: list[str] = sorted(
-                path.name
-                for path in Path(self.plan.awake_dir).iterdir()
-                if path.name != own
+        names: set[str] = set()
+        if self.plan.awake_dir:
+            try:
+                names.update(
+                    path.name
+                    for path in Path(self.plan.awake_dir).iterdir()
+                    if path.name != own
+                )
+            except OSError:
+                pass
+        if self.plan.ready_dir:
+            names.update(
+                engine_key(peer.model)
+                for peer in self._peer_specs()
+                if peer.desired is DesiredState.AWAKE and self._peer_loaded(peer)
             )
-        except OSError:
-            return []
-        return names
+        return sorted(names)
 
     def load_guarded(self, target: DesiredState) -> bool:
         """
@@ -1320,9 +1451,14 @@ class Engine:
     def mark_loading(self) -> None:
         """Note the load about to start, and the spec it starts from."""
         self._load_digest = self._decision_digest()
+        self._load_decision = self._decision
         self._write_json_marker(
             self.plan.loading_file,
-            {"spec_digest": self._load_digest, "at": time.time()},
+            {
+                "spec_digest": self._load_digest,
+                "decision_digest": self._load_decision,
+                "at": time.time(),
+            },
             "loading",
         )
 
@@ -1333,12 +1469,18 @@ class Engine:
         self._remove_marker(self.plan.crashed_file)
 
     def record_crash(
-        self, digest: str, exit_code: int | None, signal_number: int | None, reason: str
+        self,
+        digest: str,
+        decision: str,
+        exit_code: int | None,
+        signal_number: int | None,
+        reason: str,
     ) -> None:
         self._write_json_marker(
             self.plan.crashed_file,
             {
                 "spec_digest": digest,
+                "decision_digest": decision,
                 "exit_code": exit_code,
                 "signal": signal_number,
                 "at": time.time(),
@@ -1353,17 +1495,21 @@ class Engine:
         status: int = self.child.wait()
         if status < 0:
             reason: str = f"vLLM was killed by signal {-status} during its load"
-            self.record_crash(self._load_digest, None, -status, reason)
+            self.record_crash(
+                self._load_digest, self._load_decision, None, -status, reason
+            )
         else:
             reason = f"vLLM exited with code {status} during its load"
-            self.record_crash(self._load_digest, status, None, reason)
-        warn(f"{reason}; not loading again until the desired state is rewritten.")
+            self.record_crash(
+                self._load_digest, self._load_decision, status, None, reason
+            )
+        warn(f"{reason}; not loading again until its spec asks for something else.")
 
     def reconcile_dead_load(self, was_loaded: bool) -> None:
         """
         Turn a load marker left by a launcher that died into a crash marker.
 
-        A `loading/` marker with the current digest and no readiness marker
+        A `loading/` marker for the spec in force and no readiness marker
         means the previous launcher died mid-load (SIGKILL, the container's
         OOM kill), so nobody wrote a crash marker. A marker for another spec
         is just stale.
@@ -1373,13 +1519,14 @@ class Engine:
             return
         self.clear_loading()
         digest: str = self._decision_digest()
-        if was_loaded or marker.get("spec_digest") != digest:
+        if was_loaded or not crash_matches(marker, digest, self._decision):
             return
         known: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
-        if known is not None and known.get("spec_digest") == digest:
+        if known is not None and crash_matches(known, digest, self._decision):
             return
         self.record_crash(
             digest,
+            self._decision,
             None,
             None,
             "the previous launcher died while this engine was loading "
@@ -1390,20 +1537,21 @@ class Engine:
         """
         Whether the last load of this very spec died, so it is not tried again.
 
-        The same posture as a failed sleep or wake: a new spec is a new
-        decision, and gets a new attempt.
+        The same posture as a failed sleep or wake: a spec that asks for
+        something new is a new decision, and gets a new attempt. A rewrite
+        that only restamps the same spec is not.
         """
         marker: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
         if marker is None:
             return False
         digest: str = self._decision_digest()
-        if not digest or marker.get("spec_digest") != digest:
+        if not crash_matches(marker, digest, self._decision):
             return False
         if self._crash_announced != digest:
             warn(
                 f"the last load of {self.plan.model} died "
                 f"({marker.get('reason') or 'no reason recorded'}); staying "
-                "parked until the desired state is rewritten."
+                "parked until its spec asks for something else."
             )
             self._crash_announced = digest
         return True
@@ -1470,7 +1618,8 @@ class Engine:
         if digest == self._spec_digest:
             return self.plan.desired_state
         try:
-            fresh: LaunchPlan = plan_from_spec(json.loads(raw), self.environ)
+            document: dict[str, Any] = json.loads(raw)
+            fresh: LaunchPlan = plan_from_spec(document, self.environ)
         except (json.JSONDecodeError, ConfigError) as exc:
             warn(
                 f"the engine spec changed but is unusable ({exc}); "
@@ -1478,6 +1627,7 @@ class Engine:
             )
             return self.plan.desired_state
         self._spec_digest = digest
+        self._decision = decision_digest(document)
         if fresh.argv != self.plan.argv or fresh.env != self.plan.env:
             warn(
                 "the engine spec's command changed; it takes effect the next "
@@ -1693,9 +1843,19 @@ class Engine:
 
         Returns an exit code only when the container itself should stop.
         """
-        self.wait_for_pool(target)
-        if self.terminating or not self.take_load_lock():
+        # A wait that outlives the ask ends parked; the watch loop follows
+        # whatever the spec says now.
+        if not self.wait_for_pool(target):
+            self.hold_parked()
+            return None
+        if self.terminating:
             return 0
+        lock: LockWait = self.take_load_lock(target)
+        if lock is LockWait.STOPPED:
+            return 0
+        if lock is LockWait.SUPERSEDED:
+            self.hold_parked()
+            return None
         if self.terminating:
             self.release_load_lock()
             return 0
