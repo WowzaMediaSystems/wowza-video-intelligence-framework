@@ -10,6 +10,9 @@ Knobs (env):
   FAKE_VLLM_EVENT_LOG      file every event is appended to, one JSON per line
   FAKE_VLLM_IGNORE_SIGTERM "1" makes it deaf to SIGTERM, as a wedged engine is
   FAKE_VLLM_STDOUT         text written to stdout at startup, one line per \n
+  FAKE_VLLM_LATE_STDOUT    text written to stdout FAKE_VLLM_LATE_AFTER seconds
+                           after startup, as vLLM's later load messages are
+  FAKE_VLLM_LATE_AFTER     seconds before that (0)
   FAKE_VLLM_RECORD_ENV     comma-separated variables recorded on the start event
   FAKE_VLLM_WAKE_FAILS     "1" makes /wake_up answer 500 and stay asleep
   FAKE_VLLM_CRASH_AFTER    seconds after startup at which it dies on its own,
@@ -113,6 +116,15 @@ if __name__ == "__main__":
     record("start", model=MODEL, argv=argv, port=port, env=recorded)
     for line in os.environ.get("FAKE_VLLM_STDOUT", "").splitlines():
         print(line, flush=True)
+    late: str = os.environ.get("FAKE_VLLM_LATE_STDOUT", "")
+    if late:
+
+        def print_late() -> None:
+            time.sleep(float(os.environ.get("FAKE_VLLM_LATE_AFTER", "0")))
+            for line in late.splitlines():
+                print(line, flush=True)
+
+        threading.Thread(target=print_late, daemon=True).start()
     if os.environ.get("FAKE_VLLM_IGNORE_SIGTERM", "") == "1":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     else:

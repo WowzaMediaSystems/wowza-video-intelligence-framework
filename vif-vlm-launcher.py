@@ -199,6 +199,7 @@ THE STATE VOLUME, shared with VIS and every other engine:
   <state dir>/awake/<key>         awake and serving           (written here)
   <state dir>/loading/<key>       a load is under way         (written here)
   <state dir>/crashed/<key>       the last load died          (written here)
+  <state dir>/phase/<key>         where a load in progress is (written here)
   <state dir>/logs/<key>.log      this engine's output        (written here)
 
 The awake marker is created after a load that is not followed by a sleep and
@@ -217,6 +218,24 @@ digest does not load again -- it serves the parked health stub, the way a failed
 sleep or wake is not retried, until the spec is rewritten -- so an engine that
 crashes while loading does not crash-loop under Docker's restart policy. A load
 that succeeds removes the marker; VIS removes it before a new cold start.
+A load that would only run into a license is refused the same way, before
+anything is started: a spec that says `gated` needs the weights on disk or an
+HF_TOKEN whose account has accepted the model's license, and when it has
+neither the crash note carries `access_problem` (token_missing, token_rejected
+or license_not_accepted) instead of an exit code. The parked stub answers
+`GET /vif/access` with the same verdict, checked right then, so VIS can refuse
+an activate before it drains the engine that is serving. A note like this one
+is dropped when the launcher starts, because a restart is what changes the
+token.
+
+`phase/<key>` is JSON with the spec digest, `phase` (waiting for the pool or
+the load lock, downloading, loading, compiling) and, while downloading,
+`downloaded_bytes`. It exists only while a load is under way and only moves
+forward. Downloading is read from the hub cache on disk (weights not yet
+linked, or a `.incomplete` file); compiling starts at vLLM's own "Loading
+weights took" line, and an engine whose log is never teed simply stays in
+`loading`.
+
 `loading/<key>` is what tells a launcher that died mid-load (SIGKILL, the
 container's OOM kill) from one that never loaded: a restart that finds it with
 the current digest and no `ready/<key>` writes the crash marker itself. A clean
@@ -252,10 +271,10 @@ from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import FrameType
-from typing import IO, Any, TextIO
+from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-29.3"
+LAUNCHER_REVISION: str = "2026-09-29.4"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -269,6 +288,7 @@ ENGINE_READY_DIRNAME: str = "ready"
 ENGINE_AWAKE_DIRNAME: str = "awake"
 ENGINE_LOADING_DIRNAME: str = "loading"
 ENGINE_CRASHED_DIRNAME: str = "crashed"
+ENGINE_PHASE_DIRNAME: str = "phase"
 ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
 # Inside the container, not on the state volume: the healthcheck reads it.
@@ -286,6 +306,15 @@ READY_POLL_SECONDS: float = 2.0
 LOCK_POLL_SECONDS: float = 0.2
 
 FP8_KV_CACHE_MIN_COMPUTE_CAPABILITY: float = 8.9
+
+DEFAULT_HF_ENDPOINT: str = "https://huggingface.co"
+ACCESS_PROBE_TIMEOUT_SECONDS: float = 10.0
+WEIGHT_SUFFIXES: tuple[str, ...] = (".safetensors", ".bin", ".pt", ".pth", ".gguf")
+# vLLM's own line once the weights are on the GPU; what follows is compiling,
+# profiling and graph capture.
+WEIGHTS_LOADED: re.Pattern[bytes] = re.compile(
+    rb"Loading weights took|Model loading took"
+)
 
 _TRUE: frozenset[str] = frozenset({"1", "true", "yes"})
 _FALSE: frozenset[str] = frozenset({"", "0", "false", "no"})
@@ -329,6 +358,38 @@ class DesiredState(StrEnum):
     PARKED = "parked"
 
 
+class LoadPhase(StrEnum):
+    """
+    Where a load is, in the order a first load goes through them. A phase that
+    does not apply (weights already on disk, a warm compile cache) is skipped.
+    """
+
+    WAITING = "waiting"
+    DOWNLOADING = "downloading"
+    LOADING = "loading"
+    COMPILING = "compiling"
+
+
+LOAD_PHASE_ORDER: tuple[LoadPhase, ...] = tuple(LoadPhase)
+
+
+class AccessProblem(StrEnum):
+    """Why a gated model's weights cannot be fetched with this deployment's token."""
+
+    TOKEN_MISSING = "token_missing"
+    TOKEN_REJECTED = "token_rejected"
+    LICENSE_NOT_ACCEPTED = "license_not_accepted"
+
+
+ACCESS_CAUSES: dict[AccessProblem, str] = {
+    AccessProblem.TOKEN_MISSING: "no HF_TOKEN is set",
+    AccessProblem.TOKEN_REJECTED: "HuggingFace does not accept the HF_TOKEN",
+    AccessProblem.LICENSE_NOT_ACCEPTED: (
+        "the account behind the HF_TOKEN has not accepted its license"
+    ),
+}
+
+
 # Dry runs print JSON on stdout, so their logging moves out of the way.
 _LOG_STREAM: TextIO = sys.stdout
 
@@ -367,6 +428,10 @@ class LaunchPlan:
     # only: the digest they carry is the spec's.
     loading_dir: str = ""
     crashed_dir: str = ""
+    # Where the phase of a load in progress is published. Spec path only.
+    phase_dir: str = ""
+    # Whether the weights sit behind a HuggingFace license: the spec says so.
+    gated: bool = False
     # The other engines' specs, which the boot order reads. Spec path only.
     engines_dir: str = ""
     log_file: str = ""
@@ -407,6 +472,13 @@ class LaunchPlan:
         if not self.crashed_dir:
             return ""
         return str(Path(self.crashed_dir) / engine_key(self.model))
+
+    @property
+    def phase_file(self) -> str:
+        """This engine's load-phase marker, or "" when there is nowhere."""
+        if not self.phase_dir:
+            return ""
+        return str(Path(self.phase_dir) / engine_key(self.model))
 
     @property
     def watches(self) -> bool:
@@ -529,6 +601,103 @@ def make_shared_dir(directory: Path) -> None:
     except PermissionError:
         # Not root: whatever this process creates is its own already.
         pass
+
+
+# ── weights on disk, and access to gated ones ──────────────────────────────
+
+
+def hf_cache_dir(environ: dict[str, str]) -> Path:
+    """Where the HuggingFace hub cache is, by the variables huggingface_hub reads."""
+    explicit: str = env_value(environ, "HF_HUB_CACHE")
+    if explicit:
+        return Path(explicit)
+    home: str = env_value(environ, "HF_HOME")
+    if home:
+        return Path(home) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def weights_cache_state(environ: dict[str, str], model: str) -> tuple[bool, int]:
+    """
+    Whether this model's weights are completely in the hub cache, and how many
+    bytes of it are on disk.
+
+    huggingface_hub downloads each file to `blobs/<hash>.incomplete` and renames
+    it when done, and only then links it into `snapshots/`: a download is under
+    way while any `.incomplete` file exists, and finished once a weight file is
+    linked and none does. A model that is a local path, or a host set offline,
+    never downloads.
+    """
+    if Path(model).exists() or env_bool(environ, "HF_HUB_OFFLINE"):
+        return True, 0
+    root: Path = hf_cache_dir(environ) / f"models--{model.replace('/', '--')}"
+    downloaded: int = 0
+    incomplete: bool = False
+    try:
+        for entry in os.scandir(root / "blobs"):
+            downloaded += entry.stat().st_size
+            incomplete = incomplete or entry.name.endswith(".incomplete")
+    except OSError:
+        pass
+    linked: bool = False
+    try:
+        for snapshot in os.scandir(root / "snapshots"):
+            linked = linked or any(
+                name.endswith(WEIGHT_SUFFIXES) for name in os.listdir(snapshot.path)
+            )
+    except OSError:
+        pass
+    return linked and not incomplete, downloaded
+
+
+def hf_token(environ: dict[str, str]) -> str:
+    return env_value(environ, "HF_TOKEN") or env_value(
+        environ, "HUGGING_FACE_HUB_TOKEN"
+    )
+
+
+def hf_endpoint(environ: dict[str, str]) -> str:
+    return env_value(environ, "HF_ENDPOINT", DEFAULT_HF_ENDPOINT).rstrip("/")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def gated_access_problem(environ: dict[str, str], model: str) -> AccessProblem | None:
+    """
+    Why a gated model cannot be downloaded here, or None when it can, is not
+    needed (already on disk, offline) or cannot be told.
+
+    Without a token there is nothing to ask the hub. With one, a HEAD on the
+    model's config answers 401 for a token the hub does not accept and 403 for
+    an account that has not accepted the license; anything else, a network
+    failure included, is left for vLLM to run into rather than blocking a load
+    this check has no evidence against.
+    """
+    if weights_cache_state(environ, model)[0]:
+        return None
+    token: str = hf_token(environ)
+    if not token:
+        return AccessProblem.TOKEN_MISSING
+    request: urllib.request.Request = urllib.request.Request(
+        f"{hf_endpoint(environ)}/{model}/resolve/main/config.json",
+        method="HEAD",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    opener: urllib.request.OpenerDirector = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(request, timeout=ACCESS_PROBE_TIMEOUT_SECONDS):
+            return None
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return AccessProblem.TOKEN_REJECTED
+        if exc.code == 403:
+            return AccessProblem.LICENSE_NOT_ACCEPTED
+        return None
+    except (urllib.error.URLError, OSError):
+        return None
 
 
 def pin_gpus(gpu_ids: str) -> dict[str, str]:
@@ -757,6 +926,8 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         awake_dir=str(Path(state_dir) / ENGINE_AWAKE_DIRNAME) if state_dir else "",
         loading_dir=str(Path(state_dir) / ENGINE_LOADING_DIRNAME) if state_dir else "",
         crashed_dir=str(Path(state_dir) / ENGINE_CRASHED_DIRNAME) if state_dir else "",
+        phase_dir=str(Path(state_dir) / ENGINE_PHASE_DIRNAME) if state_dir else "",
+        gated=bool(document.get("gated", False)),
         engines_dir=str(Path(spec_file).parent) if spec_file else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=str(document.get("load_lock_file") or ""),
@@ -992,7 +1163,12 @@ class ParkedStub:
     def running(self) -> bool:
         return self._server is not None
 
-    def start(self, port: int, model: str) -> None:
+    def start(
+        self,
+        port: int,
+        model: str,
+        access: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
         if self._server is not None:
             return
         body: bytes = json.dumps(
@@ -1022,6 +1198,9 @@ class ParkedStub:
                 path: str = self.path.split("?", 1)[0]
                 if path in ("/health", "/vif/parked"):
                     self._send(200, body)
+                    return
+                if path == "/vif/access" and access is not None:
+                    self._send(200, json.dumps(access()).encode("utf-8"))
                     return
                 self._send(404, b"{}")
 
@@ -1073,6 +1252,14 @@ class Engine:
         # crash digest already announced as the reason for staying parked.
         self._load_digest: str = ""
         self._crash_announced: str = ""
+        # The spec digest the published phase belongs to, and the last phase
+        # (and byte count) written, so a poll that saw nothing new writes nothing.
+        self._phase_digest: str = ""
+        self._phase: LoadPhase | None = None
+        self._phase_bytes: int = -1
+        # Set by the log tee once vLLM says the weights are on the GPU.
+        self._weights_loaded: bool = False
+        self._gate_announced: str = ""
         self._starting_file: str = env_value(
             environ, "VIF_STARTING_FILE", DEFAULT_STARTING_FILE
         )
@@ -1093,6 +1280,7 @@ class Engine:
         self.clear_awake()
         self.clear_ready()
         self.clear_loading()
+        self.clear_phase()
         if self.child is not None and self.child.poll() is None:
             self.child.send_signal(signum)
             self._forwarded = True
@@ -1166,12 +1354,30 @@ class Engine:
         for model, desired in self._peer_specs():
             if desired is DesiredState.PARKED or desired is DesiredState.AWAKE:
                 continue
-            if (
-                desired is None
-                or not (Path(self.plan.ready_dir) / engine_key(model)).exists()
+            if desired is None or (
+                not (Path(self.plan.ready_dir) / engine_key(model)).exists()
+                and not self._peer_failed(model)
             ):
                 pending.append(model)
         return pending
+
+    def _peer_failed(self, model: str) -> bool:
+        """
+        Whether another engine's load of its current spec died or was refused.
+
+        It will not become ready, so the engine that loads last does not wait
+        for it.
+        """
+        key: str = engine_key(model)
+        if not self.plan.crashed_dir or not self.plan.engines_dir:
+            return False
+        note: dict[str, Any] | None = self._read_marker(
+            str(Path(self.plan.crashed_dir) / key)
+        )
+        if note is None:
+            return False
+        digest: str = _digest_of(str(Path(self.plan.engines_dir) / f"{key}.json"))
+        return bool(digest) and note.get("spec_digest") == digest
 
     def wait_for_pool(self, target: DesiredState) -> None:
         """
@@ -1333,19 +1539,116 @@ class Engine:
         self._remove_marker(self.plan.crashed_file)
 
     def record_crash(
-        self, digest: str, exit_code: int | None, signal_number: int | None, reason: str
+        self,
+        digest: str,
+        exit_code: int | None,
+        signal_number: int | None,
+        reason: str,
+        access_problem: AccessProblem | None = None,
     ) -> None:
-        self._write_json_marker(
-            self.plan.crashed_file,
-            {
-                "spec_digest": digest,
-                "exit_code": exit_code,
-                "signal": signal_number,
-                "at": time.time(),
-                "reason": reason,
-            },
-            "crashed",
+        document: dict[str, Any] = {
+            "spec_digest": digest,
+            "exit_code": exit_code,
+            "signal": signal_number,
+            "at": time.time(),
+            "reason": reason,
+        }
+        if access_problem is not None:
+            document["access_problem"] = access_problem.value
+        self._write_json_marker(self.plan.crashed_file, document, "crashed")
+
+    # -- the phase of a load ------------------------------------------------
+
+    def publish_phase(self, phase: LoadPhase, downloaded_bytes: int = 0) -> None:
+        """Publish where the load is. Only ever forward, and only when it changed."""
+        if self._phase is not None and LOAD_PHASE_ORDER.index(
+            phase
+        ) < LOAD_PHASE_ORDER.index(self._phase):
+            return
+        if phase is self._phase and downloaded_bytes == self._phase_bytes:
+            return
+        self._phase = phase
+        self._phase_bytes = downloaded_bytes
+        document: dict[str, Any] = {
+            "spec_digest": self._phase_digest,
+            "phase": phase.value,
+            "at": time.time(),
+        }
+        if phase is LoadPhase.DOWNLOADING:
+            document["downloaded_bytes"] = downloaded_bytes
+        self._write_json_marker(self.plan.phase_file, document, "phase")
+
+    def clear_phase(self) -> None:
+        self._phase = None
+        self._phase_bytes = -1
+        self._remove_marker(self.plan.phase_file)
+
+    def observe_phase(self) -> None:
+        """Work out the phase of the load under way, from disk and from vLLM's own line."""
+        if self._weights_loaded:
+            self.publish_phase(LoadPhase.COMPILING)
+            return
+        complete: bool
+        downloaded: int
+        complete, downloaded = weights_cache_state(self.environ, self.plan.model)
+        if complete:
+            self.publish_phase(LoadPhase.LOADING)
+        else:
+            self.publish_phase(LoadPhase.DOWNLOADING, downloaded)
+
+    # -- gated models -------------------------------------------------------
+
+    def gated_out(self) -> bool:
+        """
+        Whether a load would only run into a license or a token that will not do.
+
+        Said once per spec, as a crash note carrying the problem: VIS reads it
+        the way it reads a load that died, and the engine stays parked, the
+        same posture, until the spec is rewritten.
+        """
+        if not self.plan.gated:
+            return False
+        problem: AccessProblem | None = gated_access_problem(
+            self.environ, self.plan.model
         )
+        if problem is None:
+            return False
+        digest: str = self._decision_digest()
+        if self._gate_announced != digest:
+            reason: str = (
+                f"{self.plan.model} is a gated HuggingFace model and cannot be "
+                f"downloaded: {ACCESS_CAUSES[problem]}"
+            )
+            self.record_crash(digest, None, None, reason, access_problem=problem)
+            warn(f"{reason}; staying parked until the desired state is rewritten.")
+            self._gate_announced = digest
+        return True
+
+    def access_report(self) -> dict[str, Any]:
+        """What the parked stub answers on /vif/access: can this engine load now."""
+        problem: AccessProblem | None = (
+            gated_access_problem(self.environ, self.plan.model)
+            if self.plan.gated
+            else None
+        )
+        return {
+            "model": self.plan.model,
+            "gated": self.plan.gated,
+            "ok": problem is None,
+            "access_problem": problem.value if problem is not None else "",
+        }
+
+    def forget_stale_gate(self) -> None:
+        """
+        Drop a gate note left by an earlier run of this launcher.
+
+        The token and the network are the container's environment, which a
+        restart is what changes; the digest alone would keep the engine parked
+        on a problem that may since have been fixed.
+        """
+        note: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
+        if note is not None and note.get("access_problem"):
+            self.clear_crashed()
 
     def record_child_crash(self) -> None:
         """The engine exited before it was ready: say how, for VIS and for us."""
@@ -1419,6 +1722,7 @@ class Engine:
                 return 2
             if self.child is None or self.child.poll() is not None:
                 return 2
+            self.observe_phase()
             # Every probe is time-boxed: a wedged engine still accepts
             # connections, so an untimed request would wait out the very
             # deadline it is being polled against. A failed probe is the
@@ -1602,6 +1906,8 @@ class Engine:
             for line in stream:
                 sys.stdout.buffer.write(line)
                 sys.stdout.buffer.flush()
+                if not self._weights_loaded and WEIGHTS_LOADED.search(line):
+                    self._weights_loaded = True
                 if handle is None:
                     continue
                 try:
@@ -1693,6 +1999,16 @@ class Engine:
 
         Returns an exit code only when the container itself should stop.
         """
+        self.clear_phase()
+        self._weights_loaded = False
+        self._phase_digest = self._decision_digest()
+        self.publish_phase(LoadPhase.WAITING)
+        try:
+            return self._load_engine(target)
+        finally:
+            self.clear_phase()
+
+    def _load_engine(self, target: DesiredState) -> int | None:
         self.wait_for_pool(target)
         if self.terminating or not self.take_load_lock():
             return 0
@@ -1744,7 +2060,7 @@ class Engine:
     def hold_parked(self) -> None:
         """Rest parked, with the health stub up, until the guard lifts."""
         self.state = DesiredState.PARKED
-        self._stub.start(self.plan.port, self.plan.model)
+        self._stub.start(self.plan.port, self.plan.model, self.access_report)
 
     def enter(self, target: DesiredState) -> int | None:
         """One desired-state transition. An exit code means the container stops."""
@@ -1754,14 +2070,13 @@ class Engine:
         if hot and self._already_failed(target):
             return None
         if self.state is DesiredState.PARKED and (
-            self.load_guarded(target) or self.crash_parked()
+            self.load_guarded(target) or self.crash_parked() or self.gated_out()
         ):
             return None
         log(f"desired state: {self.state} -> {target}.")
         if target is DesiredState.PARKED:
             self.stop_child()
-            self.state = DesiredState.PARKED
-            self._stub.start(self.plan.port, self.plan.model)
+            self.hold_parked()
             return None
         if self.state is DesiredState.PARKED:
             # From here until vLLM answers /health, nothing answers it.
@@ -1790,12 +2105,15 @@ class Engine:
         self.clear_ready()
         self.clear_awake()
         self.clear_starting()
+        self.clear_phase()
+        self.forget_stale_gate()
         target: DesiredState = self.poll_desired()
         self.reconcile_dead_load(was_loaded)
         if (
             target is DesiredState.PARKED
             or self.load_guarded(target)
             or self.crash_parked()
+            or self.gated_out()
         ):
             self.hold_parked()
         else:
@@ -1821,6 +2139,7 @@ class Engine:
         self.clear_ready()
         self.clear_starting()
         self.clear_loading()
+        self.clear_phase()
         self.release_load_lock()
         self._stub.stop()
 

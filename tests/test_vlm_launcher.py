@@ -1962,3 +1962,464 @@ class TestSharedDirectories:
         ]
         launcher.make_shared_dir(volume / "crashed")
         assert len(calls) == 2
+
+
+def seed_cache(
+    hf_home: Path,
+    model: str,
+    *,
+    incomplete: int = 0,
+    weights: int = 0,
+    config: int = 0,
+) -> None:
+    """A hub cache laid out the way huggingface_hub leaves it mid-download."""
+    root: Path = hf_home / "hub" / f"models--{model.replace('/', '--')}"
+    (root / "blobs").mkdir(parents=True, exist_ok=True)
+    (root / "snapshots" / "rev").mkdir(parents=True, exist_ok=True)
+    if config:
+        (root / "blobs" / "cfg").write_bytes(b"c" * config)
+        (root / "snapshots" / "rev" / "config.json").symlink_to(root / "blobs" / "cfg")
+    if incomplete:
+        (root / "blobs" / "wts.incomplete").write_bytes(b"i" * incomplete)
+    if weights:
+        (root / "blobs" / "wts").write_bytes(b"w" * weights)
+        (root / "snapshots" / "rev" / "model.safetensors").symlink_to(
+            root / "blobs" / "wts"
+        )
+
+
+def finish_download(hf_home: Path, model: str) -> None:
+    root: Path = hf_home / "hub" / f"models--{model.replace('/', '--')}"
+    size: int = (root / "blobs" / "wts.incomplete").stat().st_size
+    (root / "blobs" / "wts.incomplete").rename(root / "blobs" / "wts")
+    (root / "snapshots" / "rev" / "model.safetensors").symlink_to(
+        root / "blobs" / "wts"
+    )
+    assert size > 0
+
+
+class TestWeightsCache:
+    MODEL: str = "acme/model-a"
+
+    def env(self, tmp_path: Path) -> dict[str, str]:
+        return {"HF_HOME": str(tmp_path)}
+
+    def test_an_empty_cache_has_no_weights(self, tmp_path: Path) -> None:
+        assert launcher.weights_cache_state(self.env(tmp_path), self.MODEL) == (
+            False,
+            0,
+        )
+
+    def test_a_download_under_way_counts_its_bytes(self, tmp_path: Path) -> None:
+        seed_cache(tmp_path, self.MODEL, config=100, incomplete=1000)
+        assert launcher.weights_cache_state(self.env(tmp_path), self.MODEL) == (
+            False,
+            1100,
+        )
+
+    def test_weights_linked_and_nothing_incomplete_are_done(
+        self, tmp_path: Path
+    ) -> None:
+        seed_cache(tmp_path, self.MODEL, config=100, weights=5000)
+        assert launcher.weights_cache_state(self.env(tmp_path), self.MODEL) == (
+            True,
+            5100,
+        )
+
+    def test_a_second_file_still_downloading_is_not_done(self, tmp_path: Path) -> None:
+        seed_cache(tmp_path, self.MODEL, weights=5000, incomplete=300)
+        assert launcher.weights_cache_state(self.env(tmp_path), self.MODEL) == (
+            False,
+            5300,
+        )
+
+    def test_hub_cache_wins_over_home(self, tmp_path: Path) -> None:
+        seed_cache(tmp_path / "elsewhere", self.MODEL, weights=10)
+        environ: dict[str, str] = {
+            "HF_HOME": str(tmp_path / "home"),
+            "HF_HUB_CACHE": str(tmp_path / "elsewhere" / "hub"),
+        }
+        assert launcher.weights_cache_state(environ, self.MODEL) == (True, 10)
+
+    def test_offline_and_local_models_never_download(self, tmp_path: Path) -> None:
+        assert launcher.weights_cache_state(
+            {"HF_HOME": str(tmp_path), "HF_HUB_OFFLINE": "1"}, self.MODEL
+        ) == (True, 0)
+        assert launcher.weights_cache_state({}, str(tmp_path)) == (True, 0)
+
+
+class FakeHub:
+    """A HuggingFace stand-in that answers every HEAD with one status."""
+
+    def __init__(self, status: int) -> None:
+        self.status: int = status
+        self.requests: list[tuple[str, str]] = []
+        hub: FakeHub = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt: str, *args: Any) -> None:
+                return
+
+            def do_HEAD(self) -> None:
+                hub.requests.append((self.path, self.headers.get("Authorization", "")))
+                self.send_response(hub.status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        self.server: HTTPServer = HTTPServer(("127.0.0.1", free_port()), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_port}"
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture()
+def hub() -> Any:
+    hubs: list[FakeHub] = []
+
+    def make(status: int) -> FakeHub:
+        made: FakeHub = FakeHub(status)
+        hubs.append(made)
+        return made
+
+    yield make
+    for made in hubs:
+        made.close()
+
+
+class TestGatedAccess:
+    MODEL: str = "acme/gated-model"
+
+    def environ(
+        self, tmp_path: Path, hub_url: str, token: str = "hf_x"
+    ) -> dict[str, str]:
+        return {"HF_HOME": str(tmp_path), "HF_ENDPOINT": hub_url, "HF_TOKEN": token}
+
+    def test_no_token_is_refused_without_asking_the_hub(
+        self, tmp_path: Path, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(200)
+        problem: Any = launcher.gated_access_problem(
+            self.environ(tmp_path, fake.url, token=""), self.MODEL
+        )
+        assert problem == launcher.AccessProblem.TOKEN_MISSING
+        assert fake.requests == []
+
+    def test_the_older_token_variable_counts(self, tmp_path: Path, hub: Any) -> None:
+        fake: FakeHub = hub(200)
+        environ: dict[str, str] = {
+            "HF_HOME": str(tmp_path),
+            "HF_ENDPOINT": fake.url,
+            "HUGGING_FACE_HUB_TOKEN": "hf_old",
+        }
+        assert launcher.gated_access_problem(environ, self.MODEL) is None
+        assert fake.requests == [
+            (f"/{self.MODEL}/resolve/main/config.json", "Bearer hf_old")
+        ]
+
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            (401, "token_rejected"),
+            (403, "license_not_accepted"),
+            (200, None),
+            (307, None),
+            (404, None),
+            (500, None),
+        ],
+    )
+    def test_the_hubs_answer_names_the_problem(
+        self, tmp_path: Path, hub: Any, status: int, expected: str | None
+    ) -> None:
+        fake: FakeHub = hub(status)
+        problem: Any = launcher.gated_access_problem(
+            self.environ(tmp_path, fake.url), self.MODEL
+        )
+        assert problem == expected
+
+    def test_a_hub_that_cannot_be_reached_blocks_nothing(self, tmp_path: Path) -> None:
+        environ: dict[str, str] = self.environ(
+            tmp_path, f"http://127.0.0.1:{free_port()}"
+        )
+        assert launcher.gated_access_problem(environ, self.MODEL) is None
+
+    def test_weights_on_disk_need_no_token(self, tmp_path: Path, hub: Any) -> None:
+        seed_cache(tmp_path, self.MODEL, weights=10)
+        fake: FakeHub = hub(403)
+        problem: Any = launcher.gated_access_problem(
+            self.environ(tmp_path, fake.url, token=""), self.MODEL
+        )
+        assert problem is None
+        assert fake.requests == []
+
+
+class TestAGatedEngine:
+    """A gated model that cannot be downloaded is refused before anything starts."""
+
+    MODEL: str = "acme/model-a"
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, self.MODEL
+        )
+        managed.extra_env = {"HF_HOME": str(tmp_path / "hf"), "HF_TOKEN": ""}
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    def test_without_a_token_it_stays_parked_and_says_why(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.spec(desired_state="awake", gated=True)
+        digest: str = engine.spec_digest()
+        engine.start()
+
+        assert until(engine.crashed_marker.exists)
+        note: dict[str, Any] = engine.crash_note()
+        assert abs(note.pop("at") - time.time()) < 60
+        assert note == {
+            "spec_digest": digest,
+            "exit_code": None,
+            "signal": None,
+            "reason": (
+                "acme/model-a is a gated HuggingFace model and cannot be "
+                "downloaded: no HF_TOKEN is set"
+            ),
+            "access_problem": "token_missing",
+        }
+        assert engine.events() == []
+        assert not engine.loading_marker.exists()
+        assert http_get(engine.port, "/health")[0] == 200
+        assert engine.process is not None and engine.process.poll() is None
+
+    def test_the_parked_stub_reports_the_verdict_when_asked(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(403)
+        engine.extra_env.update({"HF_ENDPOINT": fake.url, "HF_TOKEN": "hf_x"})
+        engine.spec(desired_state="parked", gated=True)
+        engine.start()
+
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        status: int
+        body: str
+        status, body = http_get(engine.port, "/vif/access")
+        assert status == 200
+        assert json.loads(body) == {
+            "model": self.MODEL,
+            "gated": True,
+            "ok": False,
+            "access_problem": "license_not_accepted",
+        }
+        fake.status = 200
+        assert json.loads(http_get(engine.port, "/vif/access")[1])["ok"] is True
+
+    def test_an_ungated_engine_is_always_ok(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="parked")
+        engine.start()
+
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        report: dict[str, Any] = json.loads(http_get(engine.port, "/vif/access")[1])
+        assert report["gated"] is False
+        assert report["ok"] is True
+        assert report["access_problem"] == ""
+
+    def test_a_licensed_token_loads_normally(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(200)
+        engine.extra_env.update({"HF_ENDPOINT": fake.url, "HF_TOKEN": "hf_x"})
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+
+        assert until(lambda: engine.events() == ["start"])
+        assert until(engine.awake_marker.exists)
+        assert not engine.crashed_marker.exists()
+
+    def test_a_rewritten_spec_is_asked_again(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+        assert until(engine.crashed_marker.exists)
+
+        engine.spec(desired_state="awake", gated=True, generated_at="later")
+        digest: str = engine.spec_digest()
+        assert until(lambda: engine.crash_note()["spec_digest"] == digest)
+        assert engine.events() == []
+
+    def test_a_restart_forgets_the_refusal_because_the_token_may_have_changed(
+        self, tmp_path: Path, engine: ManagedEngine, hub: Any
+    ) -> None:
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+        assert until(engine.crashed_marker.exists)
+        engine.stop()
+
+        fake: FakeHub = hub(200)
+        engine.extra_env.update({"HF_ENDPOINT": fake.url, "HF_TOKEN": "hf_x"})
+        engine.start()
+        assert until(lambda: engine.events() == ["start"])
+        assert until(engine.awake_marker.exists)
+        assert not engine.crashed_marker.exists()
+
+    def test_the_serving_engine_does_not_wait_for_a_refused_neighbour(
+        self, tmp_path: Path, stub_path: Path, state_dir: Path
+    ) -> None:
+        active: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        gated: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-b"
+        )
+        active.spec(desired_state="awake")
+        gated.spec(desired_state="asleep", active=False, gated=True)
+        gated.extra_env = {"HF_HOME": str(tmp_path / "hf"), "HF_TOKEN": ""}
+        try:
+            gated.start()
+            assert until(gated.crashed_marker.exists)
+            launched: float = time.time()
+            active.start()
+            assert until(lambda: active.events() == ["start"], timeout=30)
+            assert active.started_at() - launched < 5
+        finally:
+            for managed in (active, gated):
+                if managed.process is not None:
+                    managed.stop()
+
+
+class TestLoadPhases:
+    """The phase of a load is published, in order, for VIS to follow."""
+
+    MODEL: str = "acme/model-a"
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, self.MODEL
+        )
+        managed.extra_env = {"HF_HOME": str(tmp_path / "hf")}
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    @staticmethod
+    def phase_of(engine: ManagedEngine) -> dict[str, Any] | None:
+        try:
+            note: dict[str, Any] = json.loads(
+                (engine.state_dir / "phase" / engine_key(engine.model)).read_text(
+                    "utf-8"
+                )
+            )
+        except (OSError, json.JSONDecodeError):
+            return None
+        return note
+
+    def test_a_first_load_walks_downloading_loading_compiling(
+        self, tmp_path: Path, engine: ManagedEngine
+    ) -> None:
+        hf_home: Path = tmp_path / "hf"
+        seed_cache(hf_home, self.MODEL, config=100, incomplete=4000)
+        # The stand-in prints vLLM's "weights are loaded" line three seconds in.
+        engine.extra_env.update(
+            {
+                "FAKE_VLLM_READY_AFTER": "6",
+                "FAKE_VLLM_LATE_AFTER": "3",
+                "FAKE_VLLM_LATE_STDOUT": "INFO Loading weights took 1.20 seconds",
+            }
+        )
+        engine.spec(desired_state="awake")
+        digest: str = engine.spec_digest()
+        engine.start()
+
+        seen: list[str] = []
+
+        def observe() -> dict[str, Any] | None:
+            note: dict[str, Any] | None = self.phase_of(engine)
+            if note is not None and (not seen or seen[-1] != note["phase"]):
+                seen.append(note["phase"])
+            return note
+
+        assert until(
+            lambda: (observe() or {}).get("phase") == "downloading"
+            and observe()["downloaded_bytes"] == 4100
+        )
+        note: dict[str, Any] | None = observe()
+        assert note is not None
+        assert note["spec_digest"] == digest
+        finish_download(hf_home, self.MODEL)
+        assert until(lambda: (observe() or {}).get("phase") == "compiling")
+        assert until(engine.ready_marker.exists)
+        assert self.phase_of(engine) is None
+        assert [phase for phase in seen if phase != "waiting"] == [
+            "downloading",
+            "loading",
+            "compiling",
+        ]
+
+    def test_weights_on_disk_skip_the_download(
+        self, tmp_path: Path, engine: ManagedEngine
+    ) -> None:
+        seed_cache(tmp_path / "hf", self.MODEL, config=100, weights=4000)
+        engine.extra_env.update({"FAKE_VLLM_READY_AFTER": "4"})
+        engine.spec(desired_state="awake")
+        engine.start()
+
+        assert until(lambda: (self.phase_of(engine) or {}).get("phase") == "loading")
+        note: dict[str, Any] | None = self.phase_of(engine)
+        assert note is not None
+        assert "downloaded_bytes" not in note
+        assert until(engine.ready_marker.exists)
+
+    def test_a_phase_never_moves_backwards(
+        self, tmp_path: Path, engine: ManagedEngine
+    ) -> None:
+        seed_cache(tmp_path / "hf", self.MODEL, weights=10)
+        engine.extra_env.update(
+            {
+                "FAKE_VLLM_READY_AFTER": "4",
+                "FAKE_VLLM_STDOUT": "Model loading took 4 GiB",
+            }
+        )
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: (self.phase_of(engine) or {}).get("phase") == "compiling")
+        (
+            tmp_path
+            / "hf"
+            / "hub"
+            / "models--acme--model-a"
+            / "blobs"
+            / "late.incomplete"
+        ).write_bytes(b"x")
+        time.sleep(1)
+        assert (self.phase_of(engine) or {}).get("phase") == "compiling"
+
+    def test_a_load_that_dies_leaves_no_phase(
+        self, tmp_path: Path, engine: ManagedEngine
+    ) -> None:
+        seed_cache(tmp_path / "hf", self.MODEL, weights=10)
+        engine.extra_env.update(
+            {"FAKE_VLLM_NEVER_READY": "1", "FAKE_VLLM_CRASH_AFTER": "1.5"}
+        )
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: self.phase_of(engine) is not None)
+        assert engine.process is not None
+        engine.process.wait(timeout=30)
+        assert self.phase_of(engine) is None
+
+    def test_a_hot_move_publishes_no_phase(
+        self, tmp_path: Path, engine: ManagedEngine
+    ) -> None:
+        seed_cache(tmp_path / "hf", self.MODEL, weights=10)
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(engine.awake_marker.exists)
+        engine.spec(desired_state="asleep", active=False)
+        assert until(lambda: engine.events() == ["start", "sleep"])
+        assert self.phase_of(engine) is None

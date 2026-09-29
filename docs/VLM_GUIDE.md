@@ -137,19 +137,29 @@ curl -X POST -H "X-API-Key: $VIS_API_KEY" \
 curl -H "X-API-Key: $VIS_API_KEY" http://<VIS host>:5001/vlm/status                  # progress of the switch
 ```
 
+**First activation.** A model whose weights are not on disk yet is downloaded when it is first activated, then loaded and compiled, which takes minutes. The Manager (and `GET /vlm/status`) says which of those it is doing: `downloading` with how much has arrived, `loading`, `compiling`, then a test request. Each of them is skipped when it does not apply, so a model that is already on disk and compiled starts in seconds.
+
+**Engine logs.** The Manager's model dropdown has an **Engine logs** view with the last lines of each engine's output, the same lines `docker compose logs vif-model-<model>` prints, for when a download stalls or a start fails.
+
 The active model persists across restarts. A stream's `model_name` must be the model that is serving: a request for a model that is resting is refused rather than waking it, and the stream reports itself degraded until that model is activated. The Manager UI's **Verify** button reads the models the endpoint serves and adopts the served model into the stream's config.
 
 | Model | Notes | Pre-upgrade `VLM_CONF` |
 |---|---|---|
 | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card | `qwen` |
 | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM. Cannot sleep, so it always rests parked | `nemotron` |
-| `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env`; fits a 24 GB card | `gemma` |
+| `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env` ([gated models](#gated-models)); fits a 24 GB card | `gemma` |
 | `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load, fits an 8 GB card. Uses the bundled patch mount, already wired in `docker-compose.yaml` | `cosmos-edge` |
 | `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B, ~32 GB of BF16 weights); needs a 40 GB+ card | `cosmos-nano` |
 
 **Upgrading from the single `vlm` sidecar:** on the first start, VIS makes the model your `.env`'s `VLM_CONF` named the active one, so the stack keeps serving what it served; without `VLM_CONF`, Qwen. `VLM_CONF` is read only for that and can be removed afterwards. The `vlm-env/` files and their `VLM_*` knobs no longer configure the managed engines. Stream configs that point at `http://vlm.docker:8000/v1` keep working with no edit.
 
 **Hosts without sleep mode:** vLLM's sleep mode needs CUDA UVA, which some platforms (e.g. WSL2) do not provide. Set `VLM_FORCE_ALL_COLD=true` in `.env` there: every resting model is parked, and switches take a cold start.
+
+### Gated models
+
+Gemma is gated: its weights download only for a HuggingFace account that has accepted the model's license. Accept it on the model's page (<https://huggingface.co/google/gemma-3-4b-it>) while logged in as the account whose access token you will use, put a read token for that account in `.env` as `HF_TOKEN`, and recreate the engines (`docker compose --profile vlm up -d`).
+
+Without that, activating the model is refused at once, before the serving model is touched, and the refusal says which of the three is wrong (no token, a token HuggingFace does not accept, a license not accepted) and links the license page. The serving model keeps serving. A model whose weights are already on disk is not asked about its license again. The Manager never asks for or stores the token.
 
 ### Structured output
 
