@@ -190,6 +190,8 @@ THE STATE VOLUME, shared with VIS and every other engine:
   <state dir>/active-model        the id that should serve    (written by VIS)
   <state dir>/ready/<key>         loaded, awake or asleep     (written here)
   <state dir>/awake/<key>         awake and serving           (written here)
+  <state dir>/loading/<key>       a load is under way         (written here)
+  <state dir>/crashed/<key>       the last load died          (written here)
   <state dir>/logs/<key>.log      this engine's output        (written here)
 
 The awake marker is created after a load that is not followed by a sleep and
@@ -199,6 +201,20 @@ has exited, so a restart of the whole pool never finds a neighbour's marker
 from before it; and each launcher clears both of its own markers when it
 starts, so one left by a launcher that was killed outright never misleads the
 pool.
+
+A load that dies leaves `crashed/<key>`: JSON with the digest of the spec the
+load started from (the SHA-256 of the spec file's bytes), vLLM's exit code or
+the signal that killed it, and a reason. VIS reads it to fail a cold start
+without waiting out its budget. A restarted launcher whose spec still has that
+digest does not load again -- it serves the parked health stub, the way a failed
+sleep or wake is not retried, until the spec is rewritten -- so an engine that
+crashes while loading does not crash-loop under Docker's restart policy. A load
+that succeeds removes the marker; VIS removes it before a new cold start.
+`loading/<key>` is what tells a launcher that died mid-load (SIGKILL, the
+container's OOM kill) from one that never loaded: a restart that finds it with
+the current digest and no `ready/<key>` writes the crash marker itself. A clean
+stop, or a load that succeeds, removes it. These two markers apply to engines
+run from a spec.
 
 AN EMPTY VALUE COUNTS AS UNSET, for every variable above, as it did for the
 bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
@@ -232,7 +248,7 @@ from types import FrameType
 from typing import IO, Any, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-28.5"
+LAUNCHER_REVISION: str = "2026-09-29.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -244,6 +260,8 @@ ENGINE_SPEC_DIRNAME: str = "engines"
 ENGINE_LOG_DIRNAME: str = "logs"
 ENGINE_READY_DIRNAME: str = "ready"
 ENGINE_AWAKE_DIRNAME: str = "awake"
+ENGINE_LOADING_DIRNAME: str = "loading"
+ENGINE_CRASHED_DIRNAME: str = "crashed"
 ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
 DEFAULT_SPEC_TIMEOUT_SECONDS: int = 300
@@ -336,6 +354,10 @@ class LaunchPlan:
     # it reads the other engines' markers.
     ready_dir: str = ""
     awake_dir: str = ""
+    # Where a load in progress and a load that died are recorded. Spec path
+    # only: the digest they carry is the spec's.
+    loading_dir: str = ""
+    crashed_dir: str = ""
     # The other engines' specs, which the boot order reads. Spec path only.
     engines_dir: str = ""
     log_file: str = ""
@@ -362,6 +384,20 @@ class LaunchPlan:
         if not self.awake_dir:
             return ""
         return str(Path(self.awake_dir) / engine_key(self.model))
+
+    @property
+    def loading_file(self) -> str:
+        """This engine's load-in-progress marker, or "" when there is nowhere."""
+        if not self.loading_dir:
+            return ""
+        return str(Path(self.loading_dir) / engine_key(self.model))
+
+    @property
+    def crashed_file(self) -> str:
+        """This engine's crash marker, or "" when there is nowhere."""
+        if not self.crashed_dir:
+            return ""
+        return str(Path(self.crashed_dir) / engine_key(self.model))
 
     @property
     def watches(self) -> bool:
@@ -688,6 +724,8 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         state_file=str(Path(state_dir) / ACTIVE_MODEL_FILENAME) if state_dir else "",
         ready_dir=str(Path(state_dir) / ENGINE_READY_DIRNAME) if state_dir else "",
         awake_dir=str(Path(state_dir) / ENGINE_AWAKE_DIRNAME) if state_dir else "",
+        loading_dir=str(Path(state_dir) / ENGINE_LOADING_DIRNAME) if state_dir else "",
+        crashed_dir=str(Path(state_dir) / ENGINE_CRASHED_DIRNAME) if state_dir else "",
         engines_dir=str(Path(spec_file).parent) if spec_file else "",
         log_file=engine_log_file(environ, state_dir, model),
         load_lock_file=str(document.get("load_lock_file") or ""),
@@ -1000,6 +1038,10 @@ class Engine:
         # The hot move (sleep or wake) that last failed, and the digest of the
         # decision it failed under. It is not tried again until that changes.
         self._failed_move: tuple[DesiredState, str] | None = None
+        # The digest of the spec the load in progress started from, and the
+        # crash digest already announced as the reason for staying parked.
+        self._load_digest: str = ""
+        self._crash_announced: str = ""
 
     # -- signals ------------------------------------------------------------
 
@@ -1016,6 +1058,7 @@ class Engine:
         # as the rest of the pool loaded, and load first.
         self.clear_awake()
         self.clear_ready()
+        self.clear_loading()
         if self.child is not None and self.child.poll() is None:
             self.child.send_signal(signum)
             self._forwarded = True
@@ -1204,6 +1247,125 @@ class Engine:
 
     def clear_awake(self) -> None:
         self._remove_marker(self.plan.awake_file)
+
+    # -- the load that died -------------------------------------------------
+
+    @staticmethod
+    def _read_marker(path: str) -> dict[str, Any] | None:
+        """A JSON marker, or None when it is absent or unreadable."""
+        if not path:
+            return None
+        try:
+            document: Any = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return document if isinstance(document, dict) else None
+
+    def _write_json_marker(
+        self, path: str, document: dict[str, Any], what: str
+    ) -> None:
+        """Through a rename: VIS polls this file and must never read half of it."""
+        if not path:
+            return
+        target: Path = Path(path)
+        temporary: Path = target.with_name(f".{target.name}.tmp")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(json.dumps(document) + "\n", encoding="utf-8")
+            os.replace(temporary, target)
+        except OSError as exc:
+            warn(f"the {what} marker {path} could not be written ({exc}).")
+
+    def mark_loading(self) -> None:
+        """Note the load about to start, and the spec it starts from."""
+        self._load_digest = self._decision_digest()
+        self._write_json_marker(
+            self.plan.loading_file,
+            {"spec_digest": self._load_digest, "at": time.time()},
+            "loading",
+        )
+
+    def clear_loading(self) -> None:
+        self._remove_marker(self.plan.loading_file)
+
+    def clear_crashed(self) -> None:
+        self._remove_marker(self.plan.crashed_file)
+
+    def record_crash(
+        self, digest: str, exit_code: int | None, signal_number: int | None, reason: str
+    ) -> None:
+        self._write_json_marker(
+            self.plan.crashed_file,
+            {
+                "spec_digest": digest,
+                "exit_code": exit_code,
+                "signal": signal_number,
+                "at": time.time(),
+                "reason": reason,
+            },
+            "crashed",
+        )
+
+    def record_child_crash(self) -> None:
+        """The engine exited before it was ready: say how, for VIS and for us."""
+        assert self.child is not None
+        status: int = self.child.wait()
+        if status < 0:
+            reason: str = f"vLLM was killed by signal {-status} during its load"
+            self.record_crash(self._load_digest, None, -status, reason)
+        else:
+            reason = f"vLLM exited with code {status} during its load"
+            self.record_crash(self._load_digest, status, None, reason)
+        warn(f"{reason}; not loading again until the desired state is rewritten.")
+
+    def reconcile_dead_load(self, was_loaded: bool) -> None:
+        """
+        Turn a load marker left by a launcher that died into a crash marker.
+
+        A `loading/` marker with the current digest and no readiness marker
+        means the previous launcher died mid-load (SIGKILL, the container's
+        OOM kill), so nobody wrote a crash marker. A marker for another spec
+        is just stale.
+        """
+        marker: dict[str, Any] | None = self._read_marker(self.plan.loading_file)
+        if marker is None:
+            return
+        self.clear_loading()
+        digest: str = self._decision_digest()
+        if was_loaded or marker.get("spec_digest") != digest:
+            return
+        known: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
+        if known is not None and known.get("spec_digest") == digest:
+            return
+        self.record_crash(
+            digest,
+            None,
+            None,
+            "the previous launcher died while this engine was loading "
+            "(the container was killed or ran out of memory)",
+        )
+
+    def crash_parked(self) -> bool:
+        """
+        Whether the last load of this very spec died, so it is not tried again.
+
+        The same posture as a failed sleep or wake: a new spec is a new
+        decision, and gets a new attempt.
+        """
+        marker: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
+        if marker is None:
+            return False
+        digest: str = self._decision_digest()
+        if not digest or marker.get("spec_digest") != digest:
+            return False
+        if self._crash_announced != digest:
+            warn(
+                f"the last load of {self.plan.model} died "
+                f"({marker.get('reason') or 'no reason recorded'}); staying "
+                "parked until the desired state is rewritten."
+            )
+            self._crash_announced = digest
+        return True
 
     # -- health -------------------------------------------------------------
 
@@ -1502,6 +1664,7 @@ class Engine:
             self.release_load_lock()
             self.hold_parked()
             return None
+        self.mark_loading()
         self.start()
         # A stop that landed while the child was being spawned found no child
         # to forward to; hand it over now.
@@ -1519,10 +1682,15 @@ class Engine:
             return EXIT_HEALTH_TIMEOUT
         if health == 2:
             self.release_load_lock()
-            return self.await_child()
+            code: int = self.await_child()
+            if not self.terminating:
+                self.record_child_crash()
+            return code
 
         self.state = DesiredState.AWAKE
         self.mark_ready()
+        self.clear_crashed()
+        self.clear_loading()
         if target is DesiredState.ASLEEP:
             self.move_hot(target)
         if self.state is DesiredState.AWAKE:
@@ -1544,7 +1712,9 @@ class Engine:
         hot: bool = DesiredState.PARKED not in (target, self.state)
         if hot and self._already_failed(target):
             return None
-        if self.state is DesiredState.PARKED and self.load_guarded(target):
+        if self.state is DesiredState.PARKED and (
+            self.load_guarded(target) or self.crash_parked()
+        ):
             return None
         log(f"desired state: {self.state} -> {target}.")
         if target is DesiredState.PARKED:
@@ -1568,10 +1738,18 @@ class Engine:
         # Markers left by a launcher that died without cleaning up (SIGKILL,
         # OOM, a host crash) would tell the neighbours this engine is loaded,
         # or serving.
+        was_loaded: bool = (
+            bool(self.plan.ready_file) and Path(self.plan.ready_file).exists()
+        )
         self.clear_ready()
         self.clear_awake()
         target: DesiredState = self.poll_desired()
-        if target is DesiredState.PARKED or self.load_guarded(target):
+        self.reconcile_dead_load(was_loaded)
+        if (
+            target is DesiredState.PARKED
+            or self.load_guarded(target)
+            or self.crash_parked()
+        ):
             self.hold_parked()
         else:
             code: int | None = self.start_engine(target)
@@ -1594,6 +1772,7 @@ class Engine:
     def close(self) -> None:
         self.clear_awake()
         self.clear_ready()
+        self.clear_loading()
         self.release_load_lock()
         self._stub.stop()
 

@@ -12,6 +12,10 @@ Knobs (env):
   FAKE_VLLM_STDOUT         text written to stdout at startup, one line per \n
   FAKE_VLLM_RECORD_ENV     comma-separated variables recorded on the start event
   FAKE_VLLM_WAKE_FAILS     "1" makes /wake_up answer 500 and stay asleep
+  FAKE_VLLM_CRASH_AFTER    seconds after startup at which it dies on its own,
+                           as an engine that runs out of memory while loading
+  FAKE_VLLM_CRASH_CODE     the exit code of that crash (1)
+  FAKE_VLLM_CRASH_SIGNAL   a signal number to die by instead of exiting
 
 It also answers /is_sleeping, /sleep and /wake_up, so the launcher's desired
 state can be read back the way VIS reads it.
@@ -126,5 +130,14 @@ if __name__ == "__main__":
                 raise
             time.sleep(0.2)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    crash_after: str = os.environ.get("FAKE_VLLM_CRASH_AFTER", "")
+    if crash_after:
+        time.sleep(float(crash_after))
+        record("crash", model=MODEL)
+        crash_signal: str = os.environ.get("FAKE_VLLM_CRASH_SIGNAL", "")
+        if crash_signal:
+            os.kill(os.getpid(), int(crash_signal))
+            time.sleep(60)
+        os._exit(int(os.environ.get("FAKE_VLLM_CRASH_CODE", "1")))
     while True:
         time.sleep(3600)
