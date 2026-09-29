@@ -300,6 +300,17 @@ class TestStopGrace:
 
 
 class TestHealthcheck:
+    def test_a_cold_start_is_covered_by_the_launcher_s_starting_file(
+        self, engines: dict[str, dict[str, Any]]
+    ) -> None:
+        """The file the healthcheck accepts is the one the launcher writes, and
+        it lives in the container, not on the shared state volume."""
+        for engine in engines.values():
+            assert environment(engine)["VIF_STARTING_FILE"] == (
+                launcher.DEFAULT_STARTING_FILE
+            )
+            assert not launcher.DEFAULT_STARTING_FILE.startswith(STATE_DIR + "/")
+
     def test_the_grace_covers_every_resident_loading_in_turn(
         self, engines: dict[str, dict[str, Any]]
     ) -> None:
@@ -310,7 +321,7 @@ class TestHealthcheck:
             healthcheck: dict[str, Any] = engine["healthcheck"]
             assert healthcheck["test"] == [
                 "CMD-SHELL",
-                "curl -fsS http://localhost:8000/health",
+                'curl -fsS http://localhost:8000/health || test -e "$${VIF_STARTING_FILE}"',
             ]
             assert healthcheck["start_period"] == "10200s"
             # The serving engine loads last: the whole wait for the rest of

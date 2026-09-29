@@ -10,6 +10,9 @@ x-vif-model-engine-env: &vif-model-engine-env
     # Where the launcher finds its spec (<dir>/engines/<engine key>.json) and
     # writes its readiness marker and log. Must be the same path VIS uses.
     VIF_STATE_DIR: /vif-state
+    # Present while an engine brought back from parked starts: the healthcheck
+    # below accepts it while nothing answers /health yet.
+    VIF_STARTING_FILE: /tmp/vif-engine-starting
     # Guards the engine's control endpoints (/sleep, /wake_up, ...) with
     # VLLM_API_KEY. A no-op when no key is set.
     VIF_ENGINE_MIDDLEWARE: vif_auth.VifAuthMiddleware
@@ -68,8 +71,10 @@ x-vif-model-engine: &vif-model-engine
     # No `ports:`, on purpose: engines are reached only through VIS.
     healthcheck:
       # 200 while serving, while asleep, and while parked (the launcher
-      # answers it itself), so a resting engine is never marked unhealthy.
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health"]
+      # answers it itself), so a resting engine is never marked unhealthy. A
+      # cold start from parked outlasts five failed checks while vLLM loads,
+      # so the launcher's starting file stands in for /health until it answers.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || test -e \"$${VIF_STARTING_FILE}\""]
       interval: 30s
       timeout: 10s
       retries: 5
