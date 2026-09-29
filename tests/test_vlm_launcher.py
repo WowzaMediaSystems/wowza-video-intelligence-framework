@@ -422,6 +422,21 @@ class TestSpecPath:
         with pytest.raises(launcher.ConfigError, match="missing 'args'"):
             launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
 
+    def test_a_disabled_spec_is_parked_whatever_else_it_says(
+        self, tmp_path: Path
+    ) -> None:
+        path: Path = write_spec(tmp_path, desired_state="asleep", disabled=True)
+        plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        assert (plan.disabled, plan.desired_state) == (
+            True,
+            launcher.DesiredState.PARKED,
+        )
+
+    def test_a_spec_without_the_flag_is_not_disabled(self, tmp_path: Path) -> None:
+        path: Path = write_spec(tmp_path)
+        plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+        assert plan.disabled is False
+
     def test_an_engine_that_cannot_sleep_is_parked_instead_of_refused(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -1278,6 +1293,98 @@ class TestWatchLoop:
         assert "serving now" in output
 
 
+class TestADisabledEngine:
+    """A model the catalog overlay disables: parked for good, touching nothing."""
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    @staticmethod
+    def says_disabled(engine: ManagedEngine) -> bool:
+        """Whether the stub answering now says so; a stub mid-restart does not."""
+        status, body = http_get(engine.port, "/vif/parked")
+        return status == 200 and json.loads(body).get("disabled") is True
+
+    def disabled_spec(self, engine: ManagedEngine, **overrides: Any) -> Path:
+        return engine.spec(
+            desired_state="parked",
+            active=False,
+            sleep_mode=False,
+            args=[],
+            disabled=True,
+            load_lock_file=str(engine.state_dir / "load.lock"),
+            gated=True,
+            **overrides,
+        )
+
+    def test_it_parks_without_the_lock_the_card_or_the_hub(
+        self, engine: ManagedEngine
+    ) -> None:
+        self.disabled_spec(engine)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/health")[0] == 200)
+
+        assert json.loads(http_get(engine.port, "/vif/parked")[1]) == {
+            "parked": True,
+            "model": "acme/model-a",
+            "launcher_revision": launcher.LAUNCHER_REVISION,
+            "disabled": True,
+        }
+        assert http_get(engine.port, "/vif/access")[0] == 404
+        assert http_get(engine.port, "/is_sleeping")[0] == 404
+        # Several watch polls: nothing is started, locked, sized or noted.
+        time.sleep(1.5)
+        assert engine.events() == []
+        assert not (engine.state_dir / "load.lock").exists()
+        assert not engine.sized_marker.exists()
+        assert not engine.crashed_marker.exists()
+        assert not engine.loading_marker.exists()
+        output: str = engine.stop()
+        assert (
+            "acme/model-a is disabled by the catalog overlay: it rests parked, "
+            "with no engine process, no weights and no load lock"
+        ) in output
+
+    def test_a_spec_without_the_flag_brings_it_back(
+        self, engine: ManagedEngine
+    ) -> None:
+        self.disabled_spec(engine)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+
+        engine.spec(desired_state="awake", active=True)
+        assert until(lambda: engine.events() == ["start"])
+        assert until(lambda: engine.ready_marker.exists())
+        assert http_get(engine.port, "/vif/parked")[0] == 404
+
+    def test_disabling_a_serving_engine_stops_it(self, engine: ManagedEngine) -> None:
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+
+        self.disabled_spec(engine)
+        assert until(lambda: engine.events() == ["start", "sigterm"])
+        assert until(lambda: self.says_disabled(engine))
+
+    def test_the_stub_says_so_once_a_parked_engine_is_disabled(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.spec(desired_state="parked", active=False)
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        assert "disabled" not in json.loads(http_get(engine.port, "/vif/parked")[1])
+
+        self.disabled_spec(engine)
+        assert until(lambda: self.says_disabled(engine))
+        assert engine.events() == []
+
+
 class TestBootOrder:
     """The engine that should be serving loads last, after the hot pool."""
 
@@ -1334,16 +1441,18 @@ class TestBootOrder:
     def test_parked_engines_are_not_waited_for(
         self, tmp_path: Path, stub_path: Path, state_dir: Path
     ) -> None:
-        active, parked, sleepless = self._pool(
+        active, parked, sleepless, disabled = self._pool(
             tmp_path,
             stub_path,
             state_dir,
-            ["acme/model-a", "acme/model-b", "acme/model-c"],
+            ["acme/model-a", "acme/model-b", "acme/model-c", "acme/model-d"],
         )
         active.spec(desired_state="awake")
         parked.spec(desired_state="parked", active=False)
         # Asked to sleep without sleep mode: its launcher parks it.
         sleepless.spec(desired_state="asleep", active=False, sleep_mode=False)
+        # Disabled, whatever else its spec says: never loaded.
+        disabled.spec(desired_state="asleep", active=False, disabled=True)
         launched: float = time.time()
         active.start()
         assert until(lambda: active.events() == ["start"], timeout=30)
@@ -1941,9 +2050,12 @@ class TestTheLastLoadIsNamedForWhatItWas:
     """A crash note stands for a load that died, or one refused before it started."""
 
     def test_a_load_that_died(self) -> None:
-        assert launcher.last_load_words(
-            "acme/model-a", {"exit_code": 1, "reason": "vLLM exited with code 1"}
-        ) == "the last load of acme/model-a died (vLLM exited with code 1)"
+        assert (
+            launcher.last_load_words(
+                "acme/model-a", {"exit_code": 1, "reason": "vLLM exited with code 1"}
+            )
+            == "the last load of acme/model-a died (vLLM exited with code 1)"
+        )
 
     def test_a_load_refused_for_memory(self) -> None:
         assert launcher.last_load_words(
@@ -1955,10 +2067,13 @@ class TestTheLastLoadIsNamedForWhatItWas:
         )
 
     def test_a_load_refused_for_its_license(self) -> None:
-        assert launcher.last_load_words(
-            "acme/model-a",
-            {"access_problem": "token_missing", "reason": "no HF_TOKEN is set"},
-        ) == "the last load of acme/model-a was refused (no HF_TOKEN is set)"
+        assert (
+            launcher.last_load_words(
+                "acme/model-a",
+                {"access_problem": "token_missing", "reason": "no HF_TOKEN is set"},
+            )
+            == "the last load of acme/model-a was refused (no HF_TOKEN is set)"
+        )
 
     def test_a_note_with_no_reason(self) -> None:
         assert launcher.last_load_words("acme/model-a", {}) == (

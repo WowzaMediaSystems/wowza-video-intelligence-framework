@@ -155,6 +155,31 @@ The active model persists across restarts. A stream's `model_name` must be the m
 
 **Hosts without sleep mode:** vLLM's sleep mode needs CUDA UVA, which some platforms (e.g. WSL2) do not provide. Set `VLM_FORCE_ALL_COLD=true` in `.env` there: every resting model is parked, and switches take a cold start.
 
+### Customizing the catalog: the local overlay
+
+VIS ships the model catalog: every supported model's sizing, tuning per GPU class and resting behaviour. A deployment changes it in one optional file, `./vis/models/vlm-catalog.local.json`, which VIS reads when it starts. It lives under `./vis/`, which is not tracked, so a framework `git pull` never touches it. Edit it, then restart VIS (`docker compose restart video-intelligence-service-gpu`); the engines follow the specs VIS writes them without a restart of their own.
+
+```json
+{
+  "version": 1,
+  "models": [
+    { "id": "Qwen/Qwen3-VL-4B-Instruct-FP8", "gpu_memory_utilization": 0.45 },
+    { "id": "nvidia/Cosmos3-Nano", "tier": "cold" },
+    { "id": "google/gemma-3-4b-it", "disabled": true }
+  ]
+}
+```
+
+Each entry names a model by `id` and sets only the fields it changes; lists such as `tuning` are replaced whole. `force_all_cold: true` at the top level does what `VLM_FORCE_ALL_COLD=true` does. A file VIS cannot use is never fatal: VIS logs an ERROR naming the entry and the field at fault, ignores the whole file and serves the shipped catalog.
+
+**Disabling a model.** `"disabled": true` takes a model out of the deployment: it disappears from `GET /vlm/models` and the Manager's dropdown, it is never pre-flighted or activated (`409 model_disabled`), and its engine container rests on the launcher's health stub for good — no vLLM process, no weights in memory, no GPU context, never the load lock. The container still reports healthy, so `docker compose up --wait` keeps working, and `GET /vif/parked` on it answers with `"disabled": true`. `GET /vlm/status` lists it under `disabled_models`. This is how to free the host RAM and the boot time a model you never use would cost.
+
+Disabling the model that is serving is not refused: after the restart it keeps serving, VIS logs a WARNING naming it, and the flag takes effect the moment another model is activated. The first start after an upgrade never picks a disabled model either: a `VLM_CONF` naming one falls back to the first model that is not disabled.
+
+To bring a model back, remove the flag and restart VIS. The engine loads again as it would after any restart: at boot if it rests asleep, at its next activation if it is parked.
+
+**Migrating from `vlm-env/*.env.local` copies.** The documented way to tune a model used to be copying its profile (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local`). The managed engines do not read those files. Write the lines you changed as fields of that model's overlay entry instead: `VLM_GPU_MEMORY_UTILIZATION` → `gpu_memory_utilization`, `VLM_MAX_MODEL_LEN` → `max_model_len`, `VLM_MAX_NUM_SEQS` → `max_num_seqs`, `VLM_MAX_NUM_BATCHED_TOKENS` → `max_num_batched_tokens`, `VLM_MAX_IMAGES_PER_PROMPT` → `image_cap`, and `VLM_EXTRA_ARGS` → the `extra_args` of each entry in `tuning` (one list element per whitespace-separated token). `GET /vlm/models` shows the result.
+
 ### Gated models
 
 Gemma is gated: its weights download only for a HuggingFace account that has accepted the model's license. Accept it on the model's page (<https://huggingface.co/google/gemma-3-4b-it>) while logged in as the account whose access token you will use, put a read token for that account in `.env` as `HF_TOKEN`, and recreate the engines (`docker compose --profile vlm up -d`).

@@ -169,7 +169,14 @@ couple of seconds; a spec whose content has not changed costs one read):
            cannot be woken from sleep.
 
 VIS moves an engine between those three by rewriting its spec; nothing else
-is needed on this side. A sleep or a wake that fails is not retried until the
+is needed on this side.
+
+A DISABLED ENGINE is one the catalog overlay takes out of the deployment. Its
+spec says `disabled: true` (and `parked`): the launcher serves the health stub
+for good, adds `"disabled": true` to what `/vif/parked` answers, and never
+loads the model, takes the load lock, reads the card or asks the hub about it
+-- `/vif/access` is not answered. A later spec without the flag is followed
+like any other change of desired state. A sleep or a wake that fails is not retried until the
 spec changes: VIS decides what happens to an engine that would not move.
 
 THE POOL DUTIES, when several engines share one card:
@@ -312,7 +319,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-29.5"
+LAUNCHER_REVISION: str = "2026-09-30.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -488,6 +495,8 @@ class LaunchPlan:
     # runs `args` as they are. Spec path only.
     sized_dir: str = ""
     load_sizing: LoadSizing | None = None
+    # Taken out of the deployment by the catalog overlay: parked for good.
+    disabled: bool = False
     gpu_ids: str = ""
     tensor_parallel_size: int = 1
     # The other engines' specs, which the boot order reads. Spec path only.
@@ -1123,6 +1132,13 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
     sleep_mode: bool = bool(document["sleep_mode"])
     model: str = str(document["model"])
     desired: DesiredState = read_desired_state(document)
+    disabled: bool = document.get("disabled") is True
+    if disabled and desired is not DesiredState.PARKED:
+        warn(
+            f"the engine spec disables {model} but asks for {desired}; a "
+            "disabled engine is parked."
+        )
+        desired = DesiredState.PARKED
     if desired is DesiredState.ASLEEP and not sleep_mode:
         # Capability beats configuration, on this side too: an engine with no
         # /sleep endpoint cannot put itself to sleep, so it parks -- the only
@@ -1158,6 +1174,7 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         gated=bool(document.get("gated", False)),
         sized_dir=str(Path(state_dir) / ENGINE_SIZED_DIRNAME) if state_dir else "",
         load_sizing=load_sizing_from_spec(document),
+        disabled=disabled,
         gpu_ids=gpu_ids,
         tensor_parallel_size=spec_int(document, "tensor_parallel_size", 1),
         engines_dir=str(Path(spec_file).parent) if spec_file else "",
@@ -1468,6 +1485,8 @@ class ParkedStub:
         self._host: str = host
         self._server: _StubServer | None = None
         self._thread: threading.Thread | None = None
+        # Whether the stub now serving says the engine is disabled.
+        self.disabled: bool = False
 
     @property
     def running(self) -> bool:
@@ -1478,16 +1497,19 @@ class ParkedStub:
         port: int,
         model: str,
         access: Callable[[], dict[str, Any]] | None = None,
+        disabled: bool = False,
     ) -> None:
         if self._server is not None:
             return
-        body: bytes = json.dumps(
-            {
-                "parked": True,
-                "model": model,
-                "launcher_revision": LAUNCHER_REVISION,
-            }
-        ).encode("utf-8")
+        self.disabled = disabled
+        answer: dict[str, Any] = {
+            "parked": True,
+            "model": model,
+            "launcher_revision": LAUNCHER_REVISION,
+        }
+        if disabled:
+            answer["disabled"] = True
+        body: bytes = json.dumps(answer).encode("utf-8")
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version: str = "HTTP/1.1"
@@ -1652,7 +1674,7 @@ class Engine:
 
         An unreadable spec is most likely a write in flight. An `asleep` spec
         without sleep mode counts as parked, which is what that engine's own
-        launcher makes of it.
+        launcher makes of it, and so does a disabled one.
         """
         if not self.plan.engines_dir:
             return []
@@ -1666,7 +1688,9 @@ class Engine:
                 document: dict[str, Any] = json.loads(raw)
                 model: str = str(document.get("model") or path.stem)
                 desired: DesiredState = read_desired_state(document)
-                if desired is DesiredState.ASLEEP and not document.get("sleep_mode"):
+                if document.get("disabled") is True or (
+                    desired is DesiredState.ASLEEP and not document.get("sleep_mode")
+                ):
                     desired = DesiredState.PARKED
             except (OSError, json.JSONDecodeError, KeyError, ConfigError):
                 peers.append(Peer(model=path.stem, desired=None))
@@ -2543,10 +2567,21 @@ class Engine:
     def hold_parked(self) -> None:
         """Rest parked, with the health stub up, until the guard lifts."""
         self.state = DesiredState.PARKED
+        if self.plan.disabled:
+            # Nothing is ever loaded, so there is nothing to ask the hub.
+            self._stub.start(self.plan.port, self.plan.model, disabled=True)
+            return
         self._stub.start(self.plan.port, self.plan.model, self.access_report)
 
     def enter(self, target: DesiredState) -> int | None:
         """One desired-state transition. An exit code means the container stops."""
+        if (
+            self.state is DesiredState.PARKED
+            and self._stub.disabled != self.plan.disabled
+        ):
+            # The stub's answer says whether the engine is disabled.
+            self._stub.stop()
+            self.hold_parked()
         if target is self.state:
             return None
         hot: bool = DesiredState.PARKED not in (target, self.state)
@@ -2660,6 +2695,7 @@ def describe(plan: LaunchPlan) -> dict[str, Any]:
             "load_sizing": (
                 None if plan.load_sizing is None else asdict(plan.load_sizing)
             ),
+            "disabled": plan.disabled,
             "sized_file": plan.sized_file,
             "health_timeout_seconds": plan.health_timeout_seconds,
             "watches": plan.watches,
@@ -2689,6 +2725,13 @@ def main() -> int:
         print(json.dumps(describe(plan), indent=2))
         return 0
 
+    if plan.disabled:
+        log(
+            f"{plan.model} is disabled by the catalog overlay: it rests parked, "
+            "with no engine process, no weights and no load lock, until VIS "
+            "writes a spec without the flag."
+        )
+        return supervise(plan, dict(os.environ))
     if plan.desired_state is DesiredState.PARKED:
         log(f"{plan.model} starts parked: no engine process until VIS asks for one.")
         return supervise(plan, dict(os.environ))
