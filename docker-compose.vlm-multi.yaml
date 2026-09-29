@@ -28,6 +28,8 @@ services:
         # `vlm` profile too, so `--profile vlm` brings up both containers.
         profiles: ["vlm", "vlm-2"]
         restart: unless-stopped
+        # As the managed engines: time for vLLM to shut down cleanly.
+        stop_grace_period: 30s
         env_file:
           - ./vlm-env/${VLM_2_CONF:-nemotron}.env
         volumes:

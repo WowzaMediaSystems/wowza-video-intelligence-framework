@@ -29,6 +29,11 @@ x-vif-model-engine: &vif-model-engine
     image: vllm/vllm-openai:v0.26.0
     profiles: ["vlm"]
     restart: unless-stopped
+    # On SIGTERM the launcher passes the signal to vLLM, waits for it to exit
+    # (10.7 s measured for the largest model, CUDA teardown included), then up
+    # to 10 s for its output to drain. Docker's default 10 s would SIGKILL a
+    # clean shutdown halfway; 30 s covers the 20.7 s with room to spare.
+    stop_grace_period: 30s
     # VIS writes the specs, so it starts first. An engine that still finds no
     # spec waits for one, then exits with a configuration error and is
     # restarted.

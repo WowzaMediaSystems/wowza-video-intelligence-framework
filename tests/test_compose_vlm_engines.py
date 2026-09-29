@@ -274,6 +274,31 @@ class TestAuth:
             assert mounts(engine)[target] == "./vlm-patches/cosmos3_edge.py"
 
 
+# The slowest measured engine stop: vLLM exiting on SIGTERM, CUDA teardown
+# included, for the largest shipped model.
+SLOWEST_MEASURED_STOP_SECONDS: float = 10.7
+# How long the launcher waits for the child's output to drain once it exits.
+TEE_DRAIN_SECONDS: int = 10
+STOP_GRACE: str = "30s"
+
+
+class TestStopGrace:
+    def test_every_engine_gets_the_time_a_clean_shutdown_takes(
+        self, engines: dict[str, dict[str, Any]]
+    ) -> None:
+        source: str = LAUNCHER.read_text(encoding="utf-8")
+        assert f"self._tee.join(timeout={TEE_DRAIN_SECONDS})" in source
+        grace: int = int(STOP_GRACE.removesuffix("s"))
+        assert grace > SLOWEST_MEASURED_STOP_SECONDS + TEE_DRAIN_SECONDS
+        assert {
+            name: engine.get("stop_grace_period") for name, engine in engines.items()
+        } == {name: STOP_GRACE for name in engines}
+
+    def test_the_unmanaged_example_engine_gets_it_too(self) -> None:
+        multi: dict[str, Any] = load(MULTI_GPU)
+        assert multi["services"]["vlm-2"]["stop_grace_period"] == STOP_GRACE
+
+
 class TestHealthcheck:
     def test_the_grace_covers_every_resident_loading_in_turn(
         self, engines: dict[str, dict[str, Any]]
