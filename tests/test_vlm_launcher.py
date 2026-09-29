@@ -2052,7 +2052,9 @@ class TestParkedStubBindAddress:
     """The stub answers where the deployment says, and on a container network by default."""
 
     def bound_address(self, host: str | None) -> str:
-        parked: Any = launcher.ParkedStub() if host is None else launcher.ParkedStub(host)
+        parked: Any = (
+            launcher.ParkedStub() if host is None else launcher.ParkedStub(host)
+        )
         parked.start(free_port(), "acme/model-a")
         try:
             address: str = parked._server.server_address[0]
