@@ -2048,6 +2048,36 @@ class _FakeEngineHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class TestParkedStubBindAddress:
+    """The stub answers where the deployment says, and on a container network by default."""
+
+    def bound_address(self, host: str | None) -> str:
+        parked: Any = launcher.ParkedStub() if host is None else launcher.ParkedStub(host)
+        parked.start(free_port(), "acme/model-a")
+        try:
+            address: str = parked._server.server_address[0]
+        finally:
+            parked.stop()
+        return address
+
+    def test_every_interface_by_default(self) -> None:
+        assert self.bound_address(None) == "0.0.0.0"
+
+    def test_loopback_when_asked(self) -> None:
+        assert self.bound_address("127.0.0.1") == "127.0.0.1"
+
+    def test_the_engines_stub_takes_its_address_from_the_environment(
+        self, tmp_path: Path
+    ) -> None:
+        path: Path = write_spec(tmp_path, args=["--port=9000"], port=9000)
+        plan: Any = launcher.build_plan({"VIF_ENGINE_SPEC_FILE": str(path)})
+
+        loopback: Any = launcher.Engine(plan, {"VIF_ENGINE_HOST": "127.0.0.1"})
+        default: Any = launcher.Engine(plan, {})
+
+        assert (loopback._stub._host, default._stub._host) == ("127.0.0.1", "0.0.0.0")
+
+
 class TestParkedStubConnections:
     """No connection to the stub outlives it, so no client talks to a ghost."""
 

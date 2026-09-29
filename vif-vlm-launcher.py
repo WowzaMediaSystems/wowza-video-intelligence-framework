@@ -130,6 +130,11 @@ MANAGED PATH:
                                that never arrives cannot keep the pool from
                                serving.
   VIF_ENGINE_LOG_FILE          Override for where the child's output is teed.
+  VIF_ENGINE_HOST              The address the launcher's own health stub binds
+                               (default 0.0.0.0, right for a container on a
+                               private network). A launcher that shares its host
+                               with other services sets 127.0.0.1. vLLM's own
+                               bind address is `--host` in the engine's flags.
   VIF_STARTING_FILE            Present while an engine brought back from parked
                                is starting (default /tmp/vif-engine-starting):
                                the stub has given up the port and vLLM has not
@@ -327,6 +332,9 @@ ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
 # Inside the container, not on the state volume: the healthcheck reads it.
 DEFAULT_STARTING_FILE: str = "/tmp/vif-engine-starting"
+# Every interface: the engine sits on a private container network, and its
+# neighbours reach it by service name.
+DEFAULT_ENGINE_HOST: str = "0.0.0.0"
 DEFAULT_SPEC_TIMEOUT_SECONDS: int = 300
 # How often the desired state is re-read. Fast enough that a switch is not
 # noticeably slower for it, slow enough to be free.
@@ -1456,7 +1464,8 @@ class ParkedStub:
     connection must reconnect -- and reach the engine -- once the stub is gone.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, host: str = DEFAULT_ENGINE_HOST) -> None:
+        self._host: str = host
         self._server: _StubServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -1508,12 +1517,12 @@ class ParkedStub:
             def do_POST(self) -> None:
                 self._send(404, b"{}")
 
-        self._server = _StubServer(("0.0.0.0", port), Handler)
+        self._server = _StubServer((self._host, port), Handler)
         self._thread = threading.Thread(
             target=self._server.serve_forever, daemon=True, name="parked-stub"
         )
         self._thread.start()
-        log(f"parked: no engine process; serving the health stub on :{port}.")
+        log(f"parked: no engine process; serving the health stub on {self._host}:{port}.")
 
     def stop(self) -> None:
         if self._server is None:
@@ -1539,7 +1548,9 @@ class Engine:
         self._forwarded: bool = False
         # Nothing has been entered yet: no process, no stub.
         self.state: DesiredState = DesiredState.PARKED
-        self._stub: ParkedStub = ParkedStub()
+        self._stub: ParkedStub = ParkedStub(
+            env_value(environ, "VIF_ENGINE_HOST", DEFAULT_ENGINE_HOST)
+        )
         self._lock_file: TextIO | None = None
         self._tee: threading.Thread | None = None
         self._spec_digest: str = _digest_of(plan.spec_file)
