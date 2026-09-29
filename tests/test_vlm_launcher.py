@@ -15,6 +15,7 @@ They also pass on any Python 3.12 with pytest.
 """
 
 import fcntl
+import hashlib
 import http.client
 import importlib.util
 import json
@@ -917,6 +918,22 @@ class ManagedEngine:
         return self.state_dir / "awake" / engine_key(self.model)
 
     @property
+    def loading_marker(self) -> Path:
+        return self.state_dir / "loading" / engine_key(self.model)
+
+    @property
+    def crashed_marker(self) -> Path:
+        return self.state_dir / "crashed" / engine_key(self.model)
+
+    def spec_digest(self) -> str:
+        spec: Path = self.state_dir / "engines" / f"{engine_key(self.model)}.json"
+        return hashlib.sha256(spec.read_bytes()).hexdigest()
+
+    def crash_note(self) -> dict[str, Any]:
+        note: dict[str, Any] = json.loads(self.crashed_marker.read_text("utf-8"))
+        return note
+
+    @property
     def engine_log(self) -> Path:
         return self.state_dir / "logs" / f"{engine_key(self.model)}.log"
 
@@ -1448,6 +1465,221 @@ class TestAStopClearsTheMarkers:
             "acme/model-b to load first..."
         ) in output
         assert "[vlm-launcher] the rest of the pool is loaded." in output
+
+
+class TestTheSpecDigest:
+    """A crash marker names its load by the digest of the spec file; VIS
+    computes it the same way and pins the same literal."""
+
+    def test_the_digest_is_the_sha256_of_the_files_bytes(self, tmp_path: Path) -> None:
+        spec: Path = tmp_path / "spec.json"
+        spec.write_bytes(b'{"model": "x"}\n')
+        assert launcher._digest_of(str(spec)) == (
+            "a84625f35f4c63cdb74af89d5e2daac6df1b0da9143b676dcafaafc73d4f9a11"
+        )
+
+    def test_the_marker_directories_are_pinned(self) -> None:
+        assert launcher.ENGINE_LOADING_DIRNAME == "loading"
+        assert launcher.ENGINE_CRASHED_DIRNAME == "crashed"
+
+
+class TestALoadThatDies:
+    """A crash while loading is recorded, and is not loaded again until the
+    spec is rewritten; a launcher that died mid-load is told from a clean stop."""
+
+    CRASHING: dict[str, str] = {
+        "FAKE_VLLM_NEVER_READY": "1",
+        "FAKE_VLLM_CRASH_AFTER": "0.5",
+    }
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/model-a"
+        )
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    def test_an_exit_during_the_load_is_recorded_with_its_code(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_CODE": "3"}
+        engine.spec(desired_state="awake")
+        digest: str = engine.spec_digest()
+        engine.start()
+
+        assert engine.process is not None
+        assert engine.process.wait(timeout=30) == 3
+        note: dict[str, Any] = engine.crash_note()
+        assert abs(note.pop("at") - time.time()) < 60
+        assert note == {
+            "spec_digest": digest,
+            "exit_code": 3,
+            "signal": None,
+            "reason": "vLLM exited with code 3 during its load",
+        }
+        assert not engine.loading_marker.exists()
+        assert not engine.ready_marker.exists()
+
+    def test_a_kill_during_the_load_is_recorded_as_its_signal(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_SIGNAL": "9"}
+        engine.spec(desired_state="awake")
+        digest: str = engine.spec_digest()
+        engine.start()
+
+        assert engine.process is not None
+        assert engine.process.wait(timeout=30) == 137
+        note: dict[str, Any] = engine.crash_note()
+        assert abs(note.pop("at") - time.time()) < 60
+        assert note == {
+            "spec_digest": digest,
+            "exit_code": None,
+            "signal": 9,
+            "reason": "vLLM was killed by signal 9 during its load",
+        }
+
+    def test_a_load_that_succeeds_clears_the_markers(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env = {"FAKE_VLLM_READY_AFTER": "1.5"}
+        engine.spec(desired_state="awake")
+        digest: str = engine.spec_digest()
+        engine.crashed_marker.parent.mkdir(parents=True)
+        engine.crashed_marker.write_text(
+            json.dumps({"spec_digest": "an-older-spec", "exit_code": 1}),
+            encoding="utf-8",
+        )
+        engine.start()
+
+        assert until(lambda: engine.loading_marker.exists())
+        assert (
+            json.loads(engine.loading_marker.read_text("utf-8"))["spec_digest"]
+            == digest
+        )
+        assert not engine.ready_marker.exists()
+        assert until(lambda: engine.ready_marker.exists())
+        assert not engine.loading_marker.exists()
+        assert not engine.crashed_marker.exists()
+
+    def test_a_restart_with_the_same_spec_stays_parked_until_it_is_rewritten(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_CODE": "3"}
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert engine.process is not None
+        assert engine.process.wait(timeout=30) == 3
+        assert engine.events() == ["start", "crash"]
+
+        # What Docker's restart policy does next.
+        engine.extra_env = {}
+        engine.start()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        time.sleep(1.5)
+        assert engine.events() == ["start", "crash"]
+        assert engine.crash_note()["exit_code"] == 3
+        assert not engine.loading_marker.exists()
+
+        engine.spec(desired_state="awake", generated_at="2026-09-22T12:05:00Z")
+        assert until(lambda: engine.ready_marker.exists())
+        assert engine.events() == ["start", "crash", "start"]
+        assert not engine.crashed_marker.exists()
+        output: str = engine.stop()
+        assert (
+            "[vlm-launcher] the last load of acme/model-a died (vLLM exited with "
+            "code 3 during its load); staying parked until the desired state is "
+            "rewritten."
+        ) in output
+
+    def test_a_spec_rewritten_before_the_restart_loads_normally(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env = {**self.CRASHING, "FAKE_VLLM_CRASH_CODE": "3"}
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert engine.process is not None
+        assert engine.process.wait(timeout=30) == 3
+
+        engine.extra_env = {}
+        engine.spec(desired_state="awake", generated_at="2026-09-22T12:05:00Z")
+        engine.start()
+        assert until(lambda: engine.ready_marker.exists())
+        assert engine.events() == ["start", "crash", "start"]
+        assert not engine.crashed_marker.exists()
+
+    def _leave_loading(self, engine: ManagedEngine, digest: str) -> None:
+        engine.loading_marker.parent.mkdir(parents=True)
+        engine.loading_marker.write_text(
+            json.dumps({"spec_digest": digest, "at": 1.0}), encoding="utf-8"
+        )
+
+    def test_a_launcher_that_died_mid_load_is_recorded_by_the_next_one(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.spec(desired_state="awake")
+        digest: str = engine.spec_digest()
+        self._leave_loading(engine, digest)
+        engine.start()
+
+        assert until(engine.crashed_marker.exists)
+        note: dict[str, Any] = engine.crash_note()
+        assert abs(note.pop("at") - time.time()) < 60
+        assert note == {
+            "spec_digest": digest,
+            "exit_code": None,
+            "signal": None,
+            "reason": (
+                "the previous launcher died while this engine was loading "
+                "(the container was killed or ran out of memory)"
+            ),
+        }
+        assert not engine.loading_marker.exists()
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        time.sleep(1)
+        assert engine.events() == []
+
+    def test_a_load_marker_for_another_spec_is_only_stale(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.spec(desired_state="awake")
+        self._leave_loading(engine, "an-older-spec")
+        engine.start()
+
+        assert until(lambda: engine.ready_marker.exists())
+        assert engine.events() == ["start"]
+        assert not engine.crashed_marker.exists()
+        assert not engine.loading_marker.exists()
+
+    def test_a_load_marker_beside_a_ready_marker_is_not_a_dead_load(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.spec(desired_state="awake")
+        self._leave_loading(engine, engine.spec_digest())
+        engine.ready_marker.parent.mkdir(parents=True)
+        engine.ready_marker.write_text("acme/model-a\n", encoding="utf-8")
+        engine.start()
+
+        assert until(lambda: engine.ready_marker.exists() and bool(engine.events()))
+        assert until(lambda: not engine.loading_marker.exists())
+        assert engine.events() == ["start"]
+        assert not engine.crashed_marker.exists()
+
+    def test_a_stop_during_the_load_is_not_a_crash(self, engine: ManagedEngine) -> None:
+        engine.extra_env = {"FAKE_VLLM_NEVER_READY": "1"}
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: engine.loading_marker.exists())
+        assert until(lambda: engine.events() == ["start"])
+
+        assert engine.process is not None
+        engine.process.send_signal(signal.SIGTERM)
+        assert engine.process.wait(timeout=30) == 0
+        assert engine.events() == ["start", "sigterm"]
+        assert not engine.crashed_marker.exists()
+        assert not engine.loading_marker.exists()
 
 
 def launch(env: dict[str, str], output: Path, stub_path: Path) -> subprocess.Popen[str]:
