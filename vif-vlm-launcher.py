@@ -194,8 +194,11 @@ THE STATE VOLUME, shared with VIS and every other engine:
 
 The awake marker is created after a load that is not followed by a sleep and
 after a successful wake, and removed when the engine goes to sleep, is parked
-or stops. Each launcher clears both of its own markers when it starts, so one
-left by a launcher that was killed outright never misleads the pool.
+or stops. A stop clears both markers the moment it arrives, before the engine
+has exited, so a restart of the whole pool never finds a neighbour's marker
+from before it; and each launcher clears both of its own markers when it
+starts, so one left by a launcher that was killed outright never misleads the
+pool.
 
 AN EMPTY VALUE COUNTS AS UNSET, for every variable above, as it did for the
 bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
@@ -1006,6 +1009,13 @@ class Engine:
 
     def forward_signal(self, signum: int, _frame: FrameType | None) -> None:
         _STOP.set()
+        # A stopping engine is loaded for no one. Cleared now, not once the
+        # child has exited: a stop that outlasts the container's grace period
+        # ends in a SIGKILL, which would leave the markers behind for a
+        # neighbour starting beside it -- the serving engine would take them
+        # as the rest of the pool loaded, and load first.
+        self.clear_awake()
+        self.clear_ready()
         if self.child is not None and self.child.poll() is None:
             self.child.send_signal(signum)
             self._forwarded = True
@@ -1161,13 +1171,16 @@ class Engine:
         return True
 
     def _write_marker(self, path: str, what: str) -> None:
-        if not path:
+        if not path or self.terminating:
             return
         try:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(f"{self.plan.model}\n", encoding="utf-8")
         except OSError as exc:
             warn(f"the {what} marker {path} could not be written ({exc}).")
+        # A stop that landed during the write has already cleared the markers.
+        if self.terminating:
+            self._remove_marker(path)
 
     @staticmethod
     def _remove_marker(path: str) -> None:
