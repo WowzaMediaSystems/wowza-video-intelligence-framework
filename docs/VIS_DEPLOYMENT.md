@@ -98,8 +98,12 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 
 > **Frame Harvest and shared VIS instances.** Harvest projects are keyed by
 > the shared `VIS_API_KEY`, not by the Engine that created them: two Engines
-> pointed at one VIS see, and can delete, each other's projects. Run one VIS
-> per Engine when that matters. A harvest also loads one more model on the GPU
+> pointed at one VIS see, and can delete, each other's projects. They can also
+> rebuild a bank that the other Engine's paused run is scoring against: a run
+> pins its thresholds and bank version when it starts and does not re-check
+> them on resume, so frames scored after the resume are compared against the
+> new bank with the old thresholds and nothing warns. An Engine only blocks a
+> rebuild for its own jobs. Run one VIS per Engine when that matters. A harvest also loads one more model on the GPU
 > while its projects are in use: the project's encoder, CLIP (about 0.4 GB) or
 > DINOv2 (about 0.7 GB), chosen when the project is created.
 
