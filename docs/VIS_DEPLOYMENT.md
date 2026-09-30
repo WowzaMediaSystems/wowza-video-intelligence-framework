@@ -99,8 +99,9 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 > **Frame Harvest and shared VIS instances.** Harvest projects are keyed by
 > the shared `VIS_API_KEY`, not by the Engine that created them: two Engines
 > pointed at one VIS see, and can delete, each other's projects. Run one VIS
-> per Engine when that matters. A harvest also loads one more model (the CLIP
-> encoder, about 0.4 GB) on the GPU while its projects are in use.
+> per Engine when that matters. A harvest also loads one more model on the GPU
+> while its projects are in use: the project's encoder, CLIP (about 0.4 GB) or
+> DINOv2 (about 0.7 GB), chosen when the project is created.
 
 ## Air-Gapped Deployments
 
@@ -147,6 +148,17 @@ curl -o vis/models/scene-detector.pth \
 SHA-256: `ff6a69a2641532518cbcd4497a2f246c67ac5e0a930cc7ae90e7fd200ddf5714`
 
 > **Known limitation:** Scene analysis currently requires internet access on first run to download OpenAI CLIP base weights. This will be addressed in a future release.
+
+### Frame Harvest
+
+The Harvest tab scores frames with one of two encoders, chosen per project. CLIP reuses the scene analysis weights above. DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face on first start; to pre-seed it:
+
+```bash
+curl -L -o vis/models/dinov2-base.safetensors \
+  https://huggingface.co/facebook/dinov2-base/resolve/main/model.safetensors
+```
+
+SHA-256: `d73036b56966966d07975d696bde331762f37297e2f095de8cea0040c3aa0841`
 
 ### Docker Images
 
