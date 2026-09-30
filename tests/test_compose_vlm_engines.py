@@ -22,7 +22,6 @@ yaml: Any = pytest.importorskip("yaml")
 
 REPO: Path = Path(__file__).resolve().parent.parent
 COMPOSE: Path = REPO / "docker-compose.yaml"
-MULTI_GPU: Path = REPO / "docker-compose.vlm-multi.yaml"
 LAUNCHER: Path = REPO / "vif-vlm-launcher.py"
 VIF_AUTH: Path = REPO / "vlm-patches" / "vif_auth.py"
 
@@ -211,12 +210,6 @@ class TestNetwork:
         assert on_engine_network == sorted([VIS, *engine_names])
         assert on_egress == engine_names
 
-    def test_the_multi_gpu_example_stays_off_the_engine_networks(self) -> None:
-        extra: dict[str, dict[str, Any]] = load(MULTI_GPU)["services"]
-        assert {name: networks(service) for name, service in extra.items()} == {
-            "vlm-2": {"default"}
-        }
-
 
 class TestStateVolume:
     def test_vis_has_the_state_dir_and_its_volume(
@@ -314,10 +307,6 @@ class TestStopGrace:
         assert {
             name: engine.get("stop_grace_period") for name, engine in engines.items()
         } == {name: STOP_GRACE for name in engines}
-
-    def test_the_unmanaged_example_engine_gets_it_too(self) -> None:
-        multi: dict[str, Any] = load(MULTI_GPU)
-        assert multi["services"]["vlm-2"]["stop_grace_period"] == STOP_GRACE
 
 
 class TestHealthcheck:

@@ -75,7 +75,7 @@ stream ─▶ Engine (WSE + plugin) ──WebSocket──▶ VIS ──▶ manag
 - **One serves at a time.** The others rest, either **asleep** (hot tier) or **parked** (cold tier); see [Tiers](#tiers-hot-and-cold). Switching models is a call to VIS (the Manager's **Activate** button). No container is recreated.
 - **One endpoint.** Streams use `http://video-intelligence-service.docker:5001/v1`, VIS's own port. VIS routes each request by the `model_name` it carries. The address the old single sidecar answered on, `http://vlm.docker:8000/v1`, is served the same way, so older configs keep working. The engines sit on an internal network that only VIS joins, and no engine port is ever published.
 - **A stream either follows or pins.** An empty `model_name` (shown as **Default** in the Manager) follows whichever model is active: activate another model and the stream moves with it. A named `model_name` pins the stream to that model, and a pinned stream **degrades** (empty results, `degraded: true`, reported as `engine_asleep`) while another model is active.
-- **The active model persists.** It is stored in `./vis/vlm-state/active-model`. On the first start, when that file does not exist, VIS seeds it from the pre-upgrade `VLM_CONF` if you have one, else the first catalog model (Qwen3-VL 4B).
+- **The active model persists.** It is stored in `./vis/vlm-state/active-model`. On the first start, when that file does not exist, VIS seeds it with the first catalog model (Qwen3-VL 4B).
 
 Everything the engines share lives in three bind mounts under `./vis/`:
 
@@ -153,13 +153,13 @@ Multiple engines can share one VIS deployment — point each engine's `VIS_HOST`
 
 ### The models
 
-| Model | Notes | Needs a card of | Weights on disk | Pre-upgrade `VLM_CONF` |
-|---|---|---|---|---|
-| `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly | 24 GB | 6 GB | `qwen` |
-| `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM. Cannot sleep, so it always rests parked | 24 GB | 15.4 GB | `nemotron` |
-| `google/gemma-3-4b-it` | Gated on HuggingFace: [accept the license and give the engines a token](#gated-models-and-the-huggingface-token) | 24 GB | 8.6 GB | `gemma` |
-| `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load. Uses the bundled patch mount, already wired in `docker-compose.yaml` | 8 GB | 7.7 GB | `cosmos-edge` |
-| `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B) | 40 GB | 31.5 GB | `cosmos-nano` |
+| Model | Notes | Needs a card of | Weights on disk |
+|---|---|---|---|
+| `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly | 24 GB | 6 GB |
+| `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM. Cannot sleep, so it always rests parked | 24 GB | 15.4 GB |
+| `google/gemma-3-4b-it` | Gated on HuggingFace: [accept the license and give the engines a token](#gated-models-and-the-huggingface-token) | 24 GB | 8.6 GB |
+| `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load. Uses the bundled patch mount, already wired in `docker-compose.yaml` | 8 GB | 7.7 GB |
+| `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B) | 40 GB | 31.5 GB |
 
 "Needs a card of" is the catalog's `min_vram_gb`: [pre-flight](#sizing-and-pre-flight) refuses a model whose floor is above your card's memory. The weights of all five come to about 70 GB of disk under `./vis/vlm-models`. `GET /vlm/models` (below) lists the catalog as your deployment resolved it, including anything you added or disabled in the [overlay](#customizing-the-deployment-the-catalog-overlay).
 
@@ -279,7 +279,7 @@ Each entry names a model by `id` and sets only the fields it changes; lists such
 
 **Disabling a model.** `"disabled": true` takes a model out of the deployment: it disappears from `GET /vlm/models` and the Manager's dropdown, it is never pre-flighted or activated (`409 model_disabled`), and its engine container rests on the launcher's health stub for good — no vLLM process, no weights in memory, no GPU context, never the load lock. The container still reports healthy, so `docker compose up --wait` keeps working, and `GET /vif/parked` on it answers with `"disabled": true`. `GET /vlm/status` lists it under `disabled_models`. This is how to free the host RAM and the boot time a model you never use would cost.
 
-Disabling the model that is serving is not refused: after the restart it keeps serving, VIS logs a WARNING naming it, and the flag takes effect the moment another model is activated. The first start after an upgrade never picks a disabled model either: a `VLM_CONF` naming one falls back to the first model that is not disabled.
+Disabling the model that is serving is not refused: after the restart it keeps serving, VIS logs a WARNING naming it, and the flag takes effect the moment another model is activated.
 
 To bring a model back, remove the flag and restart VIS. The engine loads again as it would after any restart: at boot if it rests asleep, at its next activation if it is parked.
 
@@ -365,9 +365,9 @@ Activating the adapter while its base serves is the fastest switch there is: the
 
 vLLM's adapter endpoints (`/v1/load_lora_adapter`, `/v1/unload_lora_adapter`) are mounted on a base with adapters. VIS's managed `/v1` never forwards them; on the engines themselves they sit on the internal network, behind `VLLM_API_KEY` when it is set.
 
-### Migrating from `vlm-env/*.env.local` copies
+### Per-model settings come from the overlay
 
-The documented way to tune a model used to be copying its profile (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local`). The managed engines do not read those files. Write the lines you changed as fields of that model's overlay entry instead: `VLM_GPU_MEMORY_UTILIZATION` → `gpu_memory_utilization`, `VLM_MAX_MODEL_LEN` → `max_model_len`, `VLM_MAX_NUM_SEQS` → `max_num_seqs`, `VLM_MAX_NUM_BATCHED_TOKENS` → `max_num_batched_tokens`, `VLM_MAX_IMAGES_PER_PROMPT` → `image_cap`, and `VLM_EXTRA_ARGS` → the `extra_args` of each entry in `tuning` (one list element per whitespace-separated token). `GET /vlm/models` shows the result.
+Per-model settings live only in the overlay entry of that model: `gpu_memory_utilization`, `max_model_len`, `max_num_seqs`, `max_num_batched_tokens`, `image_cap`, and the `extra_args` of each entry in `tuning` (one list element per whitespace-separated token). `GET /vlm/models` shows the result. The `vlm-env/*.env` profiles of the old single sidecar, the `VLM_CONF` variable that picked one and the per-model `VLM_MAX_MODEL_LEN`, `VLM_GPU_MEMORY_UTILIZATION` and similar knobs they carried were removed; the managed engines never read them.
 
 ---
 
@@ -435,23 +435,25 @@ An engine that is resting is **healthy** as far as Docker is concerned, so `dock
 
 ## Upgrading from the single sidecar, and going back
 
-Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `vlm-env/*.env` files and `VLM_CONF`. The managed engines replace it.
+Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `vlm-env/*.env` files and `VLM_CONF`. The managed engines replace it. The compatibility shim that carried those files and that variable for one release is gone: `vlm-env/`, `VLM_CONF` and `docker-compose.vlm-multi.yaml` no longer exist.
+
+**Upgrade through the release that introduced the managed engines first.** That release still reads `VLM_CONF` once, on the first start, to keep serving the model the old sidecar served. A stack that jumps straight from the single sidecar to a release without the shim loses that seed: VIS makes the first catalog model (Qwen) the active one, whatever the old `.env` said. If you served another model, pick it again with **Activate** in the Manager after the first start. Custom per-model settings do not carry over either; write them as fields of the model's entry in `vis/models/vlm-catalog.local.json` (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
 
 **Upgrading.**
 
 1. Stop the old stack with the old release's files: `docker compose --profile default --profile vlm down`. The old sidecar holds the GPU.
 2. Pull this release and start it: `docker compose --profile default --profile vlm up -d --remove-orphans`.
-3. On the first start VIS makes the model your `.env`'s `VLM_CONF` named the active one, so the stack keeps serving what it served; without `VLM_CONF`, the first catalog model (Qwen). `VLM_CONF` is read only for that and can be removed afterwards.
+3. On the first start VIS makes the first catalog model (Qwen) the active one. Activate another from the Manager if the old sidecar served a different model.
 4. Stream configs that point at `http://vlm.docker:8000/v1` keep working with no edit. The first time the Engine loads its configs after the upgrade it also moves every VLM block that names the old sidecar to the managed endpoint with an empty `model_name` (follows the active model), keeping a `*.pre-follow-active` copy of each file it changed. The plugin reference, [`README.wse-plugin.md`](README.wse-plugin.md), describes that migration.
 5. The first boot downloads and compiles every hot-tier model you did not already have, so it takes long; your existing `./vis/vlm-models` and `./vis/vlm-cache` are reused as they are.
 
-The `vlm-env/` files and their `VLM_*` knobs no longer configure the managed engines. The shipped files and the `VLM_CONF` setting remain only for that first-start seeding and for [bring-your-own](#appendix-bring-your-own-endpoint) containers built from them. [Move your tuning into the overlay](#migrating-from-vlm-envenvlocal-copies).
+The old `VLM_*` knobs no longer configure anything; [move your tuning into the overlay](#per-model-settings-come-from-the-overlay).
 
 **Going back** to a release with the single `vlm` sidecar:
 
 1. Stop the engines with this release's files first: `docker compose --profile default --profile vlm down`.
 2. Restore the Engine's configs from the `*.pre-follow-active` copies (see the plugin reference), and name a model in any config you saved since that follows the active model: earlier releases do not accept an empty `model_name`.
-3. Bring the older release up with the same `.env`. Put `VLM_CONF=<name>` back in `.env` if the model you were serving was not Qwen.
+3. Bring the older release up, from that release's own files, with the same `.env`. That release picks its model with `VLM_CONF`: set it in `.env` if the model you were serving was not Qwen.
 
 The older release reuses `./vis/vlm-models` and `./vis/vlm-cache` as they are and ignores `./vis/vlm-state`.
 
@@ -493,7 +495,6 @@ The managed engines take no model configuration from `.env`: VIS resolves each e
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
 | `VLM_FORCE_ALL_COLD` | unset | `true` parks every resting engine instead of putting it to sleep — for hosts where sleep mode cannot run |
 | `VLM_RAM_RESERVE_MIB` | derived | Host RAM kept back from sleeping engines; unset = the larger of 40% of host RAM and 8 GiB |
-| `VLM_CONF` | unset | Pre-upgrade only: a `vlm-env/` name (`qwen`, `gemma`, …) that seeds the active model on the first start when the state volume has none |
 | `VLM_GPU_IDS` | unset | Kept from the single-sidecar layout and still passed to the engines as their GPU pin. VIS sizes and pre-flights against GPU 0, so leave it unset: placing the engines on another card is not supported by this release |
 | `VLM_CATALOG_OVERLAY` | `./models/vlm-catalog.local.json` | Path of the [overlay](#customizing-the-deployment-the-catalog-overlay) inside the VIS container (`./vis/models/vlm-catalog.local.json` on the host) |
 
@@ -580,14 +581,6 @@ Everything above is the managed path. A VLM stream can instead use **any OpenAI-
 - **Outages degrade, they do not error.** An unreachable endpoint yields empty results with `degraded: true`, exactly as on the managed path; analysis resumes when it is back.
 - **Authentication and exposure.** The endpoint's key goes in `api_key`; set one on any endpoint reachable beyond the host.
 
-**Running your own vLLM next to the stack.** Any container that serves an OpenAI-compatible `/v1` on a network the VIS container can reach works. The framework ships one example: `docker-compose.vlm-multi.yaml` adds `vlm-2`, a plain vLLM container that VIS does not manage, on its own GPU, so a second model can serve **at the same time** as the managed one. Streams reach it directly at `http://vlm-2.docker:8000/v1`, naming its model in `model_name`:
-
-```bash
-# .env:  VLM_2_CONF=<model file in vlm-env/>   (default nemotron)   VLM_2_GPU_IDS=1
-docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml \
-  --profile default --profile vlm up -d
-```
-
-Keep `vlm-2` off GPU 0: VIS sizes the managed engines against the whole card and does not know about `vlm-2`. Teardown uses the same files: `docker compose -f docker-compose.yaml -f docker-compose.vlm-multi.yaml --profile vlm down`. `vlm-2` reads its model's settings from the `vlm-env/*.env` files, which is what they remain for; they no longer configure the managed engines.
+**Running your own vLLM next to the stack.** Any container that serves an OpenAI-compatible `/v1` on a network the VIS container can reach works: a plain `vllm/vllm-openai` container you run yourself, on its own GPU so a second model serves **at the same time** as the managed one. Streams reach it directly, naming its model in `model_name`. Keep it off GPU 0: VIS sizes the managed engines against the whole card and does not know about your container. The framework no longer ships an example file for this (`docker-compose.vlm-multi.yaml` was removed along with the single-sidecar shim).
 
 Two [deployment topologies](#deployment-topologies) use this path naturally: a VLM on a different machine from VIS, and a model from a hosted provider.

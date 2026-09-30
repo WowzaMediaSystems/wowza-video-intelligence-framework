@@ -38,7 +38,6 @@ REPO: Path = Path(__file__).resolve().parent.parent
 LAUNCHER: Path = REPO / "vif-vlm-launcher.py"
 FAKE_VLLM: Path = Path(__file__).resolve().parent / "fake_vllm.py"
 FAKE_NVML: Path = Path(__file__).resolve().parent / "fake_nvml"
-VLM_ENV: Path = REPO / "vlm-env"
 
 XGRAMMAR: list[str] = [
     "--structured-outputs-config",
@@ -57,15 +56,51 @@ def load_launcher() -> Any:
 launcher: Any = load_launcher()
 
 
+PROFILES: dict[str, dict[str, str]] = {
+    "qwen": {
+        "VLM_MODEL": "Qwen/Qwen3-VL-4B-Instruct-FP8",
+        "VLM_EXTRA_ARGS": "--max-cudagraph-capture-size=64 --structured-outputs-config {\"backend\":\"xgrammar\",\"disable_any_whitespace\":true}",
+        "VLM_MAX_MODEL_LEN": "16384",
+        "VLM_MIN_PIXELS": "3136",
+        "VLM_MAX_PIXELS": "401408",
+        "VLM_GPU_MEMORY_UTILIZATION": "0.80",
+    },
+    "nemotron": {
+        "VLM_MODEL": "nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8",
+        "VLM_MAX_MODEL_LEN": "8192",
+        "VLM_EXTRA_ARGS": "--quantization modelopt --trust-remote-code --enforce-eager --max-cudagraph-capture-size=64 --structured-outputs-config {\"backend\":\"xgrammar\",\"disable_any_whitespace\":true}",
+        "VLM_GPU_MEMORY_UTILIZATION": "0.80",
+    },
+    "gemma": {
+        "VLM_MODEL": "google/gemma-3-4b-it",
+        "VLM_EXTRA_ARGS": "--trust-remote-code --mm-processor-kwargs={} --max-cudagraph-capture-size=64 --structured-outputs-config {\"backend\":\"xgrammar\",\"disable_any_whitespace\":true}",
+        "VLM_MAX_MODEL_LEN": "32768",
+        "VLM_GPU_MEMORY_UTILIZATION": "0.8",
+    },
+    "cosmos-edge": {
+        "VLM_MODEL": "nvidia/Cosmos3-Edge",
+        "VLM_EXTRA_ARGS": "--quantization fp8 --allowed-local-media-path / --max-cudagraph-capture-size=64 --default-chat-template-kwargs {\"enable_thinking\":false} --structured-outputs-config {\"backend\":\"xgrammar\",\"disable_any_whitespace\":true}",
+        "VLM_MAX_MODEL_LEN": "16384",
+        "VLM_MAX_NUM_BATCHED_TOKENS": "8192",
+        "VLM_MIN_PIXELS": "4096",
+        "VLM_MAX_PIXELS": "1003520",
+        "VLM_GPU_MEMORY_UTILIZATION": "0.80",
+    },
+    "cosmos-nano": {
+        "VLM_MODEL": "nvidia/Cosmos3-Nano",
+        "VLM_EXTRA_ARGS": "--enforce-eager --max-cudagraph-capture-size=64 --structured-outputs-config {\"backend\":\"xgrammar\",\"disable_any_whitespace\":true}",
+        "VLM_MAX_MODEL_LEN": "16384",
+        "VLM_MAX_NUM_SEQS": "1",
+        "VLM_MIN_PIXELS": "3136",
+        "VLM_MAX_PIXELS": "401408",
+        "VLM_GPU_MEMORY_UTILIZATION": "0.87",
+    },
+}
+
+
 def profile_env(name: str) -> dict[str, str]:
-    """The VLM_* variables compose would load from vlm-env/<name>.env."""
-    env: dict[str, str] = {}
-    for line in (VLM_ENV / f"{name}.env").read_text(encoding="utf-8").splitlines():
-        stripped: str = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        env[key.strip()] = value
+    """The VLM_* variables of one single-container model profile."""
+    env: dict[str, str] = dict(PROFILES[name])
     # Pin the dtype so flag resolution never depends on the host's GPU.
     env.setdefault("VLM_KV_CACHE_DTYPE", "fp8")
     return env

@@ -230,15 +230,11 @@ services:
         # below; VIS writes each engine's spec there. The rest are optional
         # and passed only when set:
         #   VLLM_API_KEY         the engines' key, sent on VIS's calls to them
-        #   VLM_CONF             the model the pre-upgrade sidecar served
-        #                        (a vlm-env/ name); seeds the active model on
-        #                        the first start after an upgrade
         #   VLM_FORCE_ALL_COLD   true on hosts where sleep mode cannot run
         #                        (e.g. WSL2): every engine rests parked
         #   VLM_RAM_RESERVE_MIB  host RAM kept back from sleeping engines
           - VIF_STATE_DIR=/vif-state
           - VLLM_API_KEY
-          - VLM_CONF
           - VLM_FORCE_ALL_COLD
           - VLM_RAM_RESERVE_MIB
         # NVIDIA GPU configuration
