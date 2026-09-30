@@ -64,7 +64,11 @@ last; flag values containing spaces cannot be passed here).
 
 HF_TOKEN (higher rate limits on the first-boot weight download) and
 HF_HUB_OFFLINE=1 (skip Hub probes on air-gapped hosts with pre-seeded weights)
-are read by vLLM/HuggingFace directly, not by this script.
+are read by vLLM/HuggingFace directly. On the managed path a token set in the
+Manager reaches vLLM too: when the container's own HF_TOKEN is empty, the
+launcher reads <VIF_STATE_DIR>/secrets/hf-token before every access check and
+every load and hands it to vLLM as HF_TOKEN. A token set in .env always wins,
+so a deployment can pin it there. The token is never logged.
 
 SIZING CONCURRENCY: there is no universal "right" --max-num-seqs; vLLM
 computes the real ceiling for your GPU at startup and prints it. Watch the
@@ -271,10 +275,13 @@ anything is started: a spec that says `gated` needs the weights on disk or an
 HF_TOKEN whose account has accepted the model's license, and when it has
 neither the crash note carries `access_problem` (token_missing, token_rejected
 or license_not_accepted) instead of an exit code. The parked stub answers
-`GET /vif/access` with the same verdict, checked right then, so VIS can refuse
-an activate before it drains the engine that is serving. A note like this one
-is dropped when the launcher starts, because a restart is what changes the
-token.
+`GET /vif/access` with the same verdict, checked right then, and says where
+the token came from (`token_source`: environment, manager, or empty), so VIS
+can refuse an activate before it drains the engine that is serving. The note
+carries a fingerprint of the token it was decided with (a truncated SHA-256,
+never the token); once the token in force is another one -- set or removed in
+the Manager, or a restart with a new .env -- the note is dropped and the next
+load is checked again. It is also dropped when the launcher starts.
 
 `phase/<key>` is JSON with the spec digest, `phase` (waiting for the pool or
 the load lock, downloading, loading, compiling) and, while downloading,
@@ -344,7 +351,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-30.2"
+LAUNCHER_REVISION: str = "2026-09-30.4"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -364,6 +371,8 @@ ENGINE_SLOTS_DIRNAME: str = "slots"
 SLOT_ASSIGNMENT_SUFFIX: str = ".assignment.json"
 SLOT_POLL_SECONDS: float = 2.0
 ACTIVE_MODEL_FILENAME: str = "active-model"
+# Written by VIS, mode 0600: the HuggingFace token set in the Manager.
+HF_TOKEN_FILE: str = "secrets/hf-token"
 DEFAULT_STATE_DIR: str = "/vif-state"
 # Inside the container, not on the state volume: the healthcheck reads it.
 DEFAULT_STARTING_FILE: str = "/tmp/vif-engine-starting"
@@ -459,12 +468,20 @@ class AccessProblem(StrEnum):
 
 
 ACCESS_CAUSES: dict[AccessProblem, str] = {
-    AccessProblem.TOKEN_MISSING: "no HF_TOKEN is set",
-    AccessProblem.TOKEN_REJECTED: "HuggingFace does not accept the HF_TOKEN",
+    AccessProblem.TOKEN_MISSING: "no HuggingFace token is set",
+    AccessProblem.TOKEN_REJECTED: "HuggingFace does not accept the token",
     AccessProblem.LICENSE_NOT_ACCEPTED: (
-        "the account behind the HF_TOKEN has not accepted its license"
+        "the account behind the token has not accepted its license"
     ),
 }
+
+
+class TokenSource(StrEnum):
+    """Where the token a check or a load uses comes from."""
+
+    NONE = ""
+    ENVIRONMENT = "environment"
+    MANAGER = "manager"
 
 
 # Dry runs print JSON on stdout, so their logging moves out of the way.
@@ -519,6 +536,9 @@ class LaunchPlan:
     phase_dir: str = ""
     # Whether the weights sit behind a HuggingFace license: the spec says so.
     gated: bool = False
+    # The token set in the Manager, used when the environment has none. Spec
+    # path only.
+    hf_token_file: str = ""
     # Where each load's sizing is recorded, and what it is sized with; None
     # runs `args` as they are. Spec path only.
     sized_dir: str = ""
@@ -756,6 +776,53 @@ def hf_token(environ: dict[str, str]) -> str:
     return env_value(environ, "HF_TOKEN") or env_value(
         environ, "HUGGING_FACE_HUB_TOKEN"
     )
+
+
+# The token file is read on every poll; an unreadable one is said once.
+_UNREADABLE_TOKEN_FILES: set[str] = set()
+
+
+def stored_hf_token(path: str) -> str:
+    """The token VIS stored for the Manager, or "" when there is none."""
+    if not path:
+        return ""
+    try:
+        token: str = Path(path).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        if path not in _UNREADABLE_TOKEN_FILES:
+            _UNREADABLE_TOKEN_FILES.add(path)
+            warn(f"the HuggingFace token file {path} cannot be read ({exc.strerror}).")
+        return ""
+    _UNREADABLE_TOKEN_FILES.discard(path)
+    return token
+
+
+def token_source(environ: dict[str, str], token_file: str) -> TokenSource:
+    """The environment's token wins; the Manager's stands in when it has none."""
+    if hf_token(environ):
+        return TokenSource.ENVIRONMENT
+    if stored_hf_token(token_file):
+        return TokenSource.MANAGER
+    return TokenSource.NONE
+
+
+def with_stored_token(environ: dict[str, str], token_file: str) -> dict[str, str]:
+    """`environ` as vLLM and the access check see it: the Manager's token filled in."""
+    if hf_token(environ):
+        return environ
+    stored: str = stored_hf_token(token_file)
+    if not stored:
+        return environ
+    return {**environ, "HF_TOKEN": stored}
+
+
+def token_fingerprint(token: str) -> str:
+    """Tells two tokens apart without holding either; "" for no token."""
+    if not token:
+        return ""
+    return hashlib.sha256(f"vif-hf-token:{token}".encode("utf-8")).hexdigest()[:16]
 
 
 def hf_endpoint(environ: dict[str, str]) -> str:
@@ -1200,6 +1267,7 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         crashed_dir=str(Path(state_dir) / ENGINE_CRASHED_DIRNAME) if state_dir else "",
         phase_dir=str(Path(state_dir) / ENGINE_PHASE_DIRNAME) if state_dir else "",
         gated=bool(document.get("gated", False)),
+        hf_token_file=str(Path(state_dir) / HF_TOKEN_FILE) if state_dir else "",
         sized_dir=str(Path(state_dir) / ENGINE_SIZED_DIRNAME) if state_dir else "",
         load_sizing=load_sizing_from_spec(document),
         disabled=disabled,
@@ -1960,6 +2028,7 @@ class Engine:
         reason: str,
         access_problem: AccessProblem | None = None,
         sizing_refused: bool = False,
+        fingerprint: str = "",
     ) -> None:
         document: dict[str, Any] = {
             "spec_digest": digest,
@@ -1971,6 +2040,7 @@ class Engine:
         }
         if access_problem is not None:
             document["access_problem"] = access_problem.value
+            document["token_fingerprint"] = fingerprint
         if sizing_refused:
             document["sizing_refused"] = True
         self._write_json_marker(self.plan.crashed_file, document, "crashed")
@@ -2016,19 +2086,24 @@ class Engine:
 
     # -- gated models -------------------------------------------------------
 
+    @property
+    def token_environ(self) -> dict[str, str]:
+        """The container's environment with the Manager's token, read right now."""
+        return with_stored_token(self.environ, self.plan.hf_token_file)
+
     def gated_out(self) -> bool:
         """
         Whether a load would only run into a license or a token that will not do.
 
-        Said once per spec, as a crash note carrying the problem: VIS reads it
-        the way it reads a load that died, and the engine stays parked, the
-        same posture, until the spec is rewritten.
+        Said once per spec and token, as a crash note carrying the problem: VIS
+        reads it the way it reads a load that died, and the engine stays
+        parked, the same posture, until the spec is rewritten or the token
+        changes.
         """
         if not self.plan.gated:
             return False
-        problem: AccessProblem | None = gated_access_problem(
-            self.environ, self.plan.model
-        )
+        environ: dict[str, str] = self.token_environ
+        problem: AccessProblem | None = gated_access_problem(environ, self.plan.model)
         if problem is None:
             return False
         decision: str = self._decision
@@ -2044,6 +2119,7 @@ class Engine:
                 None,
                 reason,
                 access_problem=problem,
+                fingerprint=token_fingerprint(hf_token(environ)),
             )
             warn(f"{reason}; staying parked until the desired state is rewritten.")
             self._gate_announced = decision
@@ -2052,7 +2128,7 @@ class Engine:
     def access_report(self) -> dict[str, Any]:
         """What the parked stub answers on /vif/access: can this engine load now."""
         problem: AccessProblem | None = (
-            gated_access_problem(self.environ, self.plan.model)
+            gated_access_problem(self.token_environ, self.plan.model)
             if self.plan.gated
             else None
         )
@@ -2061,19 +2137,42 @@ class Engine:
             "gated": self.plan.gated,
             "ok": problem is None,
             "access_problem": problem.value if problem is not None else "",
+            "token_source": token_source(self.environ, self.plan.hf_token_file).value,
         }
 
     def forget_stale_gate(self) -> None:
         """
         Drop a gate note left by an earlier run of this launcher.
 
-        The token and the network are the container's environment, which a
+        The network and the environment's token are the container's, which a
         restart is what changes; the digest alone would keep the engine parked
         on a problem that may since have been fixed.
         """
         note: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
         if note is not None and note.get("access_problem"):
             self.clear_crashed()
+
+    def forget_gate_of_another_token(self) -> None:
+        """
+        Drop a gate note decided with a token that is no longer the one in force.
+
+        The Manager's token changes with no restart, so the note says which
+        token it was about; with another one the next load is checked afresh.
+        """
+        if not self.plan.gated:
+            return
+        note: dict[str, Any] | None = self._read_marker(self.plan.crashed_file)
+        if note is None or not note.get("access_problem"):
+            return
+        current: str = token_fingerprint(hf_token(self.token_environ))
+        if note.get("token_fingerprint", "") == current:
+            return
+        self.clear_crashed()
+        self._gate_announced = ""
+        log(
+            f"the HuggingFace token changed since {self.plan.model} was refused; "
+            "the next load checks it again."
+        )
 
     def record_child_crash(self) -> None:
         """The engine exited before it was ready: say how, for VIS and for us."""
@@ -2451,9 +2550,10 @@ class Engine:
 
         Built on every start, never once at boot: an engine that booted parked
         and is restarted hot needs that spec's VLLM_SERVER_DEV_MODE, or it has
-        no /sleep, and a new GPU pin must reach the new process.
+        no /sleep, a new GPU pin must reach the new process, and so must a
+        token set in the Manager since.
         """
-        return {**self.environ, **self.plan.env}
+        return {**self.token_environ, **self.plan.env}
 
     def start(self, argv: list[str]) -> None:
         if not self.plan.log_file:
@@ -2673,6 +2773,8 @@ class Engine:
             if self.child is not None and self.child.poll() is not None:
                 return self.await_child()
             if self.plan.watches:
+                if self.state is DesiredState.PARKED:
+                    self.forget_gate_of_another_token()
                 code = self.enter(self.poll_desired())
                 if code is not None:
                     return code
