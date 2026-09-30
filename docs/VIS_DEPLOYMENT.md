@@ -60,7 +60,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`); default is to scan the `models/` folder |
 | `HARVEST_STORE_DIR` | `./harvest` (`/build/harvest` in the compose stack) | Frame Harvest store: projects, example banks and exported packages. Must be writable; see the `./vis/harvest` mount |
 | `HARVEST_MAX_UPLOAD_MB` | `16` (`512` in the compose stack) | Cap per upload body on the harvest HTTP API: an example image, a judged frame during a bank rebuild, or an export package. Size it for the largest package the Engine sends back |
-| `HARVEST_MAX_EXAMPLES` | `200` | Maximum example images per class |
+| `HARVEST_MAX_EXAMPLES` | `200` | Maximum example images per class; adding one to a class that is at the cap is refused |
 | `HARVEST_DEVICE` | — | GPU the harvest encoder loads on (e.g., `cuda:1`); unset picks the first CUDA device |
 | `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
