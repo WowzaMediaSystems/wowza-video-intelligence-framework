@@ -205,7 +205,7 @@ A model VIS does not ship takes two things: its metadata in the overlay, and an 
 }
 ```
 
-`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk; `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then `HF_TOKEN` applies as for Gemma). `tier` (`auto` by default), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model.
+`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk; `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then a HuggingFace token applies as for Gemma, set in the Manager or as `HF_TOKEN`). `tier` (`auto` by default), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model.
 
 **The engine** is a slot: the compose ships two generic services, `vif-model-slot-1` and `vif-model-slot-2`, each behind a profile of its own and told which model to serve by one `.env` line:
 
