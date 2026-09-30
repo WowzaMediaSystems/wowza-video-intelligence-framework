@@ -1464,6 +1464,38 @@ class TestASlot:
         assert until(lambda: engine.events() == ["start"])
         assert until(lambda: engine.ready_marker.exists())
 
+    def test_an_assigned_slot_that_loses_its_model_parks_until_it_is_back(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env["VLM_PORT"] = str(engine.port)
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: bool(self.registration(engine)))
+        self.answer(engine, "assigned")
+        assert until(lambda: engine.ready_marker.exists())
+
+        taken: str = (
+            "vif-model-slot-1 is assigned acme/custom-vl, which vif-model-slot-2 "
+            "already serves; assign each model to one slot"
+        )
+        self.answer(engine, "misconfigured", taken)
+        assert until(lambda: engine.events() == ["start", "sigterm"])
+        assert until(lambda: self.parked(engine).get("parked") is True)
+        assert engine.ready_marker.exists() is False
+        assert engine.awake_marker.exists() is False
+
+        self.answer(engine, "assigned")
+        assert until(lambda: engine.events() == ["start", "sigterm", "start"])
+        output: str = engine.stop()
+        assert (
+            f"[vlm-launcher] slot vif-model-slot-1 lost acme/custom-vl: {taken}. "
+            "Parking."
+        ) in output
+        assert (
+            "[vlm-launcher] slot vif-model-slot-1 assigned acme/custom-vl by VIS "
+            "again."
+        ) in output
+
     def test_a_misconfigured_slot_rests_until_the_verdict_changes(
         self, engine: ManagedEngine
     ) -> None:

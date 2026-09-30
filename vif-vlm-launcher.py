@@ -176,10 +176,11 @@ and a nonce new on every start -- and then:
   * otherwise it waits for VIS's verdict on that registration,
     <state dir>/slots/<slot>.assignment.json carrying the same nonce, serving
     the stub meanwhile. `assigned` goes on to the model's spec like any other
-    engine; `misconfigured` (a model the catalog does not have, one with a
-    service of its own, one another slot already serves) logs VIS's reason
-    and rests on the stub (`"misconfigured": true` and the reason), still
-    watching for a verdict that changes. No verdict within
+    engine, still watching the verdict: one that takes the model away parks
+    the engine until a verdict assigns it again; `misconfigured` (a model the
+    catalog does not have, one with a service of its own, one another slot
+    already serves) logs VIS's reason and rests on the stub (`"misconfigured":
+    true` and the reason), still watching for a verdict that changes. No verdict within
     VIF_SPEC_TIMEOUT_SECONDS exits 78, as a spec that never arrives does.
 
 THE DESIRED STATE, AND THE WATCH LOOP. A spec names one of three states, and
@@ -351,7 +352,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-30.4"
+LAUNCHER_REVISION: str = "2026-09-30.5"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -1662,9 +1663,15 @@ class ParkedStub:
 class Engine:
     """The vLLM child process, its pool duties, and the state it is told to be in."""
 
-    def __init__(self, plan: LaunchPlan, environ: dict[str, str]) -> None:
+    def __init__(
+        self,
+        plan: LaunchPlan,
+        environ: dict[str, str],
+        lease: "SlotLease | None" = None,
+    ) -> None:
         self.plan: LaunchPlan = plan
         self.environ: dict[str, str] = environ
+        self.lease: "SlotLease | None" = lease
         self.child: subprocess.Popen[bytes] | None = None
         # Whether a stop signal has already been passed on to the child.
         self._forwarded: bool = False
@@ -2366,11 +2373,14 @@ class Engine:
 
     def poll_desired(self) -> DesiredState:
         """What the spec (or the state file) says this engine should be now."""
+        desired: DesiredState = self.plan.desired_state
         if self.plan.spec_file:
-            return self._desired_from_spec()
-        if self.plan.state_file:
-            return self._desired_from_state_file()
-        return self.plan.desired_state
+            desired = self._desired_from_spec()
+        elif self.plan.state_file:
+            desired = self._desired_from_state_file()
+        if self.lease is not None and not self.lease.held():
+            return DesiredState.PARKED
+        return desired
 
     def _desired_from_spec(self) -> DesiredState:
         """
@@ -2840,12 +2850,40 @@ def read_slot_verdict(state_dir: Path, slot: str, nonce: str) -> dict[str, Any] 
     return verdict
 
 
-def run_slot(environ: dict[str, str], slot: str) -> int | None:
+@dataclass
+class SlotLease:
     """
-    Register this slot and wait until VIS assigns it its model.
+    An assigned slot's hold on its model, which VIS can take back.
 
-    None means it has: go on to the model's spec. A number is the exit code.
+    A restarted VIS may hand the model to another slot; this one then parks
+    until a verdict assigns it again.
     """
+
+    state_dir: Path
+    slot: str
+    nonce: str
+    model: str
+    lost: bool = False
+
+    def held(self) -> bool:
+        """Re-read VIS's verdict; an unreadable one changes nothing."""
+        verdict: dict[str, Any] | None = read_slot_verdict(
+            self.state_dir, self.slot, self.nonce
+        )
+        if verdict is None:
+            return not self.lost
+        lost: bool = verdict.get("status") != SlotStatus.ASSIGNED
+        if lost and not self.lost:
+            reason: str = str(verdict.get("reason") or verdict.get("status"))
+            warn(f"slot {self.slot} lost {self.model}: {reason}. Parking.")
+        elif self.lost and not lost:
+            log(f"slot {self.slot} assigned {self.model} by VIS again.")
+        self.lost = lost
+        return not lost
+
+
+def run_slot(environ: dict[str, str], slot: str) -> SlotLease:
+    """Register this slot and wait until VIS assigns it its model."""
     state_dir_text: str = env_value(environ, "VIF_STATE_DIR")
     if not state_dir_text:
         raise ConfigError(f"slot {slot} needs VIF_STATE_DIR to register on")
@@ -2870,7 +2908,7 @@ def run_slot(environ: dict[str, str], slot: str) -> int | None:
         while not pause(poll):
             pass
         stub.stop()
-        return 0
+        raise Stopped(f"slot {slot} stopped")
 
     log(f"slot {slot} registered for {model}; waiting for VIS to assign it...")
     stub.start(port, model, extra={"slot": slot})
@@ -2884,7 +2922,7 @@ def run_slot(environ: dict[str, str], slot: str) -> int | None:
             if verdict.get("status") == SlotStatus.ASSIGNED:
                 stub.stop()
                 log(f"slot {slot} assigned {model} by VIS.")
-                return None
+                return SlotLease(state_dir, slot, nonce, model)
             reason: str = str(verdict.get("reason") or verdict.get("status"))
             if reason != announced:
                 warn(
@@ -2906,11 +2944,13 @@ def run_slot(environ: dict[str, str], slot: str) -> int | None:
             )
         if pause(poll):
             stub.stop()
-            return 0
+            raise Stopped(f"slot {slot} stopped")
 
 
-def supervise(plan: LaunchPlan, environ: dict[str, str]) -> int:
-    engine: Engine = Engine(plan, environ)
+def supervise(
+    plan: LaunchPlan, environ: dict[str, str], lease: SlotLease | None = None
+) -> int:
+    engine: Engine = Engine(plan, environ, lease)
     signal.signal(signal.SIGTERM, engine.forward_signal)
     signal.signal(signal.SIGINT, engine.forward_signal)
     try:
@@ -2961,10 +3001,9 @@ def main() -> int:
             _LOG_STREAM = sys.stderr
         log(f"revision {LAUNCHER_REVISION}")
         slot: str = env_value(dict(os.environ), "VIF_SLOT")
+        lease: SlotLease | None = None
         if slot and not dry_run:
-            code: int | None = run_slot(dict(os.environ), slot)
-            if code is not None:
-                return code
+            lease = run_slot(dict(os.environ), slot)
         plan: LaunchPlan = build_plan(dict(os.environ))
     except ConfigError as exc:
         warn(str(exc))
@@ -2983,10 +3022,10 @@ def main() -> int:
             "with no engine process, no weights and no load lock, until VIS "
             "writes a spec without the flag."
         )
-        return supervise(plan, dict(os.environ))
+        return supervise(plan, dict(os.environ), lease)
     if plan.desired_state is DesiredState.PARKED:
         log(f"{plan.model} starts parked: no engine process until VIS asks for one.")
-        return supervise(plan, dict(os.environ))
+        return supervise(plan, dict(os.environ), lease)
 
     log("Launching vLLM with:")
     for part in [plan.model, *plan.args]:
@@ -3016,7 +3055,7 @@ def main() -> int:
     if not plan.needs_supervision:
         os.execvpe(plan.argv[0], plan.argv, {**os.environ, **plan.env})
 
-    return supervise(plan, dict(os.environ))
+    return supervise(plan, dict(os.environ), lease)
 
 
 if __name__ == "__main__":
