@@ -107,6 +107,14 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 
 VIS does **not** require direct internet access at runtime, but it must be able to reach the Wowza Streaming Engine instances it serves.
 
+VIS downloads each of the following at first start when the file is not already in `vis/models/`, so an air-gapped deployment, including an upgrade to a release that adds one of them, must pre-seed every one it will use:
+
+| Used for | File in `vis/models/` | Source |
+|---|---|---|
+| Object detection (RF-DETR) | `rfdetr-<variant>.pth` | Wowza hosting; see [Object Detection](#object-detection-rf-detr) |
+| Scene analysis | `scene-detector.pth` | Wowza hosting; see [Scene Analysis](#scene-analysis-experimental) |
+| Frame Harvest with the DINOv2 encoder | `dinov2-base.safetensors` | `https://huggingface.co/facebook/dinov2-base/resolve/main/model.safetensors`, SHA-256 `d73036b56966966d07975d696bde331762f37297e2f095de8cea0040c3aa0841` |
+
 ### Object Detection (RF-DETR)
 
 On first start, VIS downloads model weights from Wowza hosting. To deploy without internet, pre-download the checkpoint files and place them in `vis/models/`.
@@ -151,7 +159,7 @@ SHA-256: `ff6a69a2641532518cbcd4497a2f246c67ac5e0a930cc7ae90e7fd200ddf5714`
 
 ### Frame Harvest
 
-The Harvest tab scores frames with one of two encoders, chosen per project. CLIP reuses the scene analysis weights above. DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face on first start; to pre-seed it:
+The Harvest tab scores frames with one of two encoders, chosen per project. CLIP reuses the scene analysis weights above. DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face at first start, like the other checkpoints, so an air-gapped deployment must pre-seed it before a project uses it:
 
 ```bash
 curl -L -o vis/models/dinov2-base.safetensors \
