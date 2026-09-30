@@ -225,6 +225,41 @@ What the slot does when something is off, always staying healthy so `docker comp
 
 A model you disable (`"disabled": true`) keeps its slot parked, like a shipped one. Bring a slot down by removing its profile from `COMPOSE_PROFILES` and running `docker compose --profile vlm-slot-1 stop vif-model-slot-1`.
 
+### Your own LoRA adapters
+
+A LoRA adapter you trained for one of the models is one more model in the dropdown: streams name it as their `model_name`, and it is served by its base model's engine, which routes each request to the adapter or the base by the name it carries.
+
+1. **Copy the adapter** (PEFT's `adapter_config.json` and `adapter_model.safetensors`) under `./vis/vlm-models/`, the weights directory every engine shares, e.g. `./vis/vlm-models/lora/acme-forklifts/`. VIS reads it there too, read-only.
+2. **Declare it in the overlay**, with the base's LoRA support in the same file:
+
+   ```json
+   {
+     "version": 1,
+     "models": [
+       {
+         "id": "nvidia/Cosmos3-Nano",
+         "enable_lora": true,
+         "lora_module_prefixes": ["model.language_model.layers."]
+       },
+       {
+         "kind": "lora",
+         "id": "acme/cosmos3-nano-forklifts",
+         "label": "Cosmos3 Nano + forklifts",
+         "base": "nvidia/Cosmos3-Nano",
+         "adapter_path": "lora/acme-forklifts",
+         "rank": 8
+       }
+     ]
+   }
+   ```
+
+   `adapter_path` is relative to `./vis/vlm-models/`; `rank` is the `r` the adapter was trained with, at most the base's `max_lora_rank` (16 unless the base's entry sets it, one of 1, 8, 16, 32, 64, 128, 256, 320, 512). `lora_module_prefixes` are the module paths, after PEFT's `base_model.model.`, that reach the base's language model: an adapter whose tensors fall outside them would load and change nothing, so VIS refuses it. The base can also be a model you added yourself. Bases that run FP8 weights (every shipped one but Gemma and Cosmos3-Nano) also need `"lora_on_fp8_verified": true`: LoRA on an FP8 base has not been shown to change the pinned vLLM's output, so set it only once you have seen your adapter do so.
+3. **Restart VIS**, and the base's engine if it is running (`docker compose restart vif-model-<base>`): an engine reads `--enable-lora` only when it starts. An adapter entry VIS cannot serve — a field that does not validate, a base that is not in the catalog or does not enable LoRA, a rank above the base's limit — is logged as an ERROR naming it and left out, and the rest of the file applies.
+
+Activating the adapter while its base serves is the fastest switch there is: the adapter is loaded into the serving engine and proven with one request, with no pause for the streams on the base. With the base resting, activating the adapter switches to the base first, then loads it. Activating anything else unloads it. An adapter whose files cannot work with its base — a rank that disagrees with its `adapter_config.json`, tensors outside the language model — is refused before the serving engine is touched, with the reason, and appears in `GET /vlm/models` with `loadable_here: false` and the same reason.
+
+vLLM's adapter endpoints (`/v1/load_lora_adapter`, `/v1/unload_lora_adapter`) are mounted on a base with adapters. VIS's managed `/v1` never forwards them; on the engines themselves they sit on the internal network, behind `VLLM_API_KEY` when it is set.
+
 **Migrating from `vlm-env/*.env.local` copies.** The documented way to tune a model used to be copying its profile (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local`). The managed engines do not read those files. Write the lines you changed as fields of that model's overlay entry instead: `VLM_GPU_MEMORY_UTILIZATION` → `gpu_memory_utilization`, `VLM_MAX_MODEL_LEN` → `max_model_len`, `VLM_MAX_NUM_SEQS` → `max_num_seqs`, `VLM_MAX_NUM_BATCHED_TOKENS` → `max_num_batched_tokens`, `VLM_MAX_IMAGES_PER_PROMPT` → `image_cap`, and `VLM_EXTRA_ARGS` → the `extra_args` of each entry in `tuning` (one list element per whitespace-separated token). `GET /vlm/models` shows the result.
 
 ### Gated models
