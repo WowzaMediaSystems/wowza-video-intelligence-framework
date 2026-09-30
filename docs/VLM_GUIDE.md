@@ -205,7 +205,7 @@ A model VIS does not ship takes two things: its metadata in the overlay, and an 
 }
 ```
 
-`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk; `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then a HuggingFace token applies as for Gemma, set in the Manager or as `HF_TOKEN`). `tier` (`auto` by default), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model.
+`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk; `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then a HuggingFace token applies as for Gemma, set in the Manager or as `HF_TOKEN`). `tier` (`auto` by default), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model. A new `id` must differ from every other model's by more than case and punctuation (`Acme/Acme_VL_2B` and `acme/acme-vl-2b` would share one engine), or VIS rejects the overlay.
 
 **The engine** is a slot: the compose ships two generic services, `vif-model-slot-1` and `vif-model-slot-2`, each behind a profile of its own and told which model to serve by one `.env` line:
 
@@ -220,7 +220,7 @@ Then restart VIS (it reads the overlay) and bring the slot up: `docker compose u
 What the slot does when something is off, always staying healthy so `docker compose up --wait` keeps working:
 
 - enabled with no `VIF_SLOT_N_MODEL`: it rests on the launcher's health stub (`/vif/parked` says `"unassigned": true`);
-- assigned a model VIS does not know (not in the overlay, or the overlay was rejected), a shipped model, or a model another slot already serves: its log says which, it rests on the stub, and `GET /vlm/status` lists the slot under `slots` as `misconfigured` with the same reason;
+- assigned a model VIS does not know (not in the overlay, or the overlay was rejected), a shipped model, or a model another slot already serves (the slot that had it first keeps it, across VIS restarts too): its log says which, it rests on the stub, and `GET /vlm/status` lists the slot under `slots` as `misconfigured` with the same reason;
 - a model in the overlay with no slot serving it: `GET /vlm/models` shows it with `resident: false` and the reason, and activating it is refused until a slot serves it.
 
 A model you disable (`"disabled": true`) keeps its slot parked, like a shipped one. Bring a slot down by removing its profile from `COMPOSE_PROFILES` and running `docker compose --profile vlm-slot-1 stop vif-model-slot-1`.
