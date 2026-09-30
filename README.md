@@ -183,6 +183,7 @@ In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount a
 - `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
 - `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
 - `./wse/vif-vod-jobs -> /usr/local/WowzaStreamingEngine/vif-vod-jobs`
+- `./wse/harvest -> /usr/local/WowzaStreamingEngine/harvest`
 - `./vis/models -> /build/models`
 
 What this enables:
@@ -192,6 +193,7 @@ What this enables:
 - Keeping WSE logs on the host for troubleshooting and historical inspection.
 - Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
 - Keeping VOD job records, results, and thumbnails across container recreation; without this mount they are lost when the container is replaced.
+- Keeping Frame Harvest judgements, confirmed frames, and runs across container recreation; without this mount every judgement you made in the Harvest tab is lost when the container is replaced.
 - Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
 
 This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:
@@ -229,7 +231,7 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
 ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/scene_mystream1"
 ```
 
-6. To build a custom detector from your own footage, open the **Harvest** tab in the VIF Manager pages: a project takes two example images per class and an encoder (CLIP for classes that are different kinds of shot, DINOv2 for a detail or state within the same framing), scores a file from the On-Demand library against them, and queues the closest frames for you to confirm. The confirmed frames export as a labelled frame set: a zip with a `manifest.json` of image-level labels per group (the positives and a `<group>_none` negative for each judged frame) and the judged frames themselves. It carries no bounding boxes and no COCO annotations, so add boxes with an annotation tool before using it with the [RF-DETR fine-tuning notebook](how_to_finetune_rf_detr_on_detection_dataset.ipynb) in this repository; the resulting `.pth` goes into `./vis/models` and, after a VIS restart, appears as a custom model in the stream configuration. Projects live under `./vis/harvest` (see [VIS deployment](docs/VIS_DEPLOYMENT.md#volumes)).
+6. To build a custom detector from your own footage, open the **Harvest** tab in the VIF Manager pages: a project takes two example images per class and an encoder (CLIP for classes that are different kinds of shot, DINOv2 for a detail or state within the same framing), scores a file from the On-Demand library against them, and queues the closest frames for you to confirm. The confirmed frames export as a labelled frame set: a zip with a `manifest.json` of image-level labels per group (the positives and a `<group>_none` negative for each judged frame) and the judged frames themselves. It carries no bounding boxes and no COCO annotations, so add boxes with an annotation tool before using it with the [RF-DETR fine-tuning notebook](how_to_finetune_rf_detr_on_detection_dataset.ipynb) in this repository; the resulting `.pth` goes into `./vis/models` and, after a VIS restart, appears as a custom model in the stream configuration. Projects are split across two mounts: on the Engine side the judgements, confirmed frames, and runs live under `./wse/harvest`; on the VIS side the examples and banks live under `./vis/harvest` (see [VIS deployment](docs/VIS_DEPLOYMENT.md#volumes)).
 
 7. For VLM analysis, start the full stack with the VLM sidecar and publish a stream matching the default `vlm.*` rule:
 
