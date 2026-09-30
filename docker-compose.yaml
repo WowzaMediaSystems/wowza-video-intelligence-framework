@@ -21,7 +21,9 @@ x-vif-model-engine-env: &vif-model-engine-env
     # container entirely when unset.
     VLLM_API_KEY:
     # Read by HuggingFace directly: token for gated models and rate limits,
-    # and offline mode for hosts with pre-seeded weights.
+    # and offline mode for hosts with pre-seeded weights. Empty, the launcher
+    # uses the token set in the Manager (<state volume>/secrets/hf-token);
+    # set, it wins over that one.
     HF_TOKEN: ${HF_TOKEN:-}
     HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
     # Kept from the single-sidecar layout: pins every engine to the given

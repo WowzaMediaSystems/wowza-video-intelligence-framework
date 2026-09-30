@@ -2070,9 +2070,12 @@ class TestTheLastLoadIsNamedForWhatItWas:
         assert (
             launcher.last_load_words(
                 "acme/model-a",
-                {"access_problem": "token_missing", "reason": "no HF_TOKEN is set"},
+                {
+                    "access_problem": "token_missing",
+                    "reason": "no HuggingFace token is set",
+                },
             )
-            == "the last load of acme/model-a was refused (no HF_TOKEN is set)"
+            == "the last load of acme/model-a was refused (no HuggingFace token is set)"
         )
 
     def test_a_note_with_no_reason(self) -> None:
@@ -2532,9 +2535,10 @@ class TestAGatedEngine:
             "signal": None,
             "reason": (
                 "acme/model-a is a gated HuggingFace model and cannot be "
-                "downloaded: no HF_TOKEN is set"
+                "downloaded: no HuggingFace token is set"
             ),
             "access_problem": "token_missing",
+            "token_fingerprint": "",
         }
         assert engine.events() == []
         assert not engine.loading_marker.exists()
@@ -2559,6 +2563,7 @@ class TestAGatedEngine:
             "gated": True,
             "ok": False,
             "access_problem": "license_not_accepted",
+            "token_source": "environment",
         }
         fake.status = 200
         assert json.loads(http_get(engine.port, "/vif/access")[1])["ok"] is True
@@ -2572,6 +2577,7 @@ class TestAGatedEngine:
         assert report["gated"] is False
         assert report["ok"] is True
         assert report["access_problem"] == ""
+        assert report["token_source"] == ""
 
     def test_a_licensed_token_loads_normally(
         self, engine: ManagedEngine, hub: Any
@@ -2647,6 +2653,226 @@ class TestAGatedEngine:
             for managed in (active, gated):
                 if managed.process is not None:
                     managed.stop()
+
+
+TOKEN_A: str = "hf_ManagerTokenA0123456789abcdefghijkl"
+TOKEN_B: str = "hf_ManagerTokenB0123456789abcdefghijkl"
+ENV_TOKEN: str = "hf_EnvironmentToken0123456789abcdefgh"
+
+
+def store_token(state_dir: Path, token: str) -> Path:
+    """Write the Manager's token the way VIS does: 0600, through a rename."""
+    path: Path = state_dir / "secrets" / "hf-token"
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary: Path = path.with_name(".hf-token.tmp")
+    temporary.write_text(f"{token}\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+    return path
+
+
+class TestTheTokenInForce:
+    """The environment's HF_TOKEN wins; the Manager's file stands in without one."""
+
+    def test_the_file_is_used_only_when_the_environment_has_no_token(
+        self, tmp_path: Path
+    ) -> None:
+        stored: Path = store_token(tmp_path, TOKEN_A)
+        empty: dict[str, str] = {"HF_TOKEN": "", "HF_HOME": "/x"}
+        assert launcher.with_stored_token(empty, str(stored)) == {
+            "HF_TOKEN": TOKEN_A,
+            "HF_HOME": "/x",
+        }
+        assert launcher.token_source(empty, str(stored)) == "manager"
+
+        pinned: dict[str, str] = {"HF_TOKEN": ENV_TOKEN}
+        assert launcher.with_stored_token(pinned, str(stored)) == pinned
+        assert launcher.token_source(pinned, str(stored)) == "environment"
+
+        older: dict[str, str] = {"HUGGING_FACE_HUB_TOKEN": ENV_TOKEN}
+        assert launcher.with_stored_token(older, str(stored)) == older
+        assert launcher.token_source(older, str(stored)) == "environment"
+
+    def test_no_file_and_no_variable_is_no_token(self, tmp_path: Path) -> None:
+        missing: str = str(tmp_path / "secrets" / "hf-token")
+        assert launcher.with_stored_token({"HF_TOKEN": ""}, missing) == {"HF_TOKEN": ""}
+        assert launcher.token_source({}, missing) == ""
+        assert launcher.token_source({}, "") == ""
+
+    def test_an_unreadable_file_is_no_token(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        directory: Path = tmp_path / "secrets" / "hf-token"
+        directory.mkdir(parents=True)
+
+        assert launcher.stored_hf_token(str(directory)) == ""
+        assert launcher.stored_hf_token(str(directory)) == ""
+        assert capsys.readouterr().err == (
+            f"[vlm-launcher] the HuggingFace token file {directory} cannot be "
+            "read (Is a directory).\n"
+        )
+
+    def test_a_fingerprint_tells_tokens_apart_without_holding_them(self) -> None:
+        a: str = launcher.token_fingerprint(TOKEN_A)
+        assert a == launcher.token_fingerprint(TOKEN_A)
+        assert a != launcher.token_fingerprint(TOKEN_B)
+        assert len(a) == 16 and int(a, 16) >= 0
+        assert a not in TOKEN_A and TOKEN_A[3:19] not in a
+        assert launcher.token_fingerprint("") == ""
+
+
+class TestAManagerToken:
+    """A token set in the Manager reaches the check and vLLM, with no restart."""
+
+    MODEL: str = "acme/model-a"
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, self.MODEL
+        )
+        managed.extra_env = {
+            "HF_HOME": str(tmp_path / "hf"),
+            "HF_TOKEN": "",
+            "HUGGING_FACE_HUB_TOKEN": "",
+            "FAKE_VLLM_RECORD_ENV": "HF_TOKEN",
+        }
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    @staticmethod
+    def started_with(engine: ManagedEngine) -> str | None:
+        for event in events(engine.log):
+            if event["event"] == "start":
+                token: str | None = event["env"]["HF_TOKEN"]
+                return token
+        return None
+
+    def test_a_token_set_after_a_refusal_loads_without_a_restart(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(200)
+        engine.extra_env["HF_ENDPOINT"] = fake.url
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+        assert until(engine.crashed_marker.exists)
+        assert engine.crash_note()["access_problem"] == "token_missing"
+        assert engine.events() == []
+
+        store_token(engine.state_dir, TOKEN_A)
+
+        assert until(lambda: engine.events() == ["start"])
+        assert until(engine.awake_marker.exists)
+        assert not engine.crashed_marker.exists()
+        assert self.started_with(engine) == TOKEN_A
+        assert fake.requests == [
+            (f"/{self.MODEL}/resolve/main/config.json", f"Bearer {TOKEN_A}")
+        ]
+        output: str = engine.stop()
+        assert "the next load checks it again" in output
+        assert TOKEN_A not in output
+
+    def test_the_environments_token_wins_over_the_file(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(200)
+        engine.extra_env.update({"HF_ENDPOINT": fake.url, "HF_TOKEN": ENV_TOKEN})
+        store_token(engine.state_dir, TOKEN_A)
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+
+        assert until(lambda: engine.events() == ["start"])
+        assert self.started_with(engine) == ENV_TOKEN
+        assert fake.requests == [
+            (f"/{self.MODEL}/resolve/main/config.json", f"Bearer {ENV_TOKEN}")
+        ]
+
+    def test_an_ungated_engine_is_handed_the_file_token_too(
+        self, engine: ManagedEngine
+    ) -> None:
+        store_token(engine.state_dir, TOKEN_A)
+        engine.spec(desired_state="awake")
+        engine.start()
+
+        assert until(lambda: engine.events() == ["start"])
+        assert self.started_with(engine) == TOKEN_A
+
+    def test_the_parked_stub_says_the_token_is_the_managers(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(403)
+        engine.extra_env["HF_ENDPOINT"] = fake.url
+        store_token(engine.state_dir, TOKEN_A)
+        engine.spec(desired_state="parked", gated=True)
+        engine.start()
+
+        assert until(lambda: http_get(engine.port, "/vif/parked")[0] == 200)
+        body: str = http_get(engine.port, "/vif/access")[1]
+        assert json.loads(body) == {
+            "model": self.MODEL,
+            "gated": True,
+            "ok": False,
+            "access_problem": "license_not_accepted",
+            "token_source": "manager",
+        }
+        assert TOKEN_A not in body
+        assert fake.requests == [
+            (f"/{self.MODEL}/resolve/main/config.json", f"Bearer {TOKEN_A}")
+        ]
+
+    def test_a_refusal_is_rechecked_once_per_token_and_names_it_by_fingerprint(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(401)
+        engine.extra_env["HF_ENDPOINT"] = fake.url
+        store_token(engine.state_dir, TOKEN_A)
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+        assert until(engine.crashed_marker.exists)
+        first: dict[str, Any] = engine.crash_note()
+        assert (first["access_problem"], first["token_fingerprint"]) == (
+            "token_rejected",
+            launcher.token_fingerprint(TOKEN_A),
+        )
+        time.sleep(1.0)
+        assert len(fake.requests) == 1
+
+        store_token(engine.state_dir, TOKEN_B)
+
+        assert until(
+            lambda: engine.crashed_marker.exists()
+            and engine.crash_note()["token_fingerprint"]
+            == launcher.token_fingerprint(TOKEN_B)
+        )
+        time.sleep(1.0)
+        assert [bearer for _, bearer in fake.requests] == [
+            f"Bearer {TOKEN_A}",
+            f"Bearer {TOKEN_B}",
+        ]
+        assert engine.events() == []
+        note_text: str = engine.crashed_marker.read_text("utf-8")
+        assert TOKEN_A not in note_text and TOKEN_B not in note_text
+
+    def test_a_token_removed_in_the_manager_rearms_the_check_too(
+        self, engine: ManagedEngine, hub: Any
+    ) -> None:
+        fake: FakeHub = hub(403)
+        engine.extra_env["HF_ENDPOINT"] = fake.url
+        stored: Path = store_token(engine.state_dir, TOKEN_A)
+        engine.spec(desired_state="awake", gated=True)
+        engine.start()
+        assert until(engine.crashed_marker.exists)
+        assert engine.crash_note()["access_problem"] == "license_not_accepted"
+
+        stored.unlink()
+
+        assert until(
+            lambda: engine.crashed_marker.exists()
+            and engine.crash_note()["access_problem"] == "token_missing"
+        )
+        assert engine.crash_note()["token_fingerprint"] == ""
+        assert engine.events() == []
 
 
 class TestLoadPhases:
