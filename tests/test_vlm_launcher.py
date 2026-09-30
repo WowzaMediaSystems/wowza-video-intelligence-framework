@@ -1385,6 +1385,139 @@ class TestADisabledEngine:
         assert engine.events() == []
 
 
+class TestASlot:
+    """A generic container: it registers what it serves and waits for VIS."""
+
+    SLOT: str = "vif-model-slot-1"
+
+    @pytest.fixture()
+    def engine(self, tmp_path: Path, stub_path: Path, state_dir: Path) -> Any:
+        managed: ManagedEngine = ManagedEngine(
+            tmp_path, stub_path, state_dir, "acme/custom-vl"
+        )
+        managed.extra_env["VIF_SLOT"] = self.SLOT
+        yield managed
+        if managed.process is not None:
+            managed.stop()
+
+    def registration(self, engine: ManagedEngine) -> dict[str, Any]:
+        path: Path = engine.state_dir / "slots" / f"{self.SLOT}.json"
+        if not path.exists():
+            return {}
+        document: dict[str, Any] = json.loads(path.read_text("utf-8"))
+        return document
+
+    def answer(self, engine: ManagedEngine, status: str, reason: str = "") -> None:
+        registration: dict[str, Any] = self.registration(engine)
+        path: Path = engine.state_dir / "slots" / f"{self.SLOT}.assignment.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "slot": self.SLOT,
+                    "nonce": registration["nonce"],
+                    "model": registration["model"],
+                    "status": status,
+                    "reason": reason,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def parked(engine: ManagedEngine) -> dict[str, Any]:
+        status, body = http_get(engine.port, "/vif/parked")
+        answer: dict[str, Any] = json.loads(body) if status == 200 else {}
+        return answer
+
+    def test_it_registers_its_model_hostname_and_a_fresh_nonce(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env["VLM_PORT"] = str(engine.port)
+        engine.start()
+        assert until(lambda: bool(self.registration(engine)))
+        first: dict[str, Any] = self.registration(engine)
+        assert {k: v for k, v in first.items() if k != "nonce"} == {
+            "slot": self.SLOT,
+            "model": "acme/custom-vl",
+            "hostname": socket.gethostname(),
+            "launcher_revision": launcher.LAUNCHER_REVISION,
+        }
+        assert len(first["nonce"]) == 16
+        # Healthy on the stub while it waits.
+        assert until(lambda: self.parked(engine).get("slot") == self.SLOT)
+        engine.stop()
+
+        engine.start()
+        assert until(lambda: self.registration(engine).get("nonce") != first["nonce"])
+
+    def test_an_assigned_slot_goes_on_to_its_models_spec(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env["VLM_PORT"] = str(engine.port)
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: bool(self.registration(engine)))
+        time.sleep(1)
+        assert engine.events() == []
+
+        self.answer(engine, "assigned")
+        assert until(lambda: engine.events() == ["start"])
+        assert until(lambda: engine.ready_marker.exists())
+
+    def test_a_misconfigured_slot_rests_until_the_verdict_changes(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env["VLM_PORT"] = str(engine.port)
+        engine.spec(desired_state="awake")
+        engine.start()
+        assert until(lambda: bool(self.registration(engine)))
+
+        self.answer(engine, "misconfigured", "acme/custom-vl is not in the catalog")
+        assert until(lambda: self.parked(engine).get("misconfigured") is True)
+        assert self.parked(engine) == {
+            "parked": True,
+            "model": "acme/custom-vl",
+            "launcher_revision": launcher.LAUNCHER_REVISION,
+            "slot": self.SLOT,
+            "misconfigured": True,
+            "reason": "acme/custom-vl is not in the catalog",
+        }
+        assert http_get(engine.port, "/health")[0] == 200
+        time.sleep(1)
+        assert engine.events() == []
+
+        self.answer(engine, "assigned")
+        assert until(lambda: engine.events() == ["start"])
+        output: str = engine.stop()
+        assert (
+            "[vlm-launcher] slot vif-model-slot-1 is misconfigured: acme/custom-vl "
+            "is not in the catalog. Resting on the health stub."
+        ) in output
+
+    def test_a_slot_with_no_model_rests_healthy_for_good(
+        self, engine: ManagedEngine
+    ) -> None:
+        engine.extra_env.update({"VLM_PORT": str(engine.port), "VLM_MODEL": ""})
+        engine.start()
+        assert until(lambda: self.parked(engine).get("unassigned") is True)
+        assert self.registration(engine)["model"] == ""
+        assert http_get(engine.port, "/health")[0] == 200
+        assert engine.process is not None
+        engine.process.terminate()
+        assert engine.process.wait(timeout=30) == 0
+
+    def test_no_verdict_is_a_configuration_error(self, engine: ManagedEngine) -> None:
+        engine.extra_env.update(
+            {"VLM_PORT": str(engine.port), "VIF_SPEC_TIMEOUT_SECONDS": "1"}
+        )
+        engine.start()
+        assert engine.process is not None
+        assert engine.process.wait(timeout=30) == launcher.EXIT_CONFIG
+        assert (
+            "VIS never answered slot vif-model-slot-1's registration within 1s"
+        ) in engine.stop()
+
+
 class TestBootOrder:
     """The engine that should be serving loads last, after the hot pool."""
 

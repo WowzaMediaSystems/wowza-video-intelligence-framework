@@ -178,6 +178,53 @@ Disabling the model that is serving is not refused: after the restart it keeps s
 
 To bring a model back, remove the flag and restart VIS. The engine loads again as it would after any restart: at boot if it rests asleep, at its next activation if it is parked.
 
+### Adding your own model: an overlay entry and a slot
+
+A model VIS does not ship takes two things: its metadata in the overlay, and an engine container to run it in.
+
+**The overlay entry** has an `id` the catalog does not have (the model's HuggingFace id, which is also what streams name as `model_name`) and every field a shipped entry has. The same rules validate it, so a missing or malformed field makes VIS log an ERROR naming the entry and the field and serve the shipped catalog without your file.
+
+```json
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "acme/acme-vl-2b",
+      "label": "Acme VL 2B",
+      "min_vram_gb": 8.0,
+      "weights_gb": 4.0,
+      "max_model_len": 4096,
+      "gpu_memory_utilization": 0.85,
+      "image_cap": 8,
+      "sleep_level_default": 1,
+      "sleep_level_source": "spike-pending",
+      "gated": false,
+      "tuning": [{ "name": "compact", "min_total_vram_gb": 8.0, "extra_args": [] }]
+    }
+  ]
+}
+```
+
+`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk; `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then `HF_TOKEN` applies as for Gemma). `tier` (`auto` by default), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model.
+
+**The engine** is a slot: the compose ships two generic services, `vif-model-slot-1` and `vif-model-slot-2`, each behind a profile of its own and told which model to serve by one `.env` line:
+
+```bash
+# .env
+COMPOSE_PROFILES=default,vlm,vlm-slot-1
+VIF_SLOT_1_MODEL=acme/acme-vl-2b
+```
+
+Then restart VIS (it reads the overlay) and bring the slot up: `docker compose up -d`. The slot's launcher tells VIS on the state volume which model it was given, VIS answers, and the model appears in `GET /vlm/models` and the Manager's dropdown like any other: it is downloaded on its first activation, rests asleep or parked by the host's RAM, and streams reach it through the managed endpoint.
+
+What the slot does when something is off, always staying healthy so `docker compose up --wait` keeps working:
+
+- enabled with no `VIF_SLOT_N_MODEL`: it rests on the launcher's health stub (`/vif/parked` says `"unassigned": true`);
+- assigned a model VIS does not know (not in the overlay, or the overlay was rejected), a shipped model, or a model another slot already serves: its log says which, it rests on the stub, and `GET /vlm/status` lists the slot under `slots` as `misconfigured` with the same reason;
+- a model in the overlay with no slot serving it: `GET /vlm/models` shows it with `resident: false` and the reason, and activating it is refused until a slot serves it.
+
+A model you disable (`"disabled": true`) keeps its slot parked, like a shipped one. Bring a slot down by removing its profile from `COMPOSE_PROFILES` and running `docker compose --profile vlm-slot-1 stop vif-model-slot-1`.
+
 **Migrating from `vlm-env/*.env.local` copies.** The documented way to tune a model used to be copying its profile (`cp vlm-env/qwen.env vlm-env/local.env`, then `VLM_CONF=local`). The managed engines do not read those files. Write the lines you changed as fields of that model's overlay entry instead: `VLM_GPU_MEMORY_UTILIZATION` → `gpu_memory_utilization`, `VLM_MAX_MODEL_LEN` → `max_model_len`, `VLM_MAX_NUM_SEQS` → `max_num_seqs`, `VLM_MAX_NUM_BATCHED_TOKENS` → `max_num_batched_tokens`, `VLM_MAX_IMAGES_PER_PROMPT` → `image_cap`, and `VLM_EXTRA_ARGS` → the `extra_args` of each entry in `tuning` (one list element per whitespace-separated token). `GET /vlm/models` shows the result.
 
 ### Gated models

@@ -119,7 +119,8 @@ MANAGED PATH:
   VIF_SPEC_TIMEOUT_SECONDS     How long to wait for VIS to write the spec
                                before exiting 78 (default 300).
   VIF_WATCH_POLL_SECONDS       How often the spec is re-read once the engine is
-                               running (default 2).
+                               running, and a slot's verdict while it waits for
+                               one (default 2).
   VIF_POOL_LOAD_TIMEOUT_SECONDS
                                How long the engine that should be serving waits
                                for the rest of the hot pool to load before it
@@ -152,6 +153,30 @@ BOTH PATHS:
 
   VIF_LAUNCHER_DRY_RUN=1       Print the fully resolved command and env as
                                JSON and exit without starting anything.
+
+SLOTS (the generic `vif-model-slot-N` services):
+  VIF_SLOT                     This container is a slot: the name it registers
+                               under (its compose service name). VLM_MODEL is
+                               the model its deployment assigned it, "" for
+                               none.
+
+A SLOT serves whichever model the catalog overlay adds and its deployment
+assigns it, so VIS cannot know from the catalog where that model's engine is.
+Before anything else the launcher registers on the state volume --
+<state dir>/slots/<slot>.json: the slot, its model, this container's hostname
+and a nonce new on every start -- and then:
+
+  * with no model assigned, it rests on the health stub for good (`/vif/parked`
+    says `"unassigned": true`), so an enabled slot nobody has used yet keeps
+    the stack healthy;
+  * otherwise it waits for VIS's verdict on that registration,
+    <state dir>/slots/<slot>.assignment.json carrying the same nonce, serving
+    the stub meanwhile. `assigned` goes on to the model's spec like any other
+    engine; `misconfigured` (a model the catalog does not have, one with a
+    service of its own, one another slot already serves) logs VIS's reason
+    and rests on the stub (`"misconfigured": true` and the reason), still
+    watching for a verdict that changes. No verdict within
+    VIF_SPEC_TIMEOUT_SECONDS exits 78, as a spec that never arrives does.
 
 THE DESIRED STATE, AND THE WATCH LOOP. A spec names one of three states, and
 this script keeps following the spec for as long as it runs (re-read every
@@ -319,7 +344,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-30.1"
+LAUNCHER_REVISION: str = "2026-09-30.2"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -335,6 +360,9 @@ ENGINE_LOADING_DIRNAME: str = "loading"
 ENGINE_CRASHED_DIRNAME: str = "crashed"
 ENGINE_PHASE_DIRNAME: str = "phase"
 ENGINE_SIZED_DIRNAME: str = "sized"
+ENGINE_SLOTS_DIRNAME: str = "slots"
+SLOT_ASSIGNMENT_SUFFIX: str = ".assignment.json"
+SLOT_POLL_SECONDS: float = 2.0
 ACTIVE_MODEL_FILENAME: str = "active-model"
 DEFAULT_STATE_DIR: str = "/vif-state"
 # Inside the container, not on the state volume: the healthcheck reads it.
@@ -1498,6 +1526,7 @@ class ParkedStub:
         model: str,
         access: Callable[[], dict[str, Any]] | None = None,
         disabled: bool = False,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         if self._server is not None:
             return
@@ -1509,6 +1538,7 @@ class ParkedStub:
         }
         if disabled:
             answer["disabled"] = True
+        answer.update(extra or {})
         body: bytes = json.dumps(answer).encode("utf-8")
 
         class Handler(BaseHTTPRequestHandler):
@@ -2662,6 +2692,121 @@ class Engine:
         self._stub.stop()
 
 
+# ── slots ──────────────────────────────────────────────────────────────────
+
+
+class SlotStatus(StrEnum):
+    ASSIGNED = "assigned"
+    UNASSIGNED = "unassigned"
+    MISCONFIGURED = "misconfigured"
+
+
+def write_json_atomically(path: Path, document: dict[str, Any]) -> None:
+    make_shared_dir(path.parent)
+    temporary: Path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def register_slot(state_dir: Path, slot: str, model: str) -> str:
+    """Say on the volume what this slot was given to serve; returns the nonce."""
+    nonce: str = os.urandom(8).hex()
+    write_json_atomically(
+        state_dir / ENGINE_SLOTS_DIRNAME / f"{engine_key(slot)}.json",
+        {
+            "slot": slot,
+            "model": model,
+            "hostname": socket.gethostname(),
+            "nonce": nonce,
+            "launcher_revision": LAUNCHER_REVISION,
+        },
+    )
+    return nonce
+
+
+def read_slot_verdict(state_dir: Path, slot: str, nonce: str) -> dict[str, Any] | None:
+    """VIS's verdict on this start's registration, or None while there is none."""
+    path: Path = (
+        state_dir / ENGINE_SLOTS_DIRNAME / f"{engine_key(slot)}{SLOT_ASSIGNMENT_SUFFIX}"
+    )
+    try:
+        verdict: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(verdict, dict) or verdict.get("nonce") != nonce:
+        return None
+    return verdict
+
+
+def run_slot(environ: dict[str, str], slot: str) -> int | None:
+    """
+    Register this slot and wait until VIS assigns it its model.
+
+    None means it has: go on to the model's spec. A number is the exit code.
+    """
+    state_dir_text: str = env_value(environ, "VIF_STATE_DIR")
+    if not state_dir_text:
+        raise ConfigError(f"slot {slot} needs VIF_STATE_DIR to register on")
+    state_dir: Path = Path(state_dir_text)
+    model: str = env_value(environ, "VLM_MODEL")
+    port: int = env_int(environ, "VLM_PORT", 8000)
+    timeout: int = env_int(
+        environ, "VIF_SPEC_TIMEOUT_SECONDS", DEFAULT_SPEC_TIMEOUT_SECONDS
+    )
+    poll: float = env_float(environ, "VIF_WATCH_POLL_SECONDS", SLOT_POLL_SECONDS)
+    nonce: str = register_slot(state_dir, slot, model)
+    stub: ParkedStub = ParkedStub(
+        env_value(environ, "VIF_ENGINE_HOST", DEFAULT_ENGINE_HOST)
+    )
+    if not model:
+        log(
+            f"slot {slot} has no model assigned: resting on the health stub. Set "
+            "its VIF_SLOT_<n>_MODEL in .env to a model the catalog overlay adds, "
+            "and recreate it."
+        )
+        stub.start(port, "", extra={"slot": slot, "unassigned": True})
+        while not pause(poll):
+            pass
+        stub.stop()
+        return 0
+
+    log(f"slot {slot} registered for {model}; waiting for VIS to assign it...")
+    stub.start(port, model, extra={"slot": slot})
+    deadline: float = time.monotonic() + timeout
+    announced: str = ""
+    answered: bool = False
+    while True:
+        verdict: dict[str, Any] | None = read_slot_verdict(state_dir, slot, nonce)
+        if verdict is not None:
+            answered = True
+            if verdict.get("status") == SlotStatus.ASSIGNED:
+                stub.stop()
+                log(f"slot {slot} assigned {model} by VIS.")
+                return None
+            reason: str = str(verdict.get("reason") or verdict.get("status"))
+            if reason != announced:
+                warn(
+                    f"slot {slot} is misconfigured: {reason}. Resting on the "
+                    "health stub."
+                )
+                announced = reason
+                stub.stop()
+                stub.start(
+                    port,
+                    model,
+                    extra={"slot": slot, "misconfigured": True, "reason": reason},
+                )
+        elif not answered and time.monotonic() >= deadline:
+            stub.stop()
+            raise ConfigError(
+                f"VIS never answered slot {slot}'s registration within {timeout}s "
+                "-- is VIS running, and is the state volume shared?"
+            )
+        if pause(poll):
+            stub.stop()
+            return 0
+
+
 def supervise(plan: LaunchPlan, environ: dict[str, str]) -> int:
     engine: Engine = Engine(plan, environ)
     signal.signal(signal.SIGTERM, engine.forward_signal)
@@ -2713,6 +2858,11 @@ def main() -> int:
         if dry_run:
             _LOG_STREAM = sys.stderr
         log(f"revision {LAUNCHER_REVISION}")
+        slot: str = env_value(dict(os.environ), "VIF_SLOT")
+        if slot and not dry_run:
+            code: int | None = run_slot(dict(os.environ), slot)
+            if code is not None:
+                return code
         plan: LaunchPlan = build_plan(dict(os.environ))
     except ConfigError as exc:
         warn(str(exc))

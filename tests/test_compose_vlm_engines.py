@@ -105,13 +105,22 @@ def services(compose: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return found
 
 
+SLOTS: list[str] = ["vif-model-slot-1", "vif-model-slot-2"]
+
+
 @pytest.fixture(scope="module")
 def engines(services: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The fixed model services: one per shipped model."""
     return {
         name: service
         for name, service in services.items()
-        if name.startswith("vif-model-")
+        if name.startswith("vif-model-") and name not in SLOTS
     }
+
+
+@pytest.fixture(scope="module")
+def slots(services: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {name: services[name] for name in SLOTS}
 
 
 class TestOneServicePerModel:
@@ -196,7 +205,9 @@ class TestNetwork:
             for name, service in services.items()
             if EGRESS_NETWORK in networks(service)
         )
-        engine_names: list[str] = sorted(hostname_for(m) for m in CATALOG_MODEL_IDS)
+        engine_names: list[str] = sorted(
+            [*(hostname_for(m) for m in CATALOG_MODEL_IDS), *SLOTS]
+        )
         assert on_engine_network == sorted([VIS, *engine_names])
         assert on_egress == engine_names
 
@@ -342,3 +353,41 @@ class TestHealthcheck:
                 + per_load
             )
             assert 10200 >= len(CATALOG_MODEL_IDS) * per_load
+
+
+class TestSlots:
+    """The generic services a model the catalog overlay adds runs in."""
+
+    @pytest.mark.parametrize("number", [1, 2])
+    def test_each_slot_is_named_by_env_and_behind_its_own_profile(
+        self, slots: dict[str, dict[str, Any]], number: int
+    ) -> None:
+        name: str = f"vif-model-slot-{number}"
+        slot: dict[str, Any] = slots[name]
+        env: dict[str, str | None] = environment(slot)
+        assert (slot["hostname"], slot["profiles"]) == (name, [f"vlm-slot-{number}"])
+        assert (env["VIF_SLOT"], env["VLM_MODEL"]) == (
+            name,
+            f"${{VIF_SLOT_{number}_MODEL:-}}",
+        )
+
+    def test_a_slot_is_a_fixed_engine_but_for_its_name_and_profile(
+        self,
+        slots: dict[str, dict[str, Any]],
+        engines: dict[str, dict[str, Any]],
+    ) -> None:
+        fixed: dict[str, Any] = engines[hostname_for(CATALOG_MODEL_IDS[0])]
+        own: set[str] = {"hostname", "profiles", "environment"}
+        for slot in slots.values():
+            assert {k: v for k, v in slot.items() if k not in own} == {
+                k: v for k, v in fixed.items() if k not in own
+            }
+            shared: dict[str, str | None] = environment(fixed)
+            del shared["VLM_MODEL"]
+            env: dict[str, str | None] = environment(slot)
+            assert {k: v for k, v in env.items() if k in shared} == shared
+
+    def test_no_slot_starts_with_the_vlm_profile_alone(
+        self, slots: dict[str, dict[str, Any]]
+    ) -> None:
+        assert [name for name, slot in slots.items() if "vlm" in slot["profiles"]] == []

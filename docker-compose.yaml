@@ -357,6 +357,37 @@ services:
             <<: *vif-model-engine-env
             VLM_MODEL: nvidia/Cosmos3-Nano
 
+    # ── Slots: models you add yourself (opt-in, one profile each) ──────────
+    # A model the catalog overlay (./vis/models/vlm-catalog.local.json) adds
+    # has no service above. A slot serves it: the same engine, told which
+    # model by .env instead of by its name. Enable a slot with its profile and
+    # assign it the overlay entry's id:
+    #
+    #   COMPOSE_PROFILES=default,vlm,vlm-slot-1
+    #   VIF_SLOT_1_MODEL=<the overlay entry's id>
+    #
+    # The slot registers what it serves on the state volume and VIS answers;
+    # a slot enabled with no model, or with one VIS does not know, rests
+    # healthy on its launcher's health stub and says why in its log.
+    # Full guide: docs/VLM_GUIDE.md.
+    vif-model-slot-1:
+        <<: *vif-model-engine
+        profiles: ["vlm-slot-1"]
+        hostname: vif-model-slot-1
+        environment:
+            <<: *vif-model-engine-env
+            VIF_SLOT: vif-model-slot-1
+            VLM_MODEL: ${VIF_SLOT_1_MODEL:-}
+
+    vif-model-slot-2:
+        <<: *vif-model-engine
+        profiles: ["vlm-slot-2"]
+        hostname: vif-model-slot-2
+        environment:
+            <<: *vif-model-engine-env
+            VIF_SLOT: vif-model-slot-2
+            VLM_MODEL: ${VIF_SLOT_2_MODEL:-}
+
     # ── Synthetic Video Detector NIM sidecar (opt-in) ──────────────────────
     # NVIDIA Synthetic Video Detector (SVD) NIM backing the
     # `detector_type=synthetic` analyzer. Bidirectional-streaming gRPC: VIS
