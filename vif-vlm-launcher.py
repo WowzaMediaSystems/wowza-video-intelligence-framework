@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Entrypoint for the VLM engine containers (the `vif-model-*` services in
-docker-compose.yaml, and `vlm-2` in docker-compose.vlm-multi.yaml).
+docker-compose.yaml).
 Runs unchanged on any supported GPU and model: defaults adapt to the hardware
 at startup, and everything else comes from the engine's spec or from VLM_*
 variables -- you should not need to edit this file.
@@ -15,10 +15,9 @@ TWO SOURCES OF FLAGS, in priority order:
      VIS resolves the whole command from its model catalog and this script
      runs it verbatim -- it is a dumb executor, by design. The one addition
      is the deployment's own middleware (VIF_ENGINE_MIDDLEWARE, below).
-  2. The LEGACY env-driven path: VLM_* variables from the model's env file
-     (vlm-env/<name>.env, picked by VLM_CONF in .env). Bit-compatible with
-     the bash entrypoint this file replaces, with one documented exception:
-     --served-model-name is always passed (see below).
+  2. The LEGACY env-driven path: VLM_* variables in the engine's environment.
+     Bit-compatible with the bash entrypoint this file replaces, with one
+     documented exception: --served-model-name is always passed (see below).
 
 --served-model-name IS ALWAYS PASSED. Under HF_HUB_OFFLINE=1 vLLM otherwise
 serves an offline model under its snapshot PATH instead of its HuggingFace id,
