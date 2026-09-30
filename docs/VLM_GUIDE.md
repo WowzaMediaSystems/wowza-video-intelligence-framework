@@ -147,7 +147,7 @@ The active model persists across restarts. A stream's `model_name` must be the m
 |---|---|---|
 | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Default. Commercial-use friendly, fits a 24 GB card | `qwen` |
 | `nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8` | NVIDIA reasoning VLM. Cannot sleep, so it always rests parked | `nemotron` |
-| `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set `HF_TOKEN` in `.env` ([gated models](#gated-models)); fits a 24 GB card | `gemma` |
+| `google/gemma-3-4b-it` | Gated on HuggingFace — accept the license and set a token in the Manager or as `HF_TOKEN` in `.env` ([gated models](#gated-models)); fits a 24 GB card | `gemma` |
 | `nvidia/Cosmos3-Edge` | NVIDIA Cosmos reasoning VLM (3.86B); fp8-quantized at load, fits an 8 GB card. Uses the bundled patch mount, already wired in `docker-compose.yaml` | `cosmos-edge` |
 | `nvidia/Cosmos3-Nano` | Larger Cosmos reasoning VLM (15.75B, ~32 GB of BF16 weights); needs a 40 GB+ card | `cosmos-nano` |
 
@@ -229,9 +229,14 @@ A model you disable (`"disabled": true`) keeps its slot parked, like a shipped o
 
 ### Gated models
 
-Gemma is gated: its weights download only for a HuggingFace account that has accepted the model's license. Accept it on the model's page (<https://huggingface.co/google/gemma-3-4b-it>) while logged in as the account whose access token you will use, put a read token for that account in `.env` as `HF_TOKEN`, and recreate the engines (`docker compose --profile vlm up -d`).
+Gemma is gated: its weights download only for a HuggingFace account that has accepted the model's license. Accept it on the model's page (<https://huggingface.co/google/gemma-3-4b-it>) while logged in as the account whose access token you will use, then give the engines a read token for that account, in one of two places:
 
-Without that, activating the model is refused at once, before the serving model is touched, and the refusal says which of the three is wrong (no token, a token HuggingFace does not accept, a license not accepted) and links the license page. The serving model keeps serving. A model whose weights are already on disk is not asked about its license again. The Manager never asks for or stores the token.
+- **In the Manager** (recommended): pick the gated model under a stream's managed VLM endpoint, paste the token in the **HuggingFace token** field and **Save**. It is checked against HuggingFace before it is kept — a token HuggingFace rejects is refused and nothing is stored; a license the account has not accepted yet is named, and the token is kept for when it is. The next activate uses it; no container is recreated. The field then shows `***` and a **Remove** button; the token itself is never shown again, logged, or returned by any API. The same field appears under a refused activate.
+- **In `.env`** as `HF_TOKEN`, then recreate the engines (`docker compose --profile vlm up -d`). A token set here wins over one set in the Manager, so a deployment can pin it; the Manager says so when that is the token being refused.
+
+Without a usable token, activating the model is refused at once, before the serving model is touched, and the refusal says which of the three is wrong (no token, a token HuggingFace does not accept, a license not accepted) and links the license page. The serving model keeps serving. A model whose weights are already on disk is not asked about its license again.
+
+**Where the Manager's token lives.** The Engine keeps a copy in its VOD secrets file under a reserved name that no webhook can use, and hands it to the Video Intelligence Service over the service's API key; the service stores it on the engines' state volume (`./vis/vlm-state/secrets/hf-token`, readable only by the service's user) for the engines to read. Nothing else receives it — not the managed `/v1` endpoint, not a stream, not a browser. The state volume is shared only by the service and the engine containers, the same exposure as the `.env` file the token would otherwise sit in: protect `./vis/` the way you protect `.env`.
 
 ### Structured output
 
@@ -263,7 +268,7 @@ The managed engines take no model configuration from `.env`: VIS resolves each e
 | Variable | Default | Meaning |
 |---|---|---|
 | `VLLM_API_KEY` | unset | Optional, never generated. When set, the engines require it, VIS sends it on its own calls to them, and the managed `/v1` passes the caller's key through — streams set the same value as `api_key`. Set it before publishing VIS's port |
-| `HF_TOKEN` | unset | HuggingFace token for the first-boot weight downloads (higher rate limits; required for gated models) |
+| `HF_TOKEN` | unset | HuggingFace token for the first-boot weight downloads (higher rate limits). Gated models need one here or set in the Manager; one set here wins |
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
 | `VLM_FORCE_ALL_COLD` | unset | `true` parks every resting engine instead of putting it to sleep — for hosts where sleep mode cannot run |
 | `VLM_RAM_RESERVE_MIB` | derived | Host RAM kept back from sleeping engines; unset = the larger of 40% of host RAM and 8 GiB |
