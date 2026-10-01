@@ -1662,7 +1662,7 @@
             let syntheticUnsets = [];
             if (detectorType === 'synthetic') {
                 // Field names mirror the VIS WSSyntheticConfigMessage contract; blank => null
-                // so the global synthetic_analysis defaults (video-intelligence.json) apply.
+                // so the global synthetic_analysis defaults (Default.json) apply.
                 const useTlsRaw = document.getElementById('cfg-synthetic-use-tls').value;
                 const thresholdRaw = document.getElementById('cfg-synthetic-classification-threshold').value.trim();
                 // NVCF-only credentials vs self-hosted-only cert paths: only the set that
@@ -1917,7 +1917,7 @@
                 // Effective endpoint (the field shows stream value layered over the json default),
                 // so an empty endpoint here means neither the stream nor the global default set one.
                 if (!sy.endpoint) {
-                    errors.push('Synthetic endpoint is required (gRPC host:port). Set it here or as a global synthetic_analysis.endpoint default in video-intelligence.json.');
+                    errors.push('Synthetic endpoint is required (gRPC host:port). Set it here or as a global synthetic_analysis.endpoint default in Default.json.');
                 } else if (/^https?:\/\//i.test(sy.endpoint)) {
                     errors.push('Synthetic endpoint must be a gRPC host:port (e.g. svd.docker:8001), not an http(s) URL.');
                 }
