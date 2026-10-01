@@ -78,11 +78,12 @@ stream ─▶ Engine (WSE + plugin) ──WebSocket──▶ VIS ──▶ manag
 - **A stream either follows or pins.** An empty `model_name` (shown as **Default** in the Manager) follows whichever model is active: activate another model and the stream moves with it. A named `model_name` pins the stream to that model, and a pinned stream **degrades** (empty results, `degraded: true`, reported as `engine_asleep`) while another model is active.
 - **The active model persists.** It is stored in `./vis/vlm-state/active-model`. On the first start, when that file does not exist, VIS seeds it with the first catalog model (Qwen3-VL 4B).
 
-Everything the engines share lives in three bind mounts under `./vis/`:
+Everything the engines share lives in four bind mounts under `./vis/`:
 
 | Path | Holds |
 |---|---|
 | `./vis/vlm-models` | Model weights (HuggingFace cache), downloaded once per model; also where your [LoRA adapters](#your-own-lora-adapters) go |
+| `./vis/vlm-adapters` | LoRA adapters uploaded through VIS (see [Your own LoRA adapters](#your-own-lora-adapters)). VIS writes it, every engine mounts it read-only |
 | `./vis/vlm-cache` | vLLM's compile cache, so a recreated container does not recompile. Safe to delete |
 | `./vis/vlm-state` | The active model, each engine's command, markers, engine logs, the saved HuggingFace token. Shared only by VIS and the engines |
 
@@ -370,15 +371,26 @@ COMPOSE_PROFILES=default,vlm,vlm-slot-1
 VIF_SLOT_1_MODEL=acme/acme-vl-2b
 ```
 
-Then restart VIS (it reads the overlay) and bring the slot up: `docker compose up -d`. A running VIS refuses an overlay that adds or removes a model (`422 unsupported_change`, naming it), because the model needs a container only the deployment can give it; so this one change needs the restart. The slot's launcher tells VIS on the state volume which model it was given, VIS answers, and the model appears in `GET /vlm/models` and the Manager's dropdown like any other: it is downloaded on its first activation, rests asleep or parked by the host's RAM, and streams reach it through the managed endpoint.
+Saving the entry (from the Manager, `PUT /vlm/overlay`, or by editing the file) is not enough on its own: the model needs an engine container, and a running VIS keeps its set of models fixed. VIS writes the file and applies everything else in the change at once; the answer lists the model under `restart_required`, `GET /vlm/overlay` keeps listing it under `pending_restart` with its full entry, and the Manager says "Restart VIS to add <model>". Then restart VIS (`docker compose restart video-intelligence-service-gpu`). When it starts it gives each slot that has no model of its own the next custom model of the overlay, in the overlay's order; the slot's launcher picks the assignment up from the state volume and runs that model's engine. The model then appears in `GET /vlm/models` and the Manager's dropdown like any other: it is downloaded on its first activation, rests asleep or parked by the host's RAM, and streams reach it through the managed endpoint. No `.env` line is involved.
 
-What the slot does when something is off, always staying healthy so `docker compose up --wait` keeps working:
+The same two slots serve at most two custom models. A change that would leave more custom models than running slots is refused with `422 invalid_overlay` (`field: "models"`, naming the first model that does not fit); `GET /vlm/overlay` reports the count of slots as `slots`. A slot's assignment survives a VIS restart: the slot that serves a model keeps it, and a model you remove frees its slot at the next restart.
 
-- enabled with no `VIF_SLOT_N_MODEL`: it rests on the launcher's health stub (`/vif/parked` says `"unassigned": true`);
-- assigned a model VIS does not know (not in the overlay, or the overlay was rejected), a shipped model, or a model another slot already serves (the slot that had it first keeps it, across VIS restarts too): its log says which, it rests on the stub, and `GET /vlm/status` lists the slot under `slots` as `misconfigured` with the same reason;
-- a model in the overlay with no slot serving it: `GET /vlm/models` shows it with `resident: false` and the reason, and activating it is refused until a slot serves it.
+**Pinning a model to a slot.** The `vlm-slot-N` profiles and `VIF_SLOT_N_MODEL` still work as before. When `VIF_SLOT_1_MODEL` (or `_2_`) names an overlay entry's id, that slot serves it, whatever VIS would have chosen:
 
-A model you disable (`"disabled": true`) keeps its slot parked, like a shipped one. Bring a slot down by removing its profile from `COMPOSE_PROFILES` and running `docker compose --profile vlm-slot-1 stop vif-model-slot-1`.
+```bash
+# .env
+VIF_SLOT_1_MODEL=acme/acme-vl-2b
+```
+
+What a slot does when something is off, always staying healthy so `docker compose up --wait` keeps working:
+
+- no custom model waits for it: it rests on the launcher's health stub (`/vif/parked` says `"unassigned": true`) and keeps listening for an assignment;
+- pinned to a model VIS does not know (not in the overlay, or the overlay was rejected), a shipped model, or a model another slot already serves (the slot that had it first keeps it, across VIS restarts too): its log says which, it rests on the stub, and `GET /vlm/status` lists the slot under `slots` as `misconfigured` with the same reason;
+- a model in the overlay that no slot serves yet: `GET /vlm/models` shows it with `resident: false` and the reason, and activating it is refused until a slot serves it.
+
+A model you disable (`"disabled": true`) keeps its slot parked, like a shipped one.
+
+**The entry's fields.** The Manager's form asks for `id`, `label`, `weights_gb`, `min_vram_gb`, `max_model_len`, `gpu_memory_utilization`, `image_cap`, `gated` and a tier. The sleep level (`1`) and a single tuning tier whose floor is `min_vram_gb` are filled in when the entry does not carry them, so a hand-written entry may omit `sleep_level_default`, `sleep_level_source` and `tuning` too.
 
 ### Your own LoRA adapters
 
@@ -410,6 +422,8 @@ A LoRA adapter you trained for one of the models is one more model in the dropdo
 
    `adapter_path` is relative to `./vis/vlm-models/`; `rank` is the `r` the adapter was trained with, at most the base's `max_lora_rank` (16 unless the base's entry sets it, one of 1, 8, 16, 32, 64, 128, 256, 320, 512). `lora_module_prefixes` are the module paths, after PEFT's `base_model.model.`, that reach the base's language model: an adapter whose tensors fall outside them would load and change nothing, so VIS refuses it. The base can also be a model you added yourself. Bases that run FP8 weights (every shipped one but Gemma and Cosmos3-Nano) also need `"lora_on_fp8_verified": true`: LoRA on an FP8 base has not been shown to change the pinned vLLM's output, so set it only once you have seen your adapter do so.
 3. **Apply it** (the Manager's panel, or the file with **Apply file edit** or `POST /vlm/overlay/reload`; no VIS restart), and reload the base if it is running: an engine reads `--enable-lora` only when it starts, so a running base is *reload pending* until you reload it (**Reload now**, or `docker compose restart vif-model-<base>`). Adding, disabling and removing adapters apply at once. An adapter entry VIS cannot serve — a field that does not validate, a base that is not in the catalog or does not enable LoRA, a rank above the base's limit — is refused with `422` naming it when you apply it; in a file VIS reads at startup it is logged as an ERROR naming it and left out, and the rest of the file applies.
+
+**Uploading an adapter instead of copying it.** `POST /vlm/adapters?id=<adapter id>&base=<base model id>` takes a zip or tar (also `.tar.gz`, `.tar.bz2`, `.tar.xz`) of the adapter as the raw request body, with the two files at its top level or in the one folder that holds them, and stores it under `./vis/vlm-adapters/<adapter id>/`. The base must already have LoRA enabled. Before anything is kept, VIS checks the archive's layout, that `adapter_config.json` parses, that its `r` is within the base's `max_lora_rank`, and that every tensor name falls under the base's `lora_module_prefixes`; a refusal (`422`) says which and nothing is stored. The answer carries the adapter's rank and the overlay entry (`kind: "lora"`, `adapter_path` relative to `./vis/vlm-adapters/`, `source: "upload"`) to declare it with. The size is capped by `VLM_ADAPTER_MAX_UPLOAD_MB` (default 1024; `413` over it). `DELETE /vlm/adapters/<adapter id>` removes the uploaded files, and only those; it is refused (`409`) while the overlay still declares the adapter. An adapter whose files you copied under `./vis/vlm-models/` keeps working as before (`source: "weights"`, the default). Base-model weights are never uploaded this way: they come from the HuggingFace hub or a pre-seeded directory.
 
 Activating the adapter while its base serves is the fastest switch there is: the adapter is loaded into the serving engine and proven with one request, with no pause for the streams on the base. With the base resting, activating the adapter switches to the base first, then loads it. Activating anything else unloads it. An adapter whose files cannot work with its base — a rank that disagrees with its `adapter_config.json`, tensors outside the language model — is refused before the serving engine is touched, with the reason, and appears in `GET /vlm/models` with `loadable_here: false` and the same reason.
 
@@ -538,8 +552,9 @@ The managed engines take no model configuration from `.env`: VIS resolves each e
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `COMPOSE_PROFILES` | unset | Profiles to start without repeating `--profile`: `default,vlm` for the stack with the engines, plus `vlm-slot-1` / `vlm-slot-2` for [slots](#adding-your-own-model-an-overlay-entry-and-a-slot) |
-| `VIF_SLOT_1_MODEL`, `VIF_SLOT_2_MODEL` | unset | The overlay entry's id a slot serves. A slot enabled with none rests idle |
+| `COMPOSE_PROFILES` | unset | Profiles to start without repeating `--profile`: `default,vlm` for the stack with the engines (the [slots](#adding-your-own-model-an-overlay-entry-and-a-slot) start with `vlm`) |
+| `VIF_SLOT_1_MODEL`, `VIF_SLOT_2_MODEL` | unset | Optional: pin the overlay entry with this id to a slot. It wins over the assignment VIS would make. A slot with none takes the next custom model VIS assigns, or rests idle |
+| `VLM_ADAPTER_MAX_UPLOAD_MB` | `1024` | The largest LoRA adapter archive VIS accepts on `POST /vlm/adapters` |
 | `VLLM_API_KEY` | unset | Optional, never generated. When set, the engines require it, VIS sends it on its own calls to them, and the managed `/v1` passes the caller's key through — streams set the same value as `api_key`. Set it before publishing VIS's port |
 | `HF_TOKEN` | unset | HuggingFace token for downloads (higher rate limits) and gated models. One set here wins over one saved in the Manager |
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |

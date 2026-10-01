@@ -58,6 +58,8 @@ x-vif-model-engine: &vif-model-engine
       # first load and reuses them after. For air-gapped hosts, pre-seed this
       # directory (see docs/VLM_GUIDE.md) and set HF_HUB_OFFLINE=1 in .env.
       - ./vis/vlm-models:/root/.cache/huggingface
+      # Adapters uploaded through VIS, read-only.
+      - ./vis/vlm-adapters:/vif-adapters:ro
       # vLLM's torch.compile artifacts, keyed per model; persisting them
       # skips the recompile whenever a container is recreated. Safe to
       # delete -- the next load just recompiles.
@@ -185,11 +187,12 @@ services:
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
         restart: "no"
-        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}", "/vif-state"]
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}", "/vif-state", "/vif-adapters"]
         volumes:
           - ./vis/models:/build/models
           - ./vis/logs:${LOG_DIR:-/logs}
           - ./vis/vlm-state:/vif-state
+          - ./vis/vlm-adapters:/vif-adapters
 
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
@@ -237,6 +240,9 @@ services:
           - VLLM_API_KEY
           - VLM_FORCE_ALL_COLD
           - VLM_RAM_RESERVE_MIB
+        #   VLM_ADAPTER_MAX_UPLOAD_MB  largest LoRA adapter archive the Manager
+        #                              may upload (default 1024)
+          - VLM_ADAPTER_MAX_UPLOAD_MB
         # NVIDIA GPU configuration
           - NVIDIA_VISIBLE_DEVICES=all  # Or specify GPU IDs: '0,1'
           - NVIDIA_DRIVER_CAPABILITIES=compute,utility
@@ -273,6 +279,9 @@ services:
         # The engines' weights, read-only: VIS reads a LoRA adapter's config
         # and tensor names here before any engine loads it (VIF_WEIGHTS_DIR).
           - ./vis/vlm-models:/vif-weights:ro
+        # Uploaded LoRA adapters (VIF_ADAPTERS_DIR): VIS writes them, the
+        # engines mount the same directory read-only.
+          - ./vis/vlm-adapters:/vif-adapters
         # The service is only reachable on the internal compose network by
         # default. Engine reaches it by hostname
         # (VIS_HOST=video-intelligence-service.docker) on the bridge, so the
@@ -363,22 +372,21 @@ services:
             <<: *vif-model-engine-env
             VLM_MODEL: nvidia/Cosmos3-Nano
 
-    # ── Slots: models you add yourself (opt-in, one profile each) ──────────
-    # A model the catalog overlay (./vis/models/vlm-catalog.local.json) adds
-    # has no service above. A slot serves it: the same engine, told which
-    # model by .env instead of by its name. Enable a slot with its profile and
-    # assign it the overlay entry's id:
+    # ── Slots: models you add yourself ─────────────────────────────────────
+    # A model the catalog overlay adds (./vis/models/vlm-catalog.local.json, or
+    # the Manager's Stream Config Defaults) has no service above. A slot serves
+    # it: the same engine, told which model by VIS instead of by its name. Both
+    # slots start with the `vlm` profile and rest healthy, parked, until VIS
+    # assigns each a custom model when it starts: add the model in the Manager,
+    # restart VIS, and it is served. Nothing is configured in .env.
     #
-    #   COMPOSE_PROFILES=default,vlm,vlm-slot-1
-    #   VIF_SLOT_1_MODEL=<the overlay entry's id>
-    #
-    # The slot registers what it serves on the state volume and VIS answers;
-    # a slot enabled with no model, or with one VIS does not know, rests
-    # healthy on its launcher's health stub and says why in its log.
+    # To pin a model to a particular slot, set VIF_SLOT_<n>_MODEL to the
+    # overlay entry's id: that always wins over VIS's choice. The older
+    # per-slot profiles (vlm-slot-1, vlm-slot-2) still select a slot alone.
     # Full guide: docs/VLM_GUIDE.md.
     vif-model-slot-1:
         <<: *vif-model-engine
-        profiles: ["vlm-slot-1"]
+        profiles: ["vlm", "vlm-slot-1"]
         hostname: vif-model-slot-1
         environment:
             <<: *vif-model-engine-env
@@ -387,7 +395,7 @@ services:
 
     vif-model-slot-2:
         <<: *vif-model-engine
-        profiles: ["vlm-slot-2"]
+        profiles: ["vlm", "vlm-slot-2"]
         hostname: vif-model-slot-2
         environment:
             <<: *vif-model-engine-env
