@@ -15,6 +15,7 @@ The framework **manages the VLM engines for you**. The Video Intelligence Servic
 - [Tiers: hot and cold](#tiers-hot-and-cold)
 - [Gated models and the HuggingFace token](#gated-models-and-the-huggingface-token)
 - [Customizing the deployment: the catalog overlay](#customizing-the-deployment-the-catalog-overlay)
+  - [Configure models from the Manager](#configure-models-from-the-manager)
 - [Sizing and pre-flight](#sizing-and-pre-flight)
 - [Engine logs and troubleshooting](#engine-logs-and-troubleshooting)
 - [Upgrading from the single sidecar, and going back](#upgrading-from-the-single-sidecar-and-going-back)
@@ -222,12 +223,11 @@ Hot returns in seconds but costs host RAM; cold costs nothing while resting and 
 
 ### Who decides a model's tier
 
-Four layers, strongest first:
+Three layers, strongest first:
 
 1. **Capability.** A model that cannot sleep is always cold (Nemotron). On a host where sleep mode cannot run, `VLM_FORCE_ALL_COLD=true` makes every model cold (see below).
-2. **A runtime pin.** `PUT /vlm/models/<id>/tier` with `{"tier": "hot"}`, `{"tier": "cold"}` or `{"tier": null}` (clears the pin). It is persisted in `./vis/vlm-state/tier-overrides.json` and survives restarts. The change on the model that is serving waits for the next switch; promoting a model to hot is checked against the RAM budget first and refused with the arithmetic when it does not fit.
-3. **The overlay.** An explicit `"tier": "hot"` or `"cold"` on a model's [overlay entry](#customizing-the-deployment-the-catalog-overlay). An explicit `hot` that the RAM budget cannot hold is demoted to cold, and VIS logs the numbers.
-4. **The RAM budget (the default, `auto`).** Every shipped model says `auto`, and VIS makes the cheapest sleepers hot until the host's RAM budget is spent. The budget is the host's RAM minus a reserve kept for the serving engine, the page cache, VIS, the Engine and the OS: the larger of 40% of host RAM and 8 GiB, or `VLM_RAM_RESERVE_MIB` when you set it.
+2. **The overlay's tier.** An explicit `"tier": "hot"` or `"cold"` on a model's [overlay entry](#customizing-the-deployment-the-catalog-overlay), the only place a tier is kept. Set it in the Manager's [VLM Models panel](#configure-models-from-the-manager), with `PUT /vlm/overlay`, with `PUT /vlm/models/<id>/tier` (`{"tier": "hot"}`, `{"tier": "cold"}`, or `{"tier": null}` to clear it; it writes the overlay's field) or by editing the file. It applies at once, except that a change on the model that is serving waits until another model is activated. An explicit `hot` that the RAM budget cannot hold is demoted to cold, and VIS logs the numbers; `PUT /vlm/models/<id>/tier` refuses such a promotion up front with the arithmetic. Earlier releases kept these pins in `./vis/vlm-state/tier-overrides.json`: VIS folds any it finds there into the overlay once, at startup, deletes the file and logs what it moved.
+3. **The RAM budget (the default, `auto`).** Every shipped model says `auto`, and VIS makes the cheapest sleepers hot until the host's RAM budget is spent. The budget is the host's RAM minus a reserve kept for the serving engine, the page cache, VIS, the Engine and the OS: the larger of 40% of host RAM and 8 GiB, or `VLM_RAM_RESERVE_MIB` when you set it.
 
 For example, on a 64 GiB host the budget is 38.4 GiB, which keeps Cosmos3 Edge (8.5 GiB) and Qwen3-VL 4B (13.1 GiB) hot and leaves Gemma and Cosmos3 Nano cold; a 144 GiB host keeps all four sleepers hot. The Manager shows the result for each model; `GET /vlm/status` shows how the budget was spent (`tiers`).
 
@@ -235,7 +235,7 @@ If you never switch to a model, **disable it** ([overlay](#customizing-the-deplo
 
 ### Hosts without sleep mode
 
-vLLM's sleep mode needs CUDA UVA, which some platforms (for example WSL2) do not provide. Set `VLM_FORCE_ALL_COLD=true` in `.env` there and recreate VIS: every resting model is parked and every switch is a cold start. `force_all_cold: true` in the overlay does the same.
+vLLM's sleep mode needs CUDA UVA, which some platforms (for example WSL2) do not provide. Set `VLM_FORCE_ALL_COLD=true` in `.env` there and recreate VIS: every resting model is parked and every switch is a cold start. `force_all_cold: true` in the overlay (the panel's **Keep every model cold** toggle) does the same, and applies at once.
 
 ### Startup order
 
@@ -262,7 +262,7 @@ A `HF_TOKEN` is also useful for ungated models: it raises HuggingFace's rate lim
 
 ## Customizing the deployment: the catalog overlay
 
-VIS ships the model catalog: every supported model's sizing, tuning per GPU class and resting behaviour. A deployment changes it in one optional file, `./vis/models/vlm-catalog.local.json`, which VIS reads when it starts. It lives under `./vis/`, which is not tracked, so a framework `git pull` never touches it. Edit it, then restart VIS (`docker compose restart video-intelligence-service-gpu`); the engines follow the specs VIS writes them without a restart of their own.
+VIS ships the model catalog: every supported model's sizing, tuning per GPU class and resting behaviour. A deployment changes it in one optional file, `./vis/models/vlm-catalog.local.json`, which VIS reads when it starts and again whenever you apply a change. It lives under `./vis/`, which is not tracked, so a framework `git pull` never touches it. Edit it, then apply the edit: **Apply file edit** in the Manager, `POST /vlm/overlay/reload`, or a VIS restart (`docker compose restart video-intelligence-service-gpu`); the engines follow the specs VIS writes them without a restart of their own. The Manager's [VLM Models panel](#configure-models-from-the-manager) edits the same file, with no hand editing and no restart. Adding a whole model is the one change that still needs the restart (see [below](#adding-your-own-model-an-overlay-entry-and-a-slot)).
 
 ```json
 {
@@ -277,11 +277,61 @@ VIS ships the model catalog: every supported model's sizing, tuning per GPU clas
 
 Each entry names a model by `id` and sets only the fields it changes; lists such as `tuning` are replaced whole. `force_all_cold: true` at the top level does what `VLM_FORCE_ALL_COLD=true` does. A file VIS cannot use is never fatal: VIS logs an ERROR naming the entry and the field at fault, ignores the whole file and serves the shipped catalog.
 
+### Configure models from the Manager
+
+The overlay file and the Engine Manager's **VLM Models** panel are two views of one document: the panel reads the file through VIS and writes the same file, so a change made in either shows in the other. Open the VIF configuration page, then edit or create a VLM stream config on the managed endpoint: the panel sits between **Video Processing** and **Advanced Options**, collapsed. It does not show for a Verify config or for a stream on your own endpoint. In the VOD analysis editor, **Manage models** under the model dropdown opens it on a new VLM config; nothing is saved unless you save that config.
+
+The panel configures the deployment, not the config around it: *settings here apply to every stream and job*. It has its own **Apply**, separate from **Save**, and one Apply makes one write of the whole document. **Activate** stays in the model dropdown; the panel activates nothing.
+
+- **Models.** One row per model: its status (the dropdown's words), a **Tier** select (Auto, Hot, Cold), an **Enabled** toggle, and a **Tuning** section with `gpu_memory_utilization`, `max_model_len`, `max_num_seqs`, `max_num_batched_tokens`, `mm_processor_kwargs`, `image_cap` and the extra vLLM arguments of each tuning tier. Each field shows the shipped value as its placeholder; empty keeps it, and **Reset** puts it back.
+- **LoRA adapters.** The adapters of the deployment, with add, disable and remove. A shipped adapter can only be disabled; the form adds your own (see [Your own LoRA adapters](#your-own-lora-adapters)).
+- **Keep every model cold (saves host RAM).** `force_all_cold`; fixed when `VLM_FORCE_ALL_COLD` sets it in `.env`.
+
+**When each change applies.**
+
+| Change | When it takes effect |
+|---|---|
+| Tier | At once. On the model that is serving it waits until another model is activated (*deferred*). A `hot` the RAM budget cannot hold is demoted to cold, and the result says so |
+| Disable | At once: the model leaves the list and its engine parks. The serving model keeps serving and the change is *deferred* until another model is activated |
+| Enable | At once. The model returns to the list and rests at its tier: a hot one loads and goes to sleep, a cold one stays parked until activated |
+| `gpu_memory_utilization`, `max_model_len`, `max_num_seqs`, `max_num_batched_tokens`, `mm_processor_kwargs`, the tuning `extra_args` | The model's next load. A parked model simply loads with the new value. A model that is serving or asleep keeps the process it has: it is *reload pending* |
+| `image_cap` | At once for the limit VIS enforces per request. It is also a vLLM flag, so a running engine is reload pending until it loads again |
+| `max_num_seqs`, VIS's own concurrency | The engine follows at its next load, as above. The number of requests VIS sends it at a time follows at the next VIS restart |
+| LoRA adapter: add, disable, remove | At once. An adapter that is active when it is disabled or removed is unloaded, and the streams pinned to it degrade like those of a model that is asleep. Giving a base `enable_lora` is an engine setting: a running base is reload pending |
+| Keep every model cold | At once for the tiers. A model that is asleep and is now cold is parked |
+
+Adding or removing a whole model is not done here; VIS refuses it (`unsupported_change`). See [Adding your own model](#adding-your-own-model-an-overlay-entry-and-a-slot).
+
+**Reload pending.** A change that only a load can apply leaves the running process alone. The model's row says **Reload pending** with the vLLM flags that differ (for example `--max-model-len`) and offers **Reload now**, which cold-starts that model alone, in one to two minutes: streams using it degrade until it is back and no other model is touched. Reloading the serving model is a cold start of itself. Reloading a model that is asleep parks it, and it loads with the new settings the next time it is activated (loading it beside the serving model would risk the card). Or leave it: the model picks the settings up at its next load. The state clears when it loads again. `GET /vlm/models` reports it per model as `reload_pending`, `reload_pending_reason` and `reload_pending_flags`.
+
+**Who can apply.** Everyone who opens the Manager sees the panel and the current values. Only a Manager user in the `admin` group gets the controls and **Apply**; for everyone else the panel is read-only, with a note that an admin makes these changes. The Engine enforces it: the three writes below are refused with `403 admin_required` for any other user, and reading stays open. For the Engine to tell who is calling, its REST API must be authorized (the `VideoIntelligenceServer` property in `Server.xml`, which the shipped configuration sets to `authorized`); without it nobody can be identified and every write is refused, and the panel says so. Activating a model and the HuggingFace token are not limited to admins by this.
+
+**Hand edits.** Editing `./vis/models/vlm-catalog.local.json` still works. VIS does not watch the file, so apply an edit with **Apply file edit** (shown on the panel while the file differs from what VIS runs), with `POST /vlm/overlay/reload`, or by restarting VIS. Until then the panel says the file was edited by hand and not applied yet, and `applied` is `false` in `GET /vlm/overlay`. A hand edit applied this way gives the same result as the same change made in the panel. The panel's own write quotes the file's `etag` (a SHA-256 of its bytes): if the file changed since the panel read it, nothing is written and the panel offers **Reload settings** to read it again, so a hand edit is never overwritten. A document VIS cannot use is refused with `422 invalid_overlay` naming the entry and the field, shown beside that field, and nothing is written.
+
+**The routes.** On VIS, behind `X-API-Key` like the rest of the control API; the Engine relays them under `/v2/vif` with the Manager's REST credentials.
+
+| VIS | Engine (`/v2/vif`) | What it does |
+|---|---|---|
+| `GET /vlm/overlay` | `GET /vlm/overlay` | The overlay as it is on disk, its `etag`, the effective value of every editable field of every model with its source (`shipped` or `overlay`), the adapters, and `applied`. The Engine adds `can_write` (and `write_blocked_reason` when it is false) |
+| `PUT /vlm/overlay` | `PUT /vlm/overlay` (admin) | Replaces the whole document. Needs `If-Match: <etag>` (`428 if_match_required` without it, `409 stale_etag` when the file changed). Validates, writes atomically, applies; answers what applied at once, what is reload pending and what is deferred. Also `409 switching` while a switch runs, `422 invalid_overlay`, `422 unsupported_change`, `500 write_failed` |
+| `POST /vlm/overlay/reload` | `POST /vlm/overlay/reload` (admin) | Reads the file again after a hand edit and answers like the `PUT` |
+| `POST /vlm/models/<id>/reload` | `POST /vlm/reload` with `{"model_id": "<id>"}` (admin) | Reloads a reload-pending model now, like an activate of it (`409 nothing_to_reload` when it is not pending); progress is in `GET /vlm/models` under `activation` |
+
+```bash
+curl -H "X-API-Key: $VIS_API_KEY" http://<VIS host>:5001/vlm/overlay                       # document, etag, effective values
+curl -X PUT -H "X-API-Key: $VIS_API_KEY" -H "If-Match: <etag from the read>" \
+  -H "Content-Type: application/json" -d @overlay.json http://<VIS host>:5001/vlm/overlay
+curl -X POST -H "X-API-Key: $VIS_API_KEY" http://<VIS host>:5001/vlm/overlay/reload
+curl -X POST -H "X-API-Key: $VIS_API_KEY" http://<VIS host>:5001/vlm/models/google/gemma-3-4b-it/reload
+```
+
+`PUT /vlm/models/<id>/tier` still exists and now writes the overlay's `tier` through the same path.
+
 **Disabling a model.** `"disabled": true` takes a model out of the deployment: it disappears from `GET /vlm/models` and the Manager's dropdown, it is never pre-flighted or activated (`409 model_disabled`), and its engine container rests on the launcher's health stub for good — no vLLM process, no weights in memory, no GPU context, never the load lock. The container still reports healthy, so `docker compose up --wait` keeps working, and `GET /vif/parked` on it answers with `"disabled": true`. `GET /vlm/status` lists it under `disabled_models`. This is how to free the host RAM and the boot time a model you never use would cost.
 
-Disabling the model that is serving is not refused: after the restart it keeps serving, VIS logs a WARNING naming it, and the flag takes effect the moment another model is activated.
+Disabling the model that is serving is not refused: it keeps serving, the change comes back as *deferred* (and VIS logs a WARNING naming the model, also when it finds the flag at a start), and the flag takes effect the moment another model is activated.
 
-To bring a model back, remove the flag and restart VIS. The engine loads again as it would after any restart: at boot if it rests asleep, at its next activation if it is parked.
+To bring a model back, remove the flag and apply. It returns to the list and rests at its tier: a hot one loads and then goes to sleep, a cold one stays parked until its next activation.
 
 ### Adding your own model: an overlay entry and a slot
 
@@ -320,7 +370,7 @@ COMPOSE_PROFILES=default,vlm,vlm-slot-1
 VIF_SLOT_1_MODEL=acme/acme-vl-2b
 ```
 
-Then restart VIS (it reads the overlay) and bring the slot up: `docker compose up -d`. The slot's launcher tells VIS on the state volume which model it was given, VIS answers, and the model appears in `GET /vlm/models` and the Manager's dropdown like any other: it is downloaded on its first activation, rests asleep or parked by the host's RAM, and streams reach it through the managed endpoint.
+Then restart VIS (it reads the overlay) and bring the slot up: `docker compose up -d`. A running VIS refuses an overlay that adds or removes a model (`422 unsupported_change`, naming it), because the model needs a container only the deployment can give it; so this one change needs the restart. The slot's launcher tells VIS on the state volume which model it was given, VIS answers, and the model appears in `GET /vlm/models` and the Manager's dropdown like any other: it is downloaded on its first activation, rests asleep or parked by the host's RAM, and streams reach it through the managed endpoint.
 
 What the slot does when something is off, always staying healthy so `docker compose up --wait` keeps working:
 
@@ -359,7 +409,7 @@ A LoRA adapter you trained for one of the models is one more model in the dropdo
    ```
 
    `adapter_path` is relative to `./vis/vlm-models/`; `rank` is the `r` the adapter was trained with, at most the base's `max_lora_rank` (16 unless the base's entry sets it, one of 1, 8, 16, 32, 64, 128, 256, 320, 512). `lora_module_prefixes` are the module paths, after PEFT's `base_model.model.`, that reach the base's language model: an adapter whose tensors fall outside them would load and change nothing, so VIS refuses it. The base can also be a model you added yourself. Bases that run FP8 weights (every shipped one but Gemma and Cosmos3-Nano) also need `"lora_on_fp8_verified": true`: LoRA on an FP8 base has not been shown to change the pinned vLLM's output, so set it only once you have seen your adapter do so.
-3. **Restart VIS**, and the base's engine if it is running (`docker compose restart vif-model-<base>`): an engine reads `--enable-lora` only when it starts. An adapter entry VIS cannot serve — a field that does not validate, a base that is not in the catalog or does not enable LoRA, a rank above the base's limit — is logged as an ERROR naming it and left out, and the rest of the file applies.
+3. **Apply it** (the Manager's panel, or the file with **Apply file edit** or `POST /vlm/overlay/reload`; no VIS restart), and reload the base if it is running: an engine reads `--enable-lora` only when it starts, so a running base is *reload pending* until you reload it (**Reload now**, or `docker compose restart vif-model-<base>`). Adding, disabling and removing adapters apply at once. An adapter entry VIS cannot serve — a field that does not validate, a base that is not in the catalog or does not enable LoRA, a rank above the base's limit — is refused with `422` naming it when you apply it; in a file VIS reads at startup it is logged as an ERROR naming it and left out, and the rest of the file applies.
 
 Activating the adapter while its base serves is the fastest switch there is: the adapter is loaded into the serving engine and proven with one request, with no pause for the streams on the base. With the base resting, activating the adapter switches to the base first, then loads it. Activating anything else unloads it. An adapter whose files cannot work with its base — a rank that disagrees with its `adapter_config.json`, tensors outside the language model — is refused before the serving engine is touched, with the reason, and appears in `GET /vlm/models` with `loadable_here: false` and the same reason.
 
@@ -419,7 +469,7 @@ An engine that is resting is **healthy** as far as Docker is concerned, so `dock
 | Activate refused: `preflight_refused` | The model does not fit this host beside the others; read the arithmetic. See [Sizing and pre-flight](#sizing-and-pre-flight) |
 | Activate refused: `gated_model` | No token, a token HuggingFace rejects, or a license not accepted. See [Gated models](#gated-models-and-the-huggingface-token). The message links the license page; if it says the `.env` token is overriding yours, fix it there |
 | Activate refused: `manager_starting` | The pool is still loading after startup. Wait; `startup_stage` says what for |
-| Activate refused: `sleep_unavailable` | The serving engine has to be put to sleep for the switch and cannot be (it was started without sleep support, or a `VLLM_API_KEY` mismatch). The message names the engine; pin that model cold, or set `VLM_FORCE_ALL_COLD=true` on a platform without sleep mode |
+| Activate refused: `sleep_unavailable` | The serving engine has to be put to sleep for the switch and cannot be (it was started without sleep support, or a `VLLM_API_KEY` mismatch). The message names the engine; set that model's tier to cold, or set `VLM_FORCE_ALL_COLD=true` on a platform without sleep mode |
 | Activate refused: `activation_in_flight` | One switch runs at a time |
 | Activate refused: `model_disabled` / `not_managed_here` | The overlay disabled the model, or it is a [custom model](#adding-your-own-model-an-overlay-entry-and-a-slot) no slot serves yet |
 | Activate refused: `host_not_measured` or `state_volume_read_only` | VIS cannot read the GPU/RAM, or cannot write `./vis/vlm-state` (check the mount's ownership; `vis-init` normally fixes it) |
