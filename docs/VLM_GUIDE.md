@@ -376,7 +376,7 @@ Before it keeps anything, VIS checks the archive's layout, that `adapter_config.
 
 Removing an uploaded adapter offers **Delete the uploaded files too**; Apply deletes them after the overlay no longer declares the adapter. VIS never deletes the files of a declared adapter. An adapter can be the Default, but it is not a member of the active models: its base is. Weights of a whole model are never uploaded; they come from the HuggingFace hub or a pre-seeded directory ([air-gapped hosts](#air-gapped-hosts)).
 
-#### Picking a model for a stream
+#### What the per-stream screens show
 
 The per-stream screens, **Stream Config** and the VOD **New Analysis** form, only pick a model from the **Model Name** dropdown. They have no Activate button, no model panel and no Manage models link. Their status text is read-only and points here:
 
