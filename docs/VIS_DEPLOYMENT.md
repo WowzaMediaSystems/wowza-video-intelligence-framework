@@ -61,6 +61,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `HARVEST_STORE_DIR` | `./harvest` (`/build/harvest` in the compose stack) | Frame Harvest store: projects, example banks and exported packages. Must be writable; see the `./vis/harvest` mount |
 | `HARVEST_MAX_UPLOAD_MB` | `16` (`512` in the compose stack) | Cap per upload body on the harvest HTTP API: an example image, a judged frame during a bank rebuild, or an export package. Size it for the largest package the Engine sends back |
 | `HARVEST_MAX_EXAMPLES` | `200` | Maximum example images per class; adding one to a class that is at the cap is refused |
+| `HARVEST_CACHE_MAX_MB` | `1024` | Per project, the most disk the embedding cache of its runs may use under `HARVEST_STORE_DIR`. A bank rebuild reads judged frames' vectors from this cache instead of re-embedding them; when a project goes over the cap the oldest runs' vectors are evicted first, never those of a run still being written. An evicted run's frames are embedded again on the next rebuild |
 | `HARVEST_DEVICE` | — | GPU the harvest encoder loads on (e.g., `cuda:1`); unset picks the first CUDA device |
 | `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
@@ -106,6 +107,20 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 > rebuild for its own jobs. Run one VIS per Engine when that matters. A harvest also loads one more model on the GPU
 > while its projects are in use: the project's encoder, CLIP (about 0.4 GB) or
 > DINOv2 (about 0.7 GB), chosen when the project is created.
+
+> **Frame Harvest on a live stream.** The Run view can harvest from a running
+> stream instead of an On-Demand file, for a window of up to 4 hours (14,400
+> seconds; 10 minutes by default). Only streams whose detector is object, scene
+> or VLM can host a window. For its duration the harvest **replaces** that
+> stream's detector, so its webhooks and overlays pause and the stream's own
+> detections stop; the window is a runtime override only and never writes a
+> stored configuration. When the window ends (its time is up, its kept-frame cap
+> is reached, someone presses Stop, or the stream ends) the stream resolves its
+> stored configuration again, including any edit saved during the window, and an
+> Engine restart also returns every stream to its stored configuration. Kept
+> frames are stored at the stream's analysis size. Coverage is what the stream could send: frames the
+> stream drops while its analysis is behind are not scored. A run that is still
+> open when the Engine restarts ends as stopped, keeping what it had scored.
 
 ## Air-Gapped Deployments
 
