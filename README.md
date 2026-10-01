@@ -238,7 +238,7 @@ docker compose --profile default --profile vlm up -d
 ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
 ```
 
-   The first start downloads the model weights into `./vis/vlm-models` and loads the models that rest asleep, which takes a while; later starts reuse them. The default model is Qwen3-VL 4B and needs a 24 GB GPU (the smallest catalog model runs on 8 GB). Streams follow the active model by default: to serve another one, pick it in the **Model Name** dropdown of the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page and press **Activate**. Gated models (Gemma) take a HuggingFace token, which you can also enter there.
+   The first start downloads the model weights into `./vis/vlm-models` and loads the models that rest asleep, which takes a while; later starts reuse them. The default model is Qwen3-VL 4B and needs a 24 GB GPU (the smallest catalog model runs on 8 GB). Streams follow the Default model by default: pick another one in the **Model Name** dropdown of the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page. The models that serve (one or several, with their GPU and memory share) are configured once in **Stream Config Defaults → VLM**. Gated models (Gemma) take a HuggingFace token, which you can also enter there.
 
 7. Expected output for streams analyzed by VIF:
 
@@ -249,7 +249,7 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
 
-See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for the managed VLM engines (choosing and activating models, hot and cold tiers, gated models, adding your own models and LoRA adapters, sizing, troubleshooting), VLM modes (`Detect`, `Describe`, and `Custom`), stream settings, and bringing your own endpoint.
+See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for the managed VLM engines (choosing models and the active models in Stream Config Defaults, hot and cold tiers, gated models, adding your own models and LoRA adapters, sizing, troubleshooting), VLM modes (`Detect`, `Describe`, and `Custom`), stream settings, and bringing your own endpoint.
 
 ## Analyzing Video Files (VOD)
 
