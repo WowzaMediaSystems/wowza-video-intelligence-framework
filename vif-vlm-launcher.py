@@ -225,15 +225,17 @@ THE POOL DUTIES, when several engines share one card:
     `awake`, and so does the wait for the load lock: an engine never loads on
     an ask VIS has since withdrawn.
   * the LOAD GUARD: an engine whose spec says `asleep` and that is not loaded
-    does not start loading while another engine holds the card: its `awake/`
+    does not start loading while another engine holds its card: its `awake/`
     marker exists, or it is loaded (`ready/`) and its spec says `awake`. VIS
     writes that spec before it wakes the engine over HTTP, and the awake
-    marker only follows at that engine's launcher's next poll. There is no
-    room beside a serving engine, so this one serves the parked health stub
-    instead and loads once no engine holds the card, or when its spec turns
-    to `awake` (the manager puts the previous engine to sleep before it
-    asks). This is what keeps an engine restarted beside a serving
-    one from crash-looping.
+    marker only follows at that engine's launcher's next poll. Only engines
+    whose spec pins the same `gpu_ids` count: a card of its own is a card of
+    its own. A spec that says `gpu_shared` is one VIS sized to load beside
+    the engines serving on its card, and the guard does not hold it. Without
+    either there is no room beside a serving engine, so this one serves the
+    parked health stub instead and loads once no engine holds the card, or
+    when its spec turns to `awake`. This is what keeps an engine restarted
+    beside a serving one from crash-looping.
   * the LOG TEE copies the engine's output to <state dir>/logs/<key>.log as
     well as to this container's stdout, which is how the Manager shows engine
     logs without VIS ever holding a Docker socket.
@@ -351,7 +353,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-09-30.5"
+LAUNCHER_REVISION: str = "2026-10-01.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -545,6 +547,9 @@ class LaunchPlan:
     load_sizing: LoadSizing | None = None
     # Taken out of the deployment by the catalog overlay: parked for good.
     disabled: bool = False
+    # Sized by VIS to load beside the engines serving on its card: the load
+    # guard does not apply.
+    gpu_shared: bool = False
     gpu_ids: str = ""
     tensor_parallel_size: int = 1
     # The other engines' specs, which the boot order reads. Spec path only.
@@ -1271,6 +1276,7 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         sized_dir=str(Path(state_dir) / ENGINE_SIZED_DIRNAME) if state_dir else "",
         load_sizing=load_sizing_from_spec(document),
         disabled=disabled,
+        gpu_shared=document.get("gpu_shared") is True,
         gpu_ids=gpu_ids,
         tensor_parallel_size=spec_int(document, "tensor_parallel_size", 1),
         engines_dir=str(Path(spec_file).parent) if spec_file else "",
@@ -1500,6 +1506,13 @@ class Peer:
     desired: DesiredState | None
     spec_digest: str = ""
     decision: str = ""
+    # The card its spec pins; unset is the first visible GPU.
+    gpu_ids: str = ""
+
+
+def same_card(mine: str, theirs: str) -> bool:
+    """Whether two `gpu_ids` pins name the same card; unset means GPU 0."""
+    return (mine.strip() or "0") == (theirs.strip() or "0")
 
 
 class LockWait(StrEnum):
@@ -1805,6 +1818,7 @@ class Engine:
                     desired=desired,
                     spec_digest=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                     decision=decision_digest(document),
+                    gpu_ids=str(document.get("gpu_ids") or ""),
                 )
             )
         return peers
@@ -1886,8 +1900,10 @@ class Engine:
 
     def serving_elsewhere(self) -> list[str]:
         """
-        The other engines holding the card: an awake marker, or a loaded
-        engine whose spec says `awake`.
+        The other engines holding this engine's card: an awake marker, or a
+        loaded engine whose spec says `awake`, among the engines whose spec
+        pins the same card (an awake marker of an engine whose spec cannot
+        be read counts, to be safe).
 
         The second is a wake in progress. VIS writes the `awake` spec before
         its own `/wake_up`, and rewrites the rest of the pool the moment that
@@ -1896,21 +1912,29 @@ class Engine:
         is the boot order's serving engine, waiting for this one to load first.
         """
         own: str = engine_key(self.plan.model)
+        peers: list[Peer] = self._peer_specs()
+        elsewhere: set[str] = {
+            engine_key(peer.model)
+            for peer in peers
+            if peer.desired is not None and not same_card(self.plan.gpu_ids, peer.gpu_ids)
+        }
         names: set[str] = set()
         if self.plan.awake_dir:
             try:
                 names.update(
                     path.name
                     for path in Path(self.plan.awake_dir).iterdir()
-                    if path.name != own
+                    if path.name != own and path.name not in elsewhere
                 )
             except OSError:
                 pass
         if self.plan.ready_dir:
             names.update(
                 engine_key(peer.model)
-                for peer in self._peer_specs()
-                if peer.desired is DesiredState.AWAKE and self._peer_loaded(peer)
+                for peer in peers
+                if peer.desired is DesiredState.AWAKE
+                and self._peer_loaded(peer)
+                and same_card(self.plan.gpu_ids, peer.gpu_ids)
             )
         return sorted(names)
 
@@ -1918,10 +1942,10 @@ class Engine:
         """
         The load guard: an engine that should be asleep does not load beside a
         serving one, because the card has no room for it. An `awake` spec is
-        never guarded -- the manager puts the previous engine to sleep before
-        it asks.
+        never guarded -- the manager retires what was there before it asks --
+        and neither is one VIS sized to share its card (`gpu_shared`).
         """
-        if target is not DesiredState.ASLEEP:
+        if target is not DesiredState.ASLEEP or self.plan.gpu_shared:
             return False
         serving: list[str] = self.serving_elsewhere()
         if not serving:
@@ -2982,6 +3006,7 @@ def describe(plan: LaunchPlan) -> dict[str, Any]:
                 None if plan.load_sizing is None else asdict(plan.load_sizing)
             ),
             "disabled": plan.disabled,
+            "gpu_shared": plan.gpu_shared,
             "sized_file": plan.sized_file,
             "health_timeout_seconds": plan.health_timeout_seconds,
             "watches": plan.watches,
