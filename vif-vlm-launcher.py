@@ -160,8 +160,8 @@ BOTH PATHS:
 SLOTS (the generic `vif-model-slot-N` services):
   VIF_SLOT                     This container is a slot: the name it registers
                                under (its compose service name). VLM_MODEL is
-                               the model its deployment assigned it, "" for
-                               none.
+                               the model its deployment assigned it, "" to let
+                               VIS choose one (it wins when set).
 
 A SLOT serves whichever model the catalog overlay adds and its deployment
 assigns it, so VIS cannot know from the catalog where that model's engine is.
@@ -169,9 +169,11 @@ Before anything else the launcher registers on the state volume --
 <state dir>/slots/<slot>.json: the slot, its model, this container's hostname
 and a nonce new on every start -- and then:
 
-  * with no model assigned, it rests on the health stub for good (`/vif/parked`
-    says `"unassigned": true`), so an enabled slot nobody has used yet keeps
-    the stack healthy;
+  * with no model assigned, it rests on the health stub (`/vif/parked` says
+    `"unassigned": true`), so an enabled slot nobody has used yet keeps the
+    stack healthy, and keeps reading VIS's verdict: one that `assigned` it a
+    model (the next custom model the overlay adds, in the overlay's order) is
+    taken like the deployment's own, and goes on to that model's spec;
   * otherwise it waits for VIS's verdict on that registration,
     <state dir>/slots/<slot>.assignment.json carrying the same nonce, serving
     the stub meanwhile. `assigned` goes on to the model's spec like any other
@@ -1916,7 +1918,8 @@ class Engine:
         elsewhere: set[str] = {
             engine_key(peer.model)
             for peer in peers
-            if peer.desired is not None and not same_card(self.plan.gpu_ids, peer.gpu_ids)
+            if peer.desired is not None
+            and not same_card(self.plan.gpu_ids, peer.gpu_ids)
         }
         names: set[str] = set()
         if self.plan.awake_dir:
@@ -2895,9 +2898,12 @@ class SlotLease:
         )
         if verdict is None:
             return not self.lost
-        lost: bool = verdict.get("status") != SlotStatus.ASSIGNED
+        now: str = str(verdict.get("model") or self.model)
+        lost: bool = verdict.get("status") != SlotStatus.ASSIGNED or now != self.model
         if lost and not self.lost:
             reason: str = str(verdict.get("reason") or verdict.get("status"))
+            if now != self.model:
+                reason = f"VIS now assigns this slot {now}; recreate its container"
             warn(f"slot {self.slot} lost {self.model}: {reason}. Parking.")
         elif self.lost and not lost:
             log(f"slot {self.slot} assigned {self.model} by VIS again.")
@@ -2923,15 +2929,24 @@ def run_slot(environ: dict[str, str], slot: str) -> SlotLease:
     )
     if not model:
         log(
-            f"slot {slot} has no model assigned: resting on the health stub. Set "
-            "its VIF_SLOT_<n>_MODEL in .env to a model the catalog overlay adds, "
-            "and recreate it."
+            f"slot {slot} has no model of its own: resting on the health stub "
+            "until VIS assigns it a custom model from the catalog overlay."
         )
         stub.start(port, "", extra={"slot": slot, "unassigned": True})
-        while not pause(poll):
-            pass
-        stub.stop()
-        raise Stopped(f"slot {slot} stopped")
+        while True:
+            proposal: dict[str, Any] | None = read_slot_verdict(state_dir, slot, nonce)
+            picked: str = "" if proposal is None else str(proposal.get("model") or "")
+            if (
+                proposal is not None
+                and picked
+                and proposal.get("status") == SlotStatus.ASSIGNED
+            ):
+                stub.stop()
+                log(f"slot {slot} assigned {picked} by VIS.")
+                return SlotLease(state_dir, slot, nonce, picked)
+            if pause(poll):
+                stub.stop()
+                raise Stopped(f"slot {slot} stopped")
 
     log(f"slot {slot} registered for {model}; waiting for VIS to assign it...")
     stub.start(port, model, extra={"slot": slot})
@@ -3028,6 +3043,7 @@ def main() -> int:
         lease: SlotLease | None = None
         if slot and not dry_run:
             lease = run_slot(dict(os.environ), slot)
+            os.environ["VLM_MODEL"] = lease.model
         plan: LaunchPlan = build_plan(dict(os.environ))
     except ConfigError as exc:
         warn(str(exc))
