@@ -420,6 +420,36 @@ services:
             VIF_SLOT: vif-model-slot-2
             VLM_MODEL: ${VIF_SLOT_2_MODEL:-}
 
+    # ── Harvest training tools (operator-run) ──────────────────────────────
+    # Turns a Frame Harvest export into VLM training pairs, trains a LoRA
+    # adapter and publishes it to VIS. Never started by `up`: run one command
+    # at a time, e.g.
+    #   docker compose --profile harvest-tools run --rm harvest-tools pairs \
+    #     --export /harvest/projects/<project id>/export/package.zip --out /work/pairs
+    # The image is built from the Video Intelligence Service repository (see
+    # docs/HARVEST_TRAINING.md); HARVEST_TOOLS_IMAGE overrides the tag. Training
+    # reserves every GPU, so stop the VLM engines first when they hold the card.
+    harvest-tools:
+        image: ${HARVEST_TOOLS_IMAGE:-wowza/wowza-video-intelligence-harvest-tools:latest}
+        profiles: ["harvest-tools"]
+        restart: "no"
+        command: ["--help"]
+        environment:
+            HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
+            VIS_API_KEY: ${VIS_API_KEY:-}
+            VLLM_API_KEY: ${VLLM_API_KEY:-}
+        volumes:
+            - ./vis/harvest:/harvest:ro
+            - ./vis/vlm-models:/root/.cache/huggingface
+            - ./harvest-tools:/work
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          capabilities: [gpu, compute, utility]
+                          count: all
+
     # ── Synthetic Video Detector NIM sidecar (opt-in) ──────────────────────
     # NVIDIA Synthetic Video Detector (SVD) NIM backing the
     # `detector_type=synthetic` analyzer. Bidirectional-streaming gRPC: VIS
