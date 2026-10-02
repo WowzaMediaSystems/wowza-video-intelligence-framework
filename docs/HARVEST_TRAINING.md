@@ -1,10 +1,11 @@
 # Training a VLM adapter from a harvest export
 
 The Harvest tab produces a labelled frame set: a zip with a `manifest.json` of image-level labels and
-the judged frames. The `harvest-tools` container, run by hand, turns that export into training
-pairs for a vision-language model, trains a LoRA adapter on `Qwen/Qwen3-VL-2B-Instruct`, publishes it
-to the VIS model manager and scores it against the base model. Nothing here starts with the stack:
-the service sits behind the `harvest-tools` compose profile and runs one command at a time.
+the judged frames. The `harvest-tools` service turns that export into training pairs for a
+vision-language model, trains a LoRA adapter on `Qwen/Qwen3-VL-2B-Instruct`, publishes it to the VIS
+model manager and scores it against the base model. You drive it from the project's **Train** tab in
+the Manager, or from the command line on a host without one. The service is behind the `harvest-tools`
+compose profile: nothing here starts with the stack, and it runs one job at a time.
 
 The adapter learns your classes as the VLM's **Detect** mode answers them: the trained request is the
 exact request VIS sends for a Detect stream, with your project's class names as the candidate list.
@@ -21,9 +22,15 @@ LoRA adapters in general.
   source, with the repository root as the build context:
   `docker build -f harvest-tools/Dockerfile -t wowza/wowza-video-intelligence-harvest-tools .`
   Set `HARVEST_TOOLS_IMAGE` in `.env` to use another tag.
-- **A free GPU for training.** The service reserves every GPU. The managed VLM engines hold most of
-  the card they run on, so stop them while `train-lora` runs. `pairs`,
-  `publish` and `eval` need no GPU.
+- **A key.** The service authenticates callers the way VIS does: they send `VIS_API_KEY` as
+  `X-API-Key`, and with `SECURE_MODE` unset or `true` the service refuses to start without a key. Only
+  `SECURE_MODE=false` runs it keyless. It listens on the compose network (port 5002) and a job names a
+  model to load, so keep the key set unless the host is internal-only. `VLLM_API_KEY` is passed through
+  for the evaluation.
+- **A free GPU for training.** Training takes the free memory of the card, and the managed VLM engines
+  hold most of it. Free it through the Model Manager's active set (Stream Config Defaults -> VLM): remove
+  the engine the Train form names, then add it back when the job ends. `pairs`, `publish` and `eval`
+  need no GPU, and the idle service holds no GPU memory.
 - **The base model as a custom model.** Adapters are trained on the bf16 `Qwen/Qwen3-VL-2B-Instruct`,
   not on the default FP8 model: LoRA on FP8 weights has not been shown to change the pinned vLLM's
   output. Add it as a [custom model](VLM_GUIDE.md#adding-your-own-model-an-overlay-entry-and-a-slot)
@@ -32,10 +39,67 @@ LoRA adapters in general.
 - **Weights.** The base downloads into `./vis/vlm-models` on first use. On an air-gapped host,
   pre-seed that directory and set `HF_HUB_OFFLINE=1`.
 
-The working directory is `./harvest-tools` next to `docker-compose.yaml`, mounted at `/work`. The
-container runs as root, so give the files back to yourself afterwards (`sudo chown -R "$USER" harvest-tools`).
+The service keeps its jobs under `./harvest-tools` next to `docker-compose.yaml`, mounted at `/work`.
+The container runs as root, so give the files back to yourself afterwards (`sudo chown -R "$USER" harvest-tools`).
 
-## The flow
+## Training from the Manager
+
+1. **Start the service.** It is not part of `docker compose up`:
+
+   ```bash
+   docker compose --profile harvest-tools up -d harvest-tools
+   ```
+
+   A bare `docker compose down` leaves it running; stop it with
+   `docker compose --profile harvest-tools down`.
+2. **Open the project's Train tab** (Harvest -> the project -> Train). If the service does not answer, or
+   rejects the Engine's key, the tab says so, shows the URL it tried and the start command above.
+3. **Read the form.** It shows the export it will train on (when it was made and its size; with none, a
+   link to the Export tab, and Train stays disabled), the adapter name with the project's slug as
+   prefix, the base (the LoRA-capable models of the catalog, the 2B preselected), the epochs, the rank,
+   whether to publish, and whether to make the adapter the Default after publishing. A details section
+   holds the other knobs. It also shows the GPU: free memory against what the base needs, and which
+   engines hold the rest. When the card does not fit, Train is disabled and the line links to the
+   Model Manager; when VLM streams share the card it says how many will slow down while training runs.
+   Train is also disabled while another job runs, naming its project.
+4. **Press Train.** The job card shows the stages (`pairs`, `train`, `publish`, `activate`, `eval`, with
+   the reason of any that was skipped), the epoch and step, the evaluation loss per epoch and the
+   tail of the log. The tab polls every few seconds; nothing is lost if you close it. **Cancel**
+   stops a running job, and a cancelled publish removes the adapter it had already uploaded.
+5. **When the job is done**, the card offers the steps in order. They are production changes and need
+   an admin; readers see everything but the buttons.
+   - **Reload base** when the card says it is pending: the first adapter of a base makes VIS restart
+     that engine with LoRA support. It is disabled while any job is training.
+   - **Make Default** serves the adapter. It asks for confirmation and names the current Default,
+     because production moves to this base and adapter. Only one adapter serves at a time.
+   - **Evaluate** scores the adapter against the base on the validation split. It is available once
+     the adapter is the Default and ready, and shows accuracy per class, the confusion table and the
+     logprob comparison (an adapter whose output equals the base's is not being applied).
+   If a publish or an activation failed, the card shows the stage, the code and the message, and
+   **Publish again** retries from that stage without training again.
+6. **Delete** removes a finished job and its files.
+
+Jobs are directories under `./harvest-tools/jobs/<job id>/` (`job.json`, the log, the pairs and the
+trained adapter). When a job ends, and when the service starts, finished jobs beyond the newest
+`HARVEST_TOOLS_MAX_JOBS` (default 10) or older than `HARVEST_TOOLS_JOB_TTL_SECONDS` (default 30 days)
+are removed, oldest first. The job that produced VIS's current Default adapter is kept. A job is
+sized in gigabytes, so mind the disk. A job running when the service restarts becomes `failed`
+(`service_restarted`); nothing resumes.
+
+**Where the Engine looks.** Stream Config Defaults -> Harvest has one field, the training service URL,
+default `http://harvest-tools.docker:5002`: the compose service needs no change. It is a default-config
+setting only; streams and stream groups cannot override it. The Engine sends its own service key as
+`X-API-Key`.
+
+**Two Engines on one VIS** share the jobs of a project, because project ids are VIS's: either Engine
+sees a project's jobs and may cancel them. A job started from another Engine appears in the Train tab
+labelled with that Engine's host name.
+
+## From the command line
+
+Hosts without a Manager run the same stages by hand, one command at a time. The commands use the same
+image and the same `./harvest-tools` directory as the service. `docker compose run` starts a separate
+container, so do not run `train-lora` while a job of the service is training on the same card.
 
 ```bash
 alias ht='docker compose --profile harvest-tools run --rm harvest-tools'

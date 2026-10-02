@@ -420,25 +420,45 @@ services:
             VIF_SLOT: vif-model-slot-2
             VLM_MODEL: ${VIF_SLOT_2_MODEL:-}
 
-    # ── Harvest training tools (operator-run) ──────────────────────────────
+    # ── Harvest training service (resident, started by hand) ───────────────
     # Turns a Frame Harvest export into VLM training pairs, trains a LoRA
-    # adapter and publishes it to VIS. Never started by `up`: run one command
-    # at a time, e.g.
+    # adapter and publishes it to VIS, one job at a time. The Manager's Train
+    # tab on a Harvest project drives it (Stream Config Defaults -> Harvest holds
+    # its URL); the same image also runs the CLI commands one at a time, e.g.
     #   docker compose --profile harvest-tools run --rm harvest-tools pairs \
     #     --export /harvest/projects/<project id>/export/package.zip --out /work/pairs
-    # The image is built from the repository root of the Video Intelligence
-    # Service source, not its video-intelligence-service/ directory (see
-    # docs/HARVEST_TRAINING.md); HARVEST_TOOLS_IMAGE overrides the tag. Training
-    # reserves every GPU, so stop the VLM engines first when they hold the card.
+    #
+    # Opt-in via the `harvest-tools` profile -- a bare `docker compose up`
+    # never starts it. Start it with:
+    #   docker compose --profile harvest-tools up -d harvest-tools
+    # Teardown: a bare `docker compose down` leaves it running; use
+    # `docker compose --profile harvest-tools down` to stop it.
+    #
+    # It requires VIS_API_KEY (callers send it as X-API-Key) unless
+    # SECURE_MODE=false. The image is built from the repository root of the
+    # Video Intelligence Service source, not its video-intelligence-service/
+    # directory (see docs/HARVEST_TRAINING.md); HARVEST_TOOLS_IMAGE overrides
+    # the tag.
+    #
+    # Training takes the whole GPU's free memory: free the card first by
+    # removing the engine that holds it from the Model Manager's active set
+    # (the Train form names the engine). While idle the service holds no GPU
+    # memory. HARVEST_TOOLS_MAX_JOBS and HARVEST_TOOLS_JOB_TTL_SECONDS bound
+    # how many finished jobs, and for how long, are kept under ./harvest-tools.
     harvest-tools:
+        hostname: harvest-tools.docker
         image: ${HARVEST_TOOLS_IMAGE:-wowza/wowza-video-intelligence-harvest-tools:latest}
         profiles: ["harvest-tools"]
-        restart: "no"
-        command: ["--help"]
+        restart: unless-stopped
+        command: ["serve"]
         environment:
             HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
+            SECURE_MODE: ${SECURE_MODE:-true}
             VIS_API_KEY: ${VIS_API_KEY:-}
+            VIS_URL: http://video-intelligence-service.docker:5001
             VLLM_API_KEY: ${VLLM_API_KEY:-}
+            HARVEST_TOOLS_MAX_JOBS: ${HARVEST_TOOLS_MAX_JOBS:-10}
+            HARVEST_TOOLS_JOB_TTL_SECONDS: ${HARVEST_TOOLS_JOB_TTL_SECONDS:-2592000}
         volumes:
             - ./vis/harvest:/harvest:ro
             - ./vis/vlm-models:/root/.cache/huggingface

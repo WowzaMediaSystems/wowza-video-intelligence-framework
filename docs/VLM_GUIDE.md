@@ -498,7 +498,7 @@ A model you disable (`"disabled": true`) keeps its slot parked, like a shipped o
 
 A LoRA adapter you trained for one of the models is one more model in the dropdown: streams name it as their `model_name`, and it is served by its base model's engine, which routes each request to the adapter or the base by the name it carries. The Manager does all of this from [Stream Config Defaults → VLM](#lora-enabling-it-and-uploading-adapters): **Enable LoRA** on the base, then **Add adapter** with an upload. This section is the file view of the same steps, and covers adapters placed under the weights directory by hand.
 
-To train an adapter from a Frame Harvest export, see [Training a VLM adapter from a harvest export](HARVEST_TRAINING.md).
+To train an adapter from a Frame Harvest export, from the Manager's Train tab or the command line, see [Training a VLM adapter from a harvest export](HARVEST_TRAINING.md).
 
 1. **Copy the adapter** (PEFT's `adapter_config.json` and `adapter_model.safetensors`) under `./vis/vlm-models/`, the weights directory every engine shares, e.g. `./vis/vlm-models/lora/acme-forklifts/`. VIS reads it there too, read-only.
 2. **Declare it in the overlay**, with the base's LoRA support in the same file (`enable_lora` and `lora_module_prefixes`, which the section's **Enable LoRA** toggle sets, with `lora_on_fp8_verified` for an FP8 base):
