@@ -59,8 +59,8 @@ The container runs as root, so give the files back to yourself afterwards (`sudo
    prefix, the base (the LoRA-capable models of the catalog, the 2B preselected), the epochs, the rank,
    whether to publish, and whether to make the adapter the Default after publishing. A details section
    holds the other knobs. It also shows the GPU: free memory against what the base needs, and which
-   engines hold the rest. When the card does not fit, Train is disabled and the line links to the
-   Model Manager; when VLM streams share the card it says how many will slow down while training runs.
+   engines hold the rest. When the card does not fit, Train is disabled and the line links to
+   Stream Config Defaults -> VLM, where the Model Manager's active set is; when VLM streams share the card it says how many will slow down while training runs.
    Train is also disabled while another job runs, naming its project.
 4. **Press Train.** The job card shows the stages (`pairs`, `train`, `publish`, `activate`, `eval`, with
    the reason of any that was skipped), the epoch and step, the evaluation loss per epoch and the
