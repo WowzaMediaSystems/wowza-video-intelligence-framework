@@ -1,4 +1,105 @@
 # name: Wowza Streaming Engine Video Intelligence Framework
+
+# ── Shared definition of a managed VLM engine ─────────────────────────────
+# Every `vif-model-*` service below is this plus the model it serves. The
+# engine runs the stock vLLM image through vif-vlm-launcher.py, which reads
+# the command VIS resolved for it from the state volume and runs it. Sleep
+# mode, dev mode and the hot/cold tier all come from that spec, not from here:
+# a model that cannot sleep is never started with sleep mode.
+x-vif-model-engine-env: &vif-model-engine-env
+    # Where the launcher finds its spec (<dir>/engines/<engine key>.json) and
+    # writes its readiness marker and log. Must be the same path VIS uses.
+    VIF_STATE_DIR: /vif-state
+    # Present while an engine brought back from parked starts: the healthcheck
+    # below accepts it while nothing answers /health yet.
+    VIF_STARTING_FILE: /tmp/vif-engine-starting
+    # Guards the engine's control endpoints (/sleep, /wake_up, ...) with
+    # VLLM_API_KEY. A no-op when no key is set.
+    VIF_ENGINE_MIDDLEWARE: vif_auth.VifAuthMiddleware
+    # Optional, never generated. When set, the engines require it and VIS
+    # sends it; streams pass the same value as `api_key`. Left out of the
+    # container entirely when unset.
+    VLLM_API_KEY:
+    # Read by HuggingFace directly: token for gated models and rate limits,
+    # and offline mode for hosts with pre-seeded weights. Empty, the launcher
+    # uses the token set in the Manager (<state volume>/secrets/hf-token);
+    # set, it wins over that one.
+    HF_TOKEN: ${HF_TOKEN:-}
+    HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
+    # Kept from the single-sidecar layout: pins every engine to the given
+    # card(s). Unset = GPU 0, the card VIS measures and sizes every engine
+    # against; leave it unset (engines on another card are not supported).
+    VLM_GPU_IDS: ${VLM_GPU_IDS:-}
+
+x-vif-model-engine: &vif-model-engine
+    image: vllm/vllm-openai:v0.26.0
+    profiles: ["vlm"]
+    restart: unless-stopped
+    # On SIGTERM the launcher passes the signal to vLLM, waits for it to exit
+    # (10.7 s measured for the largest model, CUDA teardown included), then up
+    # to 10 s for its output to drain. Docker's default 10 s would SIGKILL a
+    # clean shutdown halfway; 30 s covers the 20.7 s with room to spare.
+    stop_grace_period: 30s
+    # VIS writes the specs, so it starts first. An engine that still finds no
+    # spec waits for one, then exits with a configuration error and is
+    # restarted.
+    depends_on:
+      video-intelligence-service-gpu:
+        condition: service_healthy
+    entrypoint: ["python3", "/vif-vlm-launcher.py"]
+    volumes:
+      - ./vif-vlm-launcher.py:/vif-vlm-launcher.py:ro
+      # The control-endpoint guard, loaded through vLLM's --middleware flag.
+      - ./vlm-patches/vif_auth.py:/usr/local/lib/python3.12/dist-packages/vif_auth.py:ro
+      # Cosmos3-Edge fix for the v0.26.0 image (vLLM PR #49190 cherry-pick,
+      # see the file's header); inert for other models. Remove on a fixed release.
+      - ./vlm-patches/cosmos3_edge.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/cosmos3_edge.py:ro
+      # Model weights, shared by every engine: each one downloads its own on
+      # first load and reuses them after. For air-gapped hosts, pre-seed this
+      # directory (see docs/VLM_GUIDE.md) and set HF_HUB_OFFLINE=1 in .env.
+      - ./vis/vlm-models:/root/.cache/huggingface
+      # Adapters uploaded through VIS, read-only.
+      - ./vis/vlm-adapters:/vif-adapters:ro
+      # vLLM's torch.compile artifacts, keyed per model; persisting them
+      # skips the recompile whenever a container is recreated. Safe to
+      # delete -- the next load just recompiles.
+      - ./vis/vlm-cache:/root/.cache/vllm
+      # Specs, readiness and awake markers, engine logs and the load lock
+      # that serializes cold loads on the card. Shared with VIS.
+      - ./vis/vlm-state:/vif-state
+    ipc: host   # vLLM workers need large shared memory (esp. tensor parallel)
+    # `vif-engines` is how VIS reaches the engine; nothing else is on it.
+    # `vif-engines-egress` exists only for the first-boot weight download.
+    networks:
+      - vif-engines
+      - vif-engines-egress
+    # No `ports:`, on purpose: engines are reached only through VIS.
+    healthcheck:
+      # 200 while serving, while asleep, and while parked (the launcher
+      # answers it itself), so a resting engine is never marked unhealthy. A
+      # cold start from parked outlasts five failed checks while vLLM loads,
+      # so the launcher's starting file stands in for /health until it answers.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || test -e \"$${VIF_STARTING_FILE}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # Engines load one at a time, and the serving one loads last: it
+      # waits up to 7800 s for the rest of the pool (four loads of up to
+      # 1800 s each, plus their steps into sleep), then gives its own load
+      # 1800 s, after up to 300 s waiting for VIS to write its spec. 9900 s,
+      # rounded up. A healthy engine is marked healthy on its first passing
+      # check, so this only delays reporting an engine that never comes up.
+      start_period: 10200s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            # All GPUs are exposed; the engine uses GPU 0 unless the spec
+            # (or VLM_GPU_IDS) pins another.
+            - driver: nvidia
+              capabilities: [gpu, compute, utility]
+              count: all
+
 services:
     wse:
         hostname: wse.docker
@@ -77,25 +178,30 @@ services:
           - "host.docker.internal:host-gateway"
 
     # One-shot init: hands the ./vis bind mounts to the non-root vis user
-    # (uid/gid 1001) so VIS can write models/logs, then exits (VIS waits via
-    # depends_on). Reuses the VIS image -- no extra pull, no GPU needed.
+    # (uid/gid 1001) so VIS can write models, logs and the VLM state volume,
+    # then exits (VIS waits via depends_on). Reuses the VIS image -- no extra
+    # pull, no GPU needed.
     vis-init:
         image: wowza/wowza-video-intelligence-service:1.1.0-gpu
         pull_policy: always
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
         restart: "no"
-        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}"]
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}", "/vif-state", "/vif-adapters"]
         volumes:
           - ./vis/models:/build/models
           - ./vis/logs:${LOG_DIR:-/logs}
+          - ./vis/vlm-state:/vif-state
+          - ./vis/vlm-adapters:/vif-adapters
 
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
         image: wowza/wowza-video-intelligence-service:1.1.0-gpu
         pull_policy: always
         #platform: linux/arm64
-        profiles: ["", "vi-service", "default"]
+        # `vlm` too: the managed engines are nothing without VIS, which writes
+        # their specs and is the only way to reach them.
+        profiles: ["", "vi-service", "default", "vlm"]
         restart: unless-stopped
         depends_on:
           vis-init:
@@ -123,6 +229,20 @@ services:
         # - SSL_KEYFILE=/certs/server-key.pem
         # - SSL_CERTFILE=/certs/server-cert.pem
         # - SSL_KEYFILE_PASSWORD=optional-key-password
+        # Managed VLM engines. VIF_STATE_DIR is the state volume mounted
+        # below; VIS writes each engine's spec there. The rest are optional
+        # and passed only when set:
+        #   VLLM_API_KEY         the engines' key, sent on VIS's calls to them
+        #   VLM_FORCE_ALL_COLD   true on hosts where sleep mode cannot run
+        #                        (e.g. WSL2): every engine rests parked
+        #   VLM_RAM_RESERVE_MIB  host RAM kept back from sleeping engines
+          - VIF_STATE_DIR=/vif-state
+          - VLLM_API_KEY
+          - VLM_FORCE_ALL_COLD
+          - VLM_RAM_RESERVE_MIB
+        #   VLM_ADAPTER_MAX_UPLOAD_MB  largest LoRA adapter archive the Manager
+        #                              may upload (default 1024)
+          - VLM_ADAPTER_MAX_UPLOAD_MB
         # NVIDIA GPU configuration
           - NVIDIA_VISIBLE_DEVICES=all  # Or specify GPU IDs: '0,1'
           - NVIDIA_DRIVER_CAPABILITIES=compute,utility
@@ -153,6 +273,15 @@ services:
         # - ~/.cache/huggingface:/build/.cache/huggingface:ro
         # Mount log directory (target follows LOG_DIR from .env)
           - ./vis/logs:${LOG_DIR:-/logs}
+        # The managed VLM engines' state volume, shared with every
+        # vif-model-* service (the vis-init service above makes it writable).
+          - ./vis/vlm-state:/vif-state
+        # The engines' weights, read-only: VIS reads a LoRA adapter's config
+        # and tensor names here before any engine loads it (VIF_WEIGHTS_DIR).
+          - ./vis/vlm-models:/vif-weights:ro
+        # Uploaded LoRA adapters (VIF_ADAPTERS_DIR): VIS writes them, the
+        # engines mount the same directory read-only.
+          - ./vis/vlm-adapters:/vif-adapters
         # The service is only reachable on the internal compose network by
         # default. Engine reaches it by hostname
         # (VIS_HOST=video-intelligence-service.docker) on the bridge, so the
@@ -160,12 +289,20 @@ services:
         # other machines (e.g. Engine running on a different host), publish the
         # port by uncommenting below -- and set a non-empty VIS_API_KEY in .env
         # (keep SECURE_MODE=true) so the endpoint requires authentication:
+        # The same port carries the managed VLM endpoint (/v1), which does
+        # not take VIS_API_KEY: when publishing it, also set VLLM_API_KEY so
+        # /v1 requires a key. Engine ports are never published.
         # ports:
         #   - "${VIS_PORT:-5001}:${VIS_PORT:-5001}"
         env_file:
             - .env
         extra_hosts:
             - "host.docker.internal:host-gateway"
+        # The default network is where Engine reaches VIS; vif-engines is
+        # where VIS reaches the managed VLM engines.
+        networks:
+            - default
+            - vif-engines
         healthcheck:
           test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', int('${VIS_PORT:-5001}')), timeout=5).close()"]
           interval: 30s
@@ -174,86 +311,99 @@ services:
           start_period: 10s
         runtime: nvidia
 
-    # ── VLM sidecar (opt-in) ───────────────────────────────────────────────
-    # OpenAI-compatible vLLM server backing the standalone `detector_type=vlm`
-    # analyzer and the `vlm_verification` overlay on scene/object detectors.
+    # ── Managed VLM engines (opt-in, `--profile vlm`) ──────────────────────
+    # One container per model in the Video Intelligence Service's catalog.
+    # Every one of them is resident, but only one serves at a time: VIS decides
+    # which, and the others rest asleep (hot tier: weights in host RAM, back in
+    # a second or two) or parked (cold tier: no engine process, weights on
+    # disk, back in a cold start). Switching models is a call to VIS -- the
+    # Manager's model dropdown and Activate button make it -- and no container
+    # is recreated.
     #
-    # ONE VLM container per host (the common case). The model and its tuned
-    # flags come from a per-model env file in ./vlm-env/, picked by VLM_CONF
-    # (default qwen):
-    #   docker compose --profile default --profile vlm up -d               # Qwen
-    #   VLM_CONF=nemotron docker compose --profile default --profile vlm up -d
-    # To run SEVERAL VLMs on one host, layer the example override
-    # docker-compose.vlm-multi.yaml (see that file).
+    #   docker compose --profile default --profile vlm up -d
     #
-    # Streams point at `endpoint_url: http://vlm.docker:8000/v1`.
-    vlm:
-        hostname: vlm.docker
-        image: vllm/vllm-openai:v0.26.0
-        profiles: ["vlm"]
-        restart: unless-stopped
-        # Which model this VLM serves: ./vlm-env/<VLM_CONF>.env (default qwen).
-        env_file:
-          - ./vlm-env/${VLM_CONF:-qwen}.env
-        volumes:
-          - ./vlm-entrypoint.sh:/vlm-entrypoint.sh:ro
-        # Cosmos3-Edge fix for the v0.26.0 image (vLLM PR #49190 cherry-pick,
-        # see the file's header); inert for other models. Remove on a fixed release.
-          - ./vlm-patches/cosmos3_edge.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/cosmos3_edge.py:ro
-        # Model weights are downloaded here on first boot and reused on later
-        # boots. For air-gapped deployments, pre-seed it on a machine with
-        # internet access:
-        #   pip install -U huggingface_hub
-        #   HF_HOME=./vis/vlm-models hf download Qwen/Qwen3-VL-4B-Instruct-FP8
-        # then copy ./vis/vlm-models to this host and set HF_HUB_OFFLINE=1 in
-        # .env so boots don't probe the HuggingFace Hub. (Alternatively, run
-        # the stack once on a connected machine and copy the populated
-        # directory.)
-          - ./vis/vlm-models:/root/.cache/huggingface
-        # vLLM writes its torch.compile artifacts here; persisting them
-        # skips the ~40 s model recompile whenever the container is
-        # recreated (image update, compose edit). Safe to delete -- the
-        # next boot just recompiles.
-          - ./vis/vlm-cache:/root/.cache/vllm
-        entrypoint: ["/bin/bash", "/vlm-entrypoint.sh"]
+    # Streams point at VIS's own endpoint,
+    # `endpoint_url: http://video-intelligence-service.docker:5001/v1`, and
+    # either name a model in `model_name` (pinned to it) or leave it empty
+    # (follow whichever model is active). The address the single sidecar used to
+    # answer on (`http://vlm.docker:8000/v1`) is served the same way, so older
+    # stream configs keep working without an edit. Full guide: docs/VLM_GUIDE.md.
+    #
+    # Gated models (Gemma) need a HuggingFace token: set in the Manager, or as
+    # HF_TOKEN in .env (which wins). A model you never use can be disabled in
+    # ./vis/models/vlm-catalog.local.json to free its RAM and boot time.
+    #
+    # The service name is the engine's address: `vif-model-` plus the model id
+    # lowercased, with every run of other characters turned into one `-`. VIS
+    # finds each engine by that name. The engines sit on an internal network
+    # that only VIS joins, and no engine port is ever published.
+    vif-model-qwen-qwen3-vl-4b-instruct-fp8:
+        <<: *vif-model-engine
+        hostname: vif-model-qwen-qwen3-vl-4b-instruct-fp8
         environment:
-        # GPU placement (deployment, not model config); unset = GPU 0.
-          - VLM_GPU_IDS=${VLM_GPU_IDS:-}
-        # Secrets from the shared .env; read by vLLM / HuggingFace directly:
-          - VLLM_API_KEY=${VLLM_API_KEY:-}
-          - HF_TOKEN=${HF_TOKEN:-}
-          - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-}
-        ipc: host   # vLLM workers need large shared memory (esp. tensor parallel)
-        # The endpoint is only reachable on the internal compose network by
-        # default. To reach it from other machines (e.g. VIS running on a
-        # different host), publish the port by uncommenting below -- and set
-        # VLLM_API_KEY in .env to require a key, as the endpoint is otherwise
-        # unauthenticated (streams then pass the same key as `api_key`):
-        # ports:
-        #   - "${VLM_PORT:-8000}:${VLM_PORT:-8000}"
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        healthcheck:
-          test: ["CMD-SHELL", "curl -fsS http://localhost:$${VLM_PORT:-8000}/health"]
-          interval: 30s
-          timeout: 10s
-          retries: 5
-          # First boot downloads ~5 GB of weights into ./vis/vlm-models; the
-          # long grace covers slow links. Later boots reuse the cache and are
-          # marked healthy as soon as the first check passes.
-          start_period: 1800s
-        deploy:
-          resources:
-            reservations:
-              devices:
-                # All GPUs are exposed, but vLLM runs on the first visible
-                # card (GPU 0) unless sharded via VLM_TENSOR_PARALLEL_SIZE.
-                # On multi-GPU hosts, set VLM_GPU_IDS in .env (e.g.
-                # VLM_GPU_IDS=1) to give the sidecar its own card so it
-                # doesn't contend with WSE/VIS.
-                - driver: nvidia
-                  capabilities: [gpu, compute, utility]
-                  count: all
+            <<: *vif-model-engine-env
+            VLM_MODEL: Qwen/Qwen3-VL-4B-Instruct-FP8
+
+    vif-model-nvidia-nvidia-nemotron-nano-12b-v2-vl-fp8:
+        <<: *vif-model-engine
+        hostname: vif-model-nvidia-nvidia-nemotron-nano-12b-v2-vl-fp8
+        environment:
+            <<: *vif-model-engine-env
+            VLM_MODEL: nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8
+
+    vif-model-google-gemma-3-4b-it:
+        <<: *vif-model-engine
+        hostname: vif-model-google-gemma-3-4b-it
+        environment:
+            <<: *vif-model-engine-env
+            VLM_MODEL: google/gemma-3-4b-it
+
+    vif-model-nvidia-cosmos3-edge:
+        <<: *vif-model-engine
+        hostname: vif-model-nvidia-cosmos3-edge
+        environment:
+            <<: *vif-model-engine-env
+            VLM_MODEL: nvidia/Cosmos3-Edge
+
+    vif-model-nvidia-cosmos3-nano:
+        <<: *vif-model-engine
+        hostname: vif-model-nvidia-cosmos3-nano
+        environment:
+            <<: *vif-model-engine-env
+            VLM_MODEL: nvidia/Cosmos3-Nano
+
+    # ── Slots: models you add yourself ─────────────────────────────────────
+    # A model the catalog overlay adds (./vis/models/vlm-catalog.local.json, or
+    # the Manager's Stream Config Defaults) has no service above. A slot serves
+    # it: the same engine, told which model by VIS instead of by its name. Both
+    # slots start with the `vlm` profile and rest healthy, parked, until VIS
+    # assigns each a custom model when it starts: add the model in the Manager,
+    # restart VIS, and it is served. Nothing is configured in .env. A slot keeps
+    # the model it was given for the life of its container: after removing a
+    # custom model, recreate its slot to reuse it (docker compose --profile vlm
+    # up -d --force-recreate vif-model-slot-1).
+    #
+    # To pin a model to a particular slot, set VIF_SLOT_<n>_MODEL to the
+    # overlay entry's id: that always wins over VIS's choice. The older
+    # per-slot profiles (vlm-slot-1, vlm-slot-2) still select a slot alone.
+    # Full guide: docs/VLM_GUIDE.md.
+    vif-model-slot-1:
+        <<: *vif-model-engine
+        profiles: ["vlm", "vlm-slot-1"]
+        hostname: vif-model-slot-1
+        environment:
+            <<: *vif-model-engine-env
+            VIF_SLOT: vif-model-slot-1
+            VLM_MODEL: ${VIF_SLOT_1_MODEL:-}
+
+    vif-model-slot-2:
+        <<: *vif-model-engine
+        profiles: ["vlm", "vlm-slot-2"]
+        hostname: vif-model-slot-2
+        environment:
+            <<: *vif-model-engine-env
+            VIF_SLOT: vif-model-slot-2
+            VLM_MODEL: ${VIF_SLOT_2_MODEL:-}
 
     # ── Synthetic Video Detector NIM sidecar (opt-in) ──────────────────────
     # NVIDIA Synthetic Video Detector (SVD) NIM backing the
@@ -382,6 +532,17 @@ services:
         volumes:
           - svd-nim-cache:/opt/nim/.cache
         restart: "no"
+
+# ── Networks ───────────────────────────────────────────────────────────────
+networks:
+    # VIS <-> managed VLM engines. Internal: no route out, and nothing but VIS
+    # and the engines joins it, so Engine, Manager and the other services
+    # cannot reach an engine port.
+    vif-engines:
+        internal: true
+    # Outbound access for the engines alone (the HuggingFace weight download).
+    # No other service joins it.
+    vif-engines-egress: {}
 
 # ── Named volumes ──────────────────────────────────────────────────────────
 volumes:
