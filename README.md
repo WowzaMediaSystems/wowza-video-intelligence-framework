@@ -238,7 +238,7 @@ docker compose --profile default --profile vlm up -d
 ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
 ```
 
-   The first start downloads the model weights into `./vis/vlm-models` and loads the models that rest asleep, which takes a while; later starts reuse them. The default model is Qwen3-VL 4B and needs a 24 GB GPU (the smallest catalog model runs on 8 GB). Streams follow the Default model by default: pick another one in the **Model Name** dropdown of the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page. The models that serve (one or several, with their GPU and memory share) are configured once in **Stream Config Defaults → VLM**. Gated models (Gemma) take a HuggingFace token, which you can also enter there.
+   The first start downloads the Default model's weights into `./vis/vlm-models` and loads it, which takes a while; later starts reuse them. Every other model stays parked, holding no GPU memory, until you add it to the active models or make it hot. The default model is Qwen3-VL 4B and needs a 24 GB GPU (the smallest catalog model runs on 8 GB). Streams follow the Default model by default: pick another one in the **Model Name** dropdown of the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page. The models that serve (one or several, with their GPU and memory share) are configured once in **Stream Config Defaults → VLM**. Gated models (Gemma) take a HuggingFace token, which you can also enter there.
 
 7. Expected output for streams analyzed by VIF:
 
@@ -318,7 +318,7 @@ Recommended baseline for self-hosted VIF: approximately 8 concurrent 720p stream
 - `NVMe` storage recommended
 - `10 GbE` networking preferred for multi-stream deployments
 
-The managed VLM engines (`--profile vlm`) add their own needs: a GPU with enough memory for the model you serve (8 GB for the smallest, 24 GB for the default, 40 GB for the largest), about 70 GB of disk for all models' weights, and host RAM for the models that rest asleep (any others are parked on disk, at the price of a cold start when switching to them). See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md).
+The managed VLM engines (`--profile vlm`) add their own needs: a GPU with enough memory for the model you serve (8 GB for the smallest, 24 GB for the default, 40 GB for the largest), about 70 GB of disk for all models' weights, and host RAM for the models you make hot, which rest asleep (by default every model but the active ones is parked on disk, at the price of a cold start when switching to it). See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md).
 
 Actual capacity depends on the model variant, frame preprocessing, overlay configuration, event listeners, and downstream integrations. Higher density workloads, heavier models, or full-frame-rate analysis may require additional resources.
 

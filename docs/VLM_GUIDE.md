@@ -177,7 +177,7 @@ Open the VIF configuration page in the Engine Manager (`http://localhost:8088`),
 
 These screens only choose: they never change which models serve, and **Save** saves the stream's config as usual. Under a gated model the **HuggingFace token** field lets you store a token (see [Gated models](#gated-models-and-the-huggingface-token)), and the **Engine logs** disclosure shows the output of any engine.
 
-**First load.** A model whose weights are not on disk yet is downloaded when it is first loaded, then loaded and compiled, which takes minutes. Because the hot-tier models load at boot (see [Startup order](#startup-order)), most of the catalog downloads during the first boot and adding one to the active models later is a wake.
+**First load.** A model whose weights are not on disk yet is downloaded when it is first loaded, then loaded and compiled, which takes minutes. Only the active models and the hot ones load at boot (see [Startup order](#startup-order)), so by default the first boot downloads the Default alone, and each other model downloads the first time it is added to the active models or made hot.
 
 **Verify.** The **Verify** button beside the server address lists the models the endpoint serves. On the managed endpoint that is the models that are awake; the result is reported against your selection and never changes it. (On your own endpoint, a single served model that differs from your selection is adopted.)
 
@@ -220,17 +220,37 @@ Every model has its own engine, all of them resident, but only the active models
 
 Hot returns in seconds but costs host RAM; cold costs nothing while resting and returns with a cold start. A model removed from the active models rests at its own tier, and VIS proves a model it adds with a real request before it reports it serving.
 
+**By default only the Default model runs.** Every shipped model is cold: with `--profile vlm`, the Default (Qwen3-VL 4B unless you change it) loads and serves, and every other model stays parked, holding no GPU memory and no host RAM until you add it to the active models or make it hot. Making a model hot is an explicit choice, and it costs this much while the model rests (measured on an L40S):
+
+| Model | GPU memory while asleep | Host RAM while asleep |
+|---|---|---|
+| Qwen3-VL 4B | 1.5 GiB | about 13 GiB |
+| Gemma 3 4B | 1.1 GiB | about 18 GiB |
+| Cosmos3 Edge | 2.0 GiB | about 11 GiB |
+| Cosmos3 Nano | 0.7 GiB | about 27 GiB |
+
+A cold model holds no GPU memory and about 18 MiB of RAM (the launcher's health stub), and adding it to the active models is a cold start of about 1 to 2 minutes. Nemotron cannot be hot: its engine cannot be woken from sleep, so it is always cold.
+
+To make a model hot, use any of these; each writes the overlay's `tier`:
+
+- The **Tier** select (Auto, Hot, Cold) of the model's row in the Manager's [VLM section](#stream-config-defaults-the-vlm-section) (admins only).
+- `PUT /vlm/models/<id>/tier` with `{"tier": "hot"}`.
+- An edit of `./vis/models/vlm-catalog.local.json`, for example `"models": [{"id": "google/gemma-3-4b-it", "tier": "hot"}]`, followed by `POST /vlm/overlay/reload`.
+
+A promotion the host's RAM budget cannot hold is refused with `409 tier_refused` and the arithmetic. An accepted one loads the model and puts it to sleep at once only when its card has room beside the active models; otherwise it stays parked on the hot tier until it is first added to the active models, or until the stack restarts (hot models load first at boot), and rests asleep from then on.
+
 ### Who decides a model's tier
 
-Three layers, strongest first:
+Four layers, strongest first:
 
 1. **Capability.** A model that cannot sleep is always cold (Nemotron). On a host where sleep mode cannot run, `VLM_FORCE_ALL_COLD=true` makes every model cold (see below).
 2. **The overlay's tier.** An explicit `"tier": "hot"` or `"cold"` on a model's [overlay entry](#customizing-the-deployment-the-catalog-overlay), the only place a tier is kept. Set it in the **All models** list of the Manager's [VLM section](#stream-config-defaults-the-vlm-section), with `PUT /vlm/overlay`, with `PUT /vlm/models/<id>/tier` (`{"tier": "hot"}`, `{"tier": "cold"}`, or `{"tier": null}` to clear it; it writes the overlay's field) or by editing the file. It applies at once, except that a change on a model that is serving waits until it leaves the active models. An explicit `hot` that the RAM budget cannot hold is demoted to cold, and VIS logs the numbers; `PUT /vlm/models/<id>/tier` refuses such a promotion up front with the arithmetic. Earlier releases kept these pins in `./vis/vlm-state/tier-overrides.json`: VIS folds any it finds there into the overlay once, at startup, deletes the file and logs what it moved.
-3. **The RAM budget (the default, `auto`).** Every shipped model says `auto`, and VIS makes the cheapest sleepers hot until the host's RAM budget is spent. The budget is the host's RAM minus a reserve kept for the serving engine, the page cache, VIS, the Engine and the OS: the larger of 40% of host RAM and 8 GiB, or `VLM_RAM_RESERVE_MIB` when you set it.
+3. **The catalog's tier.** Every shipped model says `cold`. A model you add with an overlay entry says `auto` unless its entry names a tier.
+4. **The RAM budget (`auto`).** For a model set to `auto`, VIS makes the cheapest sleepers hot until the host's RAM budget is spent; explicit `hot` models are counted first. The budget is the host's RAM minus a reserve kept for the serving engine, the page cache, VIS, the Engine and the OS: the larger of 40% of host RAM and 8 GiB, or `VLM_RAM_RESERVE_MIB` when you set it.
 
-For example, on a 64 GiB host the budget is 38.4 GiB, which keeps Cosmos3 Edge (8.5 GiB) and Qwen3-VL 4B (13.1 GiB) hot and leaves Gemma and Cosmos3 Nano cold; a 144 GiB host keeps all four sleepers hot. The Manager shows the result for each model; `GET /vlm/status` shows how the budget was spent (`tiers`).
+For example, on a 64 GiB host the budget is 38.4 GiB: set to `auto`, Cosmos3 Edge (8.5 GiB) and Qwen3-VL 4B (13.1 GiB) would be hot and Gemma and Cosmos3 Nano cold; a 144 GiB host holds all four sleepers. The Manager shows the result for each model; `GET /vlm/status` shows how the budget was spent (`tiers`).
 
-If you never switch to a model, **disable it** ([overlay](#customizing-the-deployment-the-catalog-overlay)) to give its RAM and boot time back.
+If you never switch to a model you made hot, set it back to cold or **disable it** ([overlay](#customizing-the-deployment-the-catalog-overlay)) to give its RAM and boot time back.
 
 ### Hosts without sleep mode
 
@@ -238,7 +258,7 @@ vLLM's sleep mode needs CUDA UVA, which some platforms (for example WSL2) do not
 
 ### Startup order
 
-Each engine is sized assuming the others are asleep while it loads, so after a restart the hot-tier models that are not active load first, one at a time, each going to sleep as soon as it is loaded, and the active models load **last**. A cold-tier model that is in the active set is loaded at startup too, after the hot models that are not active; cold-tier models outside the set are not loaded. Streams wait for the whole pool: about 12 minutes with a warm compile cache (`./vis/vlm-cache`), longer on a first boot, when every model also downloads and compiles. A stream started meanwhile begins analyzing when the model finishes loading. Until then the control API answers `503 manager_starting`, and `GET /vlm/status` shows `startup_stage` (`pool-loading: <model> loads after N hot engine(s)`).
+Each engine is sized assuming the others are asleep while it loads, so after a restart the hot-tier models that are not active load first, one at a time, each going to sleep as soon as it is loaded, and the active models load **last**. A cold-tier model that is in the active set is loaded at startup too, after the hot models that are not active; cold-tier models outside the set are not loaded. Streams wait for the whole pool: with the shipped tiers that is the Default alone, about 1 to 2 minutes with a warm compile cache (`./vis/vlm-cache`); every hot model adds its own load, and a first boot also downloads and compiles each model it loads. A stream started meanwhile begins analyzing when the model finishes loading. Until then the control API answers `503 manager_starting`, and `GET /vlm/status` shows `startup_stage` (`pool-loading: <model> loads after N hot engine(s)`).
 
 A resting model whose container restarts while other models serve stays parked until nothing is serving or it joins the active models, rather than loading beside them.
 
@@ -294,7 +314,7 @@ The **active models** are the ones VIS keeps serving. Several can serve at the s
 
 - **Model.** Any enabled model of the catalog, including custom models and LoRA bases.
 - **GPU.** The card the model runs on, chosen from the cards VIS measured (for example `GPU 0 · NVIDIA L40S · 40,000 MiB free`). One GPU per model: a model is not split across cards.
-- **VRAM.** Three figures. **Minimum** is what the model needs on its card: its weights, what its engine holds outside its memory pool, and the KV cache for one sequence of `max_model_len` tokens. **Recommended** is the minimum plus an equal share of what the card has left after every active model's minimum, the memory the sleeping engines still hold and a safety margin, never above the catalog's `gpu_memory_utilization` for the model. Both are shown in MiB and are read-only. **Your value** is optional: the fraction of the GPU's memory the model may use, from 0 to 1 (vLLM's `gpu_memory_utilization`). Left empty, VIS uses the recommendation. A model that is not in the set yet shows the catalog's `min_vram_gb` as an estimate (`≈`) and its recommendation reads `set when applied`. The KV figure comes from the catalog's `kv_bytes_per_token`; a model without one is budgeted at the dearest shipped value and marked as estimated, and a custom model may carry its own `kv_bytes_per_token` in its overlay entry.
+- **VRAM.** Three figures. **Minimum** is what the model needs on its card: its weights, what its engine holds outside its memory pool, and the KV cache for one sequence of `max_model_len` tokens, or the smallest pool the model was measured starting with when that is more (Nemotron's Mamba layers keep a state per possible sequence, so it needs about 19.6 GB, not 15.8). **Recommended** is the minimum plus an equal share of what the card has left after every active model's minimum, the memory the sleeping engines still hold and a safety margin, never above the catalog's `gpu_memory_utilization` for the model. Both are shown in MiB and are read-only. **Your value** is optional: the fraction of the GPU's memory the model may use, from 0 to 1 (vLLM's `gpu_memory_utilization`). Left empty, VIS uses the recommendation. A model that is not in the set yet shows the catalog's `min_vram_gb` as an estimate (`≈`) and its recommendation reads `set when applied`. The KV figure comes from the catalog's `kv_bytes_per_token`; a model without one is budgeted at the dearest shipped value and marked as estimated, and a custom model may carry its own `kv_bytes_per_token` in its overlay entry.
 - **Default.** A radio: exactly one active model carries it. A stream config with no `model_name` (the **Default** option in the model dropdown) follows the model marked Default, so moving the marker moves those streams to another model with no load. Streams that name a model keep using that model. The Default may also be a [LoRA adapter](#your-own-lora-adapters) whose base is an active model; an adapter is never a member of the set itself.
 - **Status**, for example `active · default · ready · hot tier`, or the reason a member is not serving.
 
@@ -469,7 +489,7 @@ A model VIS does not ship takes two things: its metadata in the overlay, and an 
 }
 ```
 
-`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk; `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then a HuggingFace token applies as for Gemma, set in the Manager or as `HF_TOKEN`). `tier` (`auto` by default), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model. A new `id` must differ from every other model's by more than case and punctuation (`Acme/Acme_VL_2B` and `acme/acme-vl-2b` would share one engine), or VIS rejects the overlay.
+`min_vram_gb` must equal the lowest tuning tier's `min_total_vram_gb`; `weights_gb` is the checkpoint's size on disk, and the optional `gpu_weights_gb` what vLLM loads onto the GPU when that is less (a repo that also ships parts the engine does not load, such as Cosmos3 Nano's generation weights); `sleep_level_default` is always `1`; `gated: true` for weights behind a HuggingFace license (then a HuggingFace token applies as for Gemma, set in the Manager or as `HF_TOKEN`). `tier` (`auto` by default, unlike the shipped models' `cold`), `max_num_seqs`, `mm_processor_kwargs` and `sleep_capable` are optional, as for a shipped model. A new `id` must differ from every other model's by more than case and punctuation (`Acme/Acme_VL_2B` and `acme/acme-vl-2b` would share one engine), or VIS rejects the overlay.
 
 **The engine** is a slot: the compose ships two generic services, `vif-model-slot-1` and `vif-model-slot-2`. Both start with the `vlm` profile and run parked, like the catalog engines, until VIS assigns them a model. Nothing is configured in `.env`.
 
@@ -546,7 +566,7 @@ VIS sizes every engine from the card it actually runs on, measured with NVML, no
 - **The card is below the model's floor** (`min_vram_gb`, in the [model table](#the-models)). Refused first, whatever the rest of the arithmetic says.
 - **The weights do not fit.** The card's memory, minus what the sleeping engines still hold on it and a safety margin, cannot hold the model's weights plus what its engine keeps outside its memory pool.
 - **The host RAM cannot hold the sleepers.** The change would leave more sleeping weights in RAM than the host has.
-- **The set does not fit a GPU.** Per GPU, the values chosen for the active models placed on it, plus the memory the sleeping engines still hold and the safety margin, must fit the card, and each model's value must reach its minimum (weights, what the engine holds outside its pool, and the KV cache for one sequence of `max_model_len` tokens). Otherwise the whole change is refused with `422 serving_unfit` naming the GPU, `error.budget` carrying the numbers per model and per GPU, and nothing is written. The [budget bar](#active-models) shows the same arithmetic before you apply.
+- **The set does not fit a GPU.** Per GPU, the values chosen for the active models placed on it, plus the memory the sleeping engines still hold and the safety margin, must fit the card, and each model's value must reach its minimum (weights, what the engine holds outside its pool, and the KV cache for one sequence of `max_model_len` tokens, or the measured smallest pool when that is more). Otherwise the whole change is refused with `422 serving_unfit` naming the GPU, `error.budget` carrying the numbers per model and per GPU, and nothing is written. The [budget bar](#active-models) shows the same arithmetic before you apply.
 
 The refusal reaches the Manager as one line under the dropdown or beside the rows, and the API as `409 preflight_refused` (with `error.preflight` carrying the numbers field by field) or `422 serving_unfit`. Every refusal names the remedy: free the card, pin other models cold, disable models you do not use, or pick a smaller model.
 
@@ -593,10 +613,10 @@ An engine that is resting is **healthy** as far as Docker is concerned, so `dock
 | Reload ended `rolled back` | The load failed; the reason quotes the engine's last error line (or the sizing arithmetic when the card had too little free memory). The model is serving again with its previous settings |
 | Model status `failed` | Its last load failed. Open its **Engine logs**; fix the cause (memory, disk, network) and apply again, or use **Reload now** |
 | Model status `quarantined (wake-failed)` | A wake from sleep failed; the engine was parked and is never put to sleep again until VIS restarts. Adding it to the active models again is a cold start |
-| Model status `parked` on a model that should be hot | Its container restarted while another model serves, or the RAM budget made it cold. See [Tiers](#tiers-hot-and-cold) |
+| Model status `parked` on a model that should be hot | Shipped models are cold until you make them hot; otherwise its container restarted while another model serves, or the RAM budget made it cold. See [Tiers](#tiers-hot-and-cold) |
 | Model status `not deployed` | A [custom model](#adding-your-own-model-an-overlay-entry-and-a-slot) in the overlay with no slot serving it: restart VIS so it assigns one (the section's banner says so); if every slot already served a model that was removed, recreate one of the slot containers first |
 | Download stalls or restarts | Engine logs show the HuggingFace error. The engines reach the Hub over the `vif-engines-egress` network; check DNS and proxy on the host. Set `HF_TOKEN` for rate limits |
-| First boot takes very long | Normal for a first boot: every hot-tier model downloads, loads and compiles in turn ([Startup order](#startup-order)). Disable models you do not use, or [pre-seed the weights](#air-gapped-hosts) |
+| First boot takes very long | Normal for a first boot: the active and hot models download, load and compile in turn ([Startup order](#startup-order)). Set models you do not switch to often back to cold, or [pre-seed the weights](#air-gapped-hosts) |
 
 ---
 
@@ -612,7 +632,7 @@ Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `
 2. Pull this release and start it: `docker compose --profile default --profile vlm up -d --remove-orphans`.
 3. On the first start VIS makes the first catalog model (Qwen) the only active model. If the old sidecar served a different model, add it in **Stream Config Defaults → VLM** and mark it Default.
 4. Stream configs that point at `http://vlm.docker:8000/v1` keep working with no edit. The first time the Engine loads its configs after the upgrade it also moves every VLM block that names the old sidecar to the managed endpoint with an empty `model_name` (follows the Default model), keeping a `*.pre-follow-active` copy of each file it changed. The plugin reference, [`README.wse-plugin.md`](README.wse-plugin.md), describes that migration.
-5. The first boot downloads and compiles every hot-tier model you did not already have, so it takes long; your existing `./vis/vlm-models` and `./vis/vlm-cache` are reused as they are.
+5. The first boot downloads and compiles every active or hot model you did not already have, so it takes long; your existing `./vis/vlm-models` and `./vis/vlm-cache` are reused as they are.
 
 The old `VLM_*` knobs no longer configure anything; [move your tuning into the overlay](#per-model-settings-come-from-the-overlay).
 
@@ -641,7 +661,7 @@ On a Linux host without Docker, the Video Intelligence Service installs from a n
 
 ## Air-gapped hosts
 
-Pre-seed the weights on a connected machine — `pip install -U huggingface_hub && HF_HOME=./vis/vlm-models hf download <model id>` for each model you will use (every hot-tier model is loaded at boot) — copy `./vis/vlm-models` to the target, and set `HF_HUB_OFFLINE=1` in `.env` so boots skip HuggingFace Hub probes. Running the stack once on a connected machine and copying the populated directory works too. The same pre-seeding shortens a first boot on a slow link, where the resident set's weights are tens of GB.
+Pre-seed the weights on a connected machine — `pip install -U huggingface_hub && HF_HOME=./vis/vlm-models hf download <model id>` for each model you will use (the active and hot models load at boot, the others when they are first added) — copy `./vis/vlm-models` to the target, and set `HF_HUB_OFFLINE=1` in `.env` so boots skip HuggingFace Hub probes. Running the stack once on a connected machine and copying the populated directory works too. The same pre-seeding shortens a first boot on a slow link, where the resident set's weights are tens of GB.
 
 Under `HF_HUB_OFFLINE=1` the engines still serve each model under its HuggingFace id, not its snapshot path, so a config that named the snapshot path must be changed to the id (or to **Default**).
 
