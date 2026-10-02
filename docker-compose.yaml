@@ -378,7 +378,10 @@ services:
     # it: the same engine, told which model by VIS instead of by its name. Both
     # slots start with the `vlm` profile and rest healthy, parked, until VIS
     # assigns each a custom model when it starts: add the model in the Manager,
-    # restart VIS, and it is served. Nothing is configured in .env.
+    # restart VIS, and it is served. Nothing is configured in .env. A slot keeps
+    # the model it was given for the life of its container: after removing a
+    # custom model, recreate its slot to reuse it (docker compose --profile vlm
+    # up -d --force-recreate vif-model-slot-1).
     #
     # To pin a model to a particular slot, set VIF_SLOT_<n>_MODEL to the
     # overlay entry's id: that always wins over VIS's choice. The older
