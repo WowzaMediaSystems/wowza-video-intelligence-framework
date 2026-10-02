@@ -1,10 +1,10 @@
-# Training a VLM adapter from a harvest export
+# Training a VLM adapter from a Model Trainer export
 
-The Harvest tab produces a labelled frame set: a zip with a `manifest.json` of image-level labels and
-the judged frames. The `harvest-tools` service turns that export into training pairs for a
+The Model Trainer tab produces a labelled frame set: a zip with a `manifest.json` of image-level labels and
+the judged frames. The `model-trainer` service turns that export into training pairs for a
 vision-language model, trains a LoRA adapter on `Qwen/Qwen3-VL-2B-Instruct`, publishes it to the VIS
 model manager and scores it against the base model. You drive it from the project's **Train** tab in
-the Manager, or from the command line on a host without one. The service is behind the `harvest-tools`
+the Manager, or from the command line on a host without one. The service is behind the `model-trainer`
 compose profile: nothing here starts with the stack, and it runs one job at a time.
 
 The adapter learns your classes as the VLM's **Detect** mode answers them: the trained request is the
@@ -15,13 +15,13 @@ LoRA adapters in general.
 
 ## Before you start
 
-- **An export in VIS.** Export the project from the Harvest tab; VIS keeps the package at
-  `./vis/harvest/projects/<project id>/export/package.zip`, which the service mounts read-only at
-  `/harvest`.
-- **The image.** It is built from the `harvest-tools/` directory of the Video Intelligence Service
+- **An export in VIS.** Export the project from the Model Trainer tab; VIS keeps the package at
+  `./vis/model_trainer/projects/<project id>/export/package.zip`, which the service mounts read-only at
+  `/model_trainer`.
+- **The image.** It is built from the `model_trainer/` directory of the Video Intelligence Service
   source, with the repository root as the build context:
-  `docker build -f harvest-tools/Dockerfile -t wowza/wowza-video-intelligence-harvest-tools .`
-  Set `HARVEST_TOOLS_IMAGE` in `.env` to use another tag.
+  `docker build -f model_trainer/Dockerfile -t wowza/wowza-video-intelligence-model-trainer .`
+  Set `MODEL_TRAINER_IMAGE` in `.env` to use another tag.
 - **A key.** The service authenticates callers the way VIS does: they send `VIS_API_KEY` as
   `X-API-Key`, and with `SECURE_MODE` unset or `true` the service refuses to start without a key. Only
   `SECURE_MODE=false` runs it keyless. It listens on the compose network (port 5002) and a job names a
@@ -39,20 +39,20 @@ LoRA adapters in general.
 - **Weights.** The base downloads into `./vis/vlm-models` on first use. On an air-gapped host,
   pre-seed that directory and set `HF_HUB_OFFLINE=1`.
 
-The service keeps its jobs under `./harvest-tools` next to `docker-compose.yaml`, mounted at `/work`.
-The container runs as root, so give the files back to yourself afterwards (`sudo chown -R "$USER" harvest-tools`).
+The service keeps its jobs under `./model_trainer` next to `docker-compose.yaml`, mounted at `/work`.
+The container runs as root, so give the files back to yourself afterwards (`sudo chown -R "$USER" model_trainer`).
 
 ## Training from the Manager
 
 1. **Start the service.** It is not part of `docker compose up`:
 
    ```bash
-   docker compose --profile harvest-tools up -d harvest-tools
+   docker compose --profile model-trainer up -d model-trainer
    ```
 
    A bare `docker compose down` leaves it running; stop it with
-   `docker compose --profile harvest-tools down`.
-2. **Open the project's Train tab** (Harvest -> the project -> Train). If the service does not answer, or
+   `docker compose --profile model-trainer down`.
+2. **Open the project's Train tab** (Model Trainer -> the project -> Train). If the service does not answer, or
    rejects the Engine's key, the tab says so, shows the URL it tried and the start command above.
 3. **Read the form.** It shows the export it will train on (when it was made and its size; with none, a
    link to the Export tab, and Train stays disabled), the adapter name with the project's slug as
@@ -79,15 +79,15 @@ The container runs as root, so give the files back to yourself afterwards (`sudo
    **Publish again** retries from that stage without training again.
 6. **Delete** removes a finished job and its files.
 
-Jobs are directories under `./harvest-tools/jobs/<job id>/` (`job.json`, the log, the pairs and the
+Jobs are directories under `./model_trainer/jobs/<job id>/` (`job.json`, the log, the pairs and the
 trained adapter). When a job ends, and when the service starts, finished jobs beyond the newest
-`HARVEST_TOOLS_MAX_JOBS` (default 10) or older than `HARVEST_TOOLS_JOB_TTL_SECONDS` (default 30 days)
+`MODEL_TRAINER_MAX_JOBS` (default 10) or older than `MODEL_TRAINER_JOB_TTL_SECONDS` (default 30 days)
 are removed, oldest first. The job that produced VIS's current Default adapter is kept. A job is
 sized in gigabytes, so mind the disk. A job running when the service restarts becomes `failed`
 (`service_restarted`); nothing resumes.
 
-**Where the Engine looks.** Stream Config Defaults -> Harvest has one field, the training service URL,
-default `http://harvest-tools.docker:5002`: the compose service needs no change. It is a default-config
+**Where the Engine looks.** Stream Config Defaults -> Model Trainer has one field, the training service URL,
+default `http://model-trainer.docker:5002`: the compose service needs no change. It is a default-config
 setting only; streams and stream groups cannot override it. The Engine sends its own service key as
 `X-API-Key`.
 
@@ -98,15 +98,15 @@ labelled with that Engine's host name.
 ## From the command line
 
 Hosts without a Manager run the same stages by hand, one command at a time. The commands use the same
-image and the same `./harvest-tools` directory as the service. `docker compose run` starts a separate
+image and the same `./model_trainer` directory as the service. `docker compose run` starts a separate
 container, so do not run `train-lora` while a job of the service is training on the same card.
 
 ```bash
-alias ht='docker compose --profile harvest-tools run --rm harvest-tools'
+alias ht='docker compose --profile model-trainer run --rm model-trainer'
 
 # 1. Pairs: no GPU. Whole sources go to validation until it holds at least 20 % of the frames;
 #    a project with a single source keeps its last 20 % by time.
-ht pairs --export /harvest/projects/<project id>/export/package.zip --out /work/pairs
+ht pairs --export /model_trainer/projects/<project id>/export/package.zip --out /work/pairs
 
 # 2. Train: a few hundred samples over three epochs take minutes on a data-centre GPU. Per-epoch adapters,
 #    the final adapter and adapter.zip land in /work/train.

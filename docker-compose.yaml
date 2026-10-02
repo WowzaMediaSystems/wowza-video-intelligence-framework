@@ -138,7 +138,7 @@ services:
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
              - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs   # VOD job records, results, thumbnails
-             - ./wse/harvest:/usr/local/WowzaStreamingEngine/harvest   # Frame Harvest judgements, confirmed frames and runs
+             - ./wse/model_trainer:/usr/local/WowzaStreamingEngine/model_trainer   # Model Trainer judgements, confirmed frames and runs
 
         ports:
             - 80:80                     #HLS
@@ -188,10 +188,10 @@ services:
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
         restart: "no"
-        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "/build/harvest", "${LOG_DIR:-/logs}", "/vif-state", "/vif-adapters"]
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "/build/model_trainer", "${LOG_DIR:-/logs}", "/vif-state", "/vif-adapters"]
         volumes:
           - ./vis/models:/build/models
-          - ./vis/harvest:/build/harvest
+          - ./vis/model_trainer:/build/model_trainer
           - ./vis/logs:${LOG_DIR:-/logs}
           - ./vis/vlm-state:/vif-state
           - ./vis/vlm-adapters:/vif-adapters
@@ -225,15 +225,15 @@ services:
         # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
         # - TRT_MODELS=object-detection-medium
         # - TRT_MODELS=object-detection-nano,my-custom-model.pth
-        # Frame Harvest: where projects, example banks and exported packages
-        # live (the ./vis/harvest mount below). The upload cap must fit the
+        # Model Trainer: where projects, example banks and exported packages
+        # live (the ./vis/model_trainer mount below). The upload cap must fit the
         # largest export package the Engine sends back to VIS; the default
         # (16 MB) fits examples, not a package.
-          - HARVEST_STORE_DIR=/build/harvest
-          - HARVEST_MAX_UPLOAD_MB=${HARVEST_MAX_UPLOAD_MB:-512}
+          - MODEL_TRAINER_STORE_DIR=/build/model_trainer
+          - MODEL_TRAINER_MAX_UPLOAD_MB=${MODEL_TRAINER_MAX_UPLOAD_MB:-512}
         # Optional: cap the examples per class and pin the encoder's GPU
-        # - HARVEST_MAX_EXAMPLES=200
-        # - HARVEST_DEVICE=cuda:0
+        # - MODEL_TRAINER_MAX_EXAMPLES=200
+        # - MODEL_TRAINER_DEVICE=cuda:0
         # License key string required to run VIS
           - VIS_LICENSE=${VIS_LICENSE}
         # Optional: Enable SSL/TLS for HTTPS and WSS
@@ -277,10 +277,10 @@ services:
         # engines, or write the cache at runtime. Swap the line below for:
         #   - ./vis/models:/build/models:ro
           - ./vis/models:/build/models
-        # Frame Harvest projects, example banks and exports. Always writable:
+        # Model Trainer projects, example banks and exports. Always writable:
         # VIS writes here on every example upload and bank rebuild, so the
         # read-only hardening above does not extend to this mount.
-          - ./vis/harvest:/build/harvest
+          - ./vis/model_trainer:/build/model_trainer
         # Optional: Mount SSL certificates for HTTPS/WSS
         # - ./certs:/certs:ro
         # Optional: Mount for RT-DETR v2 model cache (for offline usage).
@@ -420,35 +420,35 @@ services:
             VIF_SLOT: vif-model-slot-2
             VLM_MODEL: ${VIF_SLOT_2_MODEL:-}
 
-    # ── Harvest training service (resident, started by hand) ───────────────
-    # Turns a Frame Harvest export into VLM training pairs, trains a LoRA
+    # ── Model Trainer service (resident, started by hand) ──────────────
+    # Turns a Model Trainer export into VLM training pairs, trains a LoRA
     # adapter and publishes it to VIS, one job at a time. The Manager's Train
-    # tab on a Harvest project drives it (Stream Config Defaults -> Harvest holds
+    # tab on a Model Trainer project drives it (Stream Config Defaults -> Model Trainer holds
     # its URL); the same image also runs the CLI commands one at a time, e.g.
-    #   docker compose --profile harvest-tools run --rm harvest-tools pairs \
-    #     --export /harvest/projects/<project id>/export/package.zip --out /work/pairs
+    #   docker compose --profile model-trainer run --rm model-trainer pairs \
+    #     --export /model_trainer/projects/<project id>/export/package.zip --out /work/pairs
     #
-    # Opt-in via the `harvest-tools` profile -- a bare `docker compose up`
+    # Opt-in via the `model-trainer` profile -- a bare `docker compose up`
     # never starts it. Start it with:
-    #   docker compose --profile harvest-tools up -d harvest-tools
+    #   docker compose --profile model-trainer up -d model-trainer
     # Teardown: a bare `docker compose down` leaves it running; use
-    # `docker compose --profile harvest-tools down` to stop it.
+    # `docker compose --profile model-trainer down` to stop it.
     #
     # It requires VIS_API_KEY (callers send it as X-API-Key) unless
     # SECURE_MODE=false. The image is built from the repository root of the
     # Video Intelligence Service source, not its video-intelligence-service/
-    # directory (see docs/HARVEST_TRAINING.md); HARVEST_TOOLS_IMAGE overrides
+    # directory (see docs/MODEL_TRAINER.md); MODEL_TRAINER_IMAGE overrides
     # the tag.
     #
     # Training takes the whole GPU's free memory: free the card first by
     # removing the engine that holds it from the Model Manager's active set
     # (the Train form names the engine). While idle the service holds no GPU
-    # memory. HARVEST_TOOLS_MAX_JOBS and HARVEST_TOOLS_JOB_TTL_SECONDS bound
-    # how many finished jobs, and for how long, are kept under ./harvest-tools.
-    harvest-tools:
-        hostname: harvest-tools.docker
-        image: ${HARVEST_TOOLS_IMAGE:-wowza/wowza-video-intelligence-harvest-tools:latest}
-        profiles: ["harvest-tools"]
+    # memory. MODEL_TRAINER_MAX_JOBS and MODEL_TRAINER_JOB_TTL_SECONDS bound
+    # how many finished jobs, and for how long, are kept under ./model_trainer.
+    model-trainer:
+        hostname: model-trainer.docker
+        image: ${MODEL_TRAINER_IMAGE:-wowza/wowza-video-intelligence-model-trainer:latest}
+        profiles: ["model-trainer"]
         restart: unless-stopped
         command: ["serve"]
         environment:
@@ -457,12 +457,12 @@ services:
             VIS_API_KEY: ${VIS_API_KEY:-}
             VIS_URL: http://video-intelligence-service.docker:5001
             VLLM_API_KEY: ${VLLM_API_KEY:-}
-            HARVEST_TOOLS_MAX_JOBS: ${HARVEST_TOOLS_MAX_JOBS:-10}
-            HARVEST_TOOLS_JOB_TTL_SECONDS: ${HARVEST_TOOLS_JOB_TTL_SECONDS:-2592000}
+            MODEL_TRAINER_MAX_JOBS: ${MODEL_TRAINER_MAX_JOBS:-10}
+            MODEL_TRAINER_JOB_TTL_SECONDS: ${MODEL_TRAINER_JOB_TTL_SECONDS:-2592000}
         volumes:
-            - ./vis/harvest:/harvest:ro
+            - ./vis/model_trainer:/model_trainer:ro
             - ./vis/vlm-models:/root/.cache/huggingface
-            - ./harvest-tools:/work
+            - ./model_trainer:/work
         deploy:
             resources:
                 reservations:

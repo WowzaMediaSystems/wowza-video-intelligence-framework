@@ -15,8 +15,8 @@ tmp/
 # VIS models
 vis/
 
-# Harvest training tools work directory
-harvest-tools/
+# Model Trainer service work directory
+model_trainer/
 
 # WSE Conf
 wse/
