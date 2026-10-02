@@ -426,7 +426,8 @@ services:
     # at a time, e.g.
     #   docker compose --profile harvest-tools run --rm harvest-tools pairs \
     #     --export /harvest/projects/<project id>/export/package.zip --out /work/pairs
-    # The image is built from the Video Intelligence Service repository (see
+    # The image is built from the repository root of the Video Intelligence
+    # Service source, not its video-intelligence-service/ directory (see
     # docs/HARVEST_TRAINING.md); HARVEST_TOOLS_IMAGE overrides the tag. Training
     # reserves every GPU, so stop the VLM engines first when they hold the card.
     harvest-tools:
