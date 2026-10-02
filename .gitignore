@@ -16,7 +16,7 @@ tmp/
 vis/
 
 # Model Trainer service work directory
-model_trainer/
+/model_trainer/
 
 # WSE Conf
 wse/

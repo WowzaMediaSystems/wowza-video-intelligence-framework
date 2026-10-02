@@ -102,20 +102,20 @@ image and the same `./model_trainer` directory as the service. `docker compose r
 container, so do not run `train-lora` while a job of the service is training on the same card.
 
 ```bash
-alias ht='docker compose --profile model-trainer run --rm model-trainer'
+alias mt='docker compose --profile model-trainer run --rm model-trainer'
 
 # 1. Pairs: no GPU. Whole sources go to validation until it holds at least 20 % of the frames;
 #    a project with a single source keeps its last 20 % by time.
-ht pairs --export /model_trainer/projects/<project id>/export/package.zip --out /work/pairs
+mt pairs --export /model_trainer/projects/<project id>/export/package.zip --out /work/pairs
 
 # 2. Train: a few hundred samples over three epochs take minutes on a data-centre GPU. Per-epoch adapters,
 #    the final adapter and adapter.zip land in /work/train.
-ht train-lora --pairs /work/pairs --out /work/train
+mt train-lora --pairs /work/pairs --out /work/train
 
 # 3. Publish: uploads the adapter and declares it in the overlay. Re-running with the same id needs
 #    --version-from-catalog, which picks the next -vN: ids are never replaced. The id takes
 #    letters, digits, `.`, `_` and `-` per segment: use a slug, not a project name with spaces.
-ht publish --adapter /work/train/adapter.zip --vis-url http://video-intelligence-service.docker:5001 \
+mt publish --adapter /work/train/adapter.zip --vis-url http://video-intelligence-service.docker:5001 \
    --id <project slug>/wear --version-from-catalog
 ```
 
@@ -127,7 +127,7 @@ Config Defaults → VLM** or with the id `publish` printed (it is the `-vN` one 
 `--version-from-catalog` renamed it):
 
 ```bash
-ht publish --vis-url http://video-intelligence-service.docker:5001 --id <project slug>/wear --activate-only
+mt publish --vis-url http://video-intelligence-service.docker:5001 --id <project slug>/wear --activate-only
 ```
 
 `--activate-only` uploads nothing and writes no overlay: it activates the published adapter and waits
@@ -137,7 +137,7 @@ adapter serves at a time, as the Default.
 
 ```bash
 # 4. Evaluate on the validation split, adapter against base.
-ht eval --pairs /work/pairs --endpoint http://video-intelligence-service.docker:5001/v1 \
+mt eval --pairs /work/pairs --endpoint http://video-intelligence-service.docker:5001/v1 \
    --model <project slug>/wear --baseline Qwen/Qwen3-VL-2B-Instruct
 ```
 
