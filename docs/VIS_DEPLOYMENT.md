@@ -440,6 +440,7 @@ docker compose ps
 |---|---|
 | Service won't start | Check logs with `docker compose --profile vi-service logs -f` |
 | Service stops right after startup with a `CRITICAL` TLS line | The key/certificate configuration is incomplete, sets both sources, or names a file VIS cannot read — see [SSL/TLS](#ssltls) |
+| With `wss`, model and class lists in Manager are empty and streams fail with "Timed out waiting for VIS Service" | Engine does not trust the certificate VIS serves; the Engine access log shows `PKIX path building failed` — see [Engine over `wss` to VIS](README.wse-plugin.md#engine-over-wss-to-vis) |
 | GPU not detected | Verify `nvidia-container-toolkit` is installed and `nvidia-smi` works on the host |
 | Engine cannot connect | Check network connectivity, port 5001, and firewall rules between Engine and VIS |
 | Engine connection refused after restart | VIS takes ~1 minute to initialize after a restart. Engine will reconnect automatically once VIS is ready — see [Startup behavior](#quick-start) |
