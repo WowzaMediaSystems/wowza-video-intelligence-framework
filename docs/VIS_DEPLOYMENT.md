@@ -63,6 +63,17 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `SSL_KEYFILE_PASSWORD` | — | Password for encrypted SSL key |
 | `VIS_LICENSE` | — | License key string (required). Takes precedence over license files |
 | `VIS_LICENSE_DIR` | `licenses` | Directory scanned for license files when `VIS_LICENSE` is unset |
+| `VIF_STATE_DIR` | `/vif-state` | VLM model manager: the volume VIS shares with the managed engines (engine specs, the active set, engine logs). Set by the compose file; keep it as is |
+| `VIF_WEIGHTS_DIR` | `/vif-weights` | VLM model manager: the engines' weights volume, mounted read-only in VIS so it can check a LoRA adapter's files before an engine loads it |
+| `VIF_ADAPTERS_DIR` | `/vif-adapters` | VLM model manager: where LoRA adapters uploaded with `POST /vlm/adapters` are stored, read-write in VIS and read-only in the engines |
+| `VLM_ADAPTER_MAX_UPLOAD_MB` | `1024` | The largest LoRA adapter archive `POST /vlm/adapters` accepts |
+| `VLM_CATALOG_OVERLAY` | `./models/vlm-catalog.local.json` | Path, inside the VIS container, of the VLM catalog overlay (`./vis/models/vlm-catalog.local.json` on the host) |
+| `VLM_FORCE_ALL_COLD` | unset | `true` stops every resting VLM engine instead of putting it to sleep, for hosts where sleep mode cannot run |
+| `VLM_RAM_RESERVE_MIB` | derived | Host RAM kept back from sleeping VLM engines; unset = the larger of 40% of host RAM and 8 GiB |
+| `VLLM_API_KEY` | unset | Optional key the managed VLM engines require; VIS sends it on its own calls to them. Never generated |
+| `HF_ENDPOINT` | `https://huggingface.co` | The HuggingFace hub a token saved in the Manager is checked against before VIS stores it; the same variable `huggingface_hub` reads |
+
+The `VLM_*` settings and the engines' own variables are described in context in the [VLM guide](VLM_GUIDE.md#configuration-reference).
 
 ### Volumes
 
@@ -71,6 +82,9 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `./vis/models` | `/build/models` | Model checkpoints and cached TensorRT engines |
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
+| `./vis/vlm-state` | `/vif-state` | State shared with the managed VLM engines (`--profile vlm`) |
+| `./vis/vlm-models` | `/vif-weights:ro` | The VLM engines' weights, read by VIS to check LoRA adapters |
+| `./vis/vlm-adapters` | `/vif-adapters` | Uploaded LoRA adapters |
 
 ### Logging
 
