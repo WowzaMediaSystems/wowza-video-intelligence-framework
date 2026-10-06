@@ -358,7 +358,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-05.1"
+LAUNCHER_REVISION: str = "2026-10-06.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -3078,10 +3078,10 @@ def main() -> int:
             "with no engine process, no weights and no load lock, until VIS "
             "writes a spec without the flag."
         )
-        return supervise(plan, dict(os.environ), lease)
+        return supervise(plan, environ, lease)
     if plan.desired_state is DesiredState.PARKED:
         log(f"{plan.model} starts parked: no engine process until VIS asks for one.")
-        return supervise(plan, dict(os.environ), lease)
+        return supervise(plan, environ, lease)
 
     log("Launching vLLM with:")
     for part in [plan.model, *plan.args]:
@@ -3111,7 +3111,7 @@ def main() -> int:
     if not plan.needs_supervision:
         os.execvpe(plan.argv[0], plan.argv, {**os.environ, **plan.env})
 
-    return supervise(plan, dict(os.environ), lease)
+    return supervise(plan, environ, lease)
 
 
 if __name__ == "__main__":
