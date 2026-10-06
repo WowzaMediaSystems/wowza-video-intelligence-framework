@@ -40,8 +40,8 @@ AUTO-DETECTED at startup (legacy path only; the spec carries it resolved):
                                VLM_KV_CACHE_DTYPE to override.
 
 TUNABLE (defaults fit Qwen3-VL-4B-Instruct-FP8 on a DEDICATED 24 GB-class
-GPU). All of these live in the model's env file, except VLM_GPU_IDS which is
-deployment placement and lives in .env:
+GPU). All of these are read from the engine's environment, except VLM_GPU_IDS
+which is deployment placement and lives in .env:
   VLM_GPU_IDS                  (.env) Pin the engine to specific GPU(s), e.g.
                                "1" or "2,3". Indices match `nvidia-smi` order.
                                Unset = first visible GPU (GPU 0), which WSE and
@@ -97,10 +97,12 @@ script execs `vllm serve` directly, exactly as the bash entrypoint did.
   VLM_HEALTH_TIMEOUT_SECONDS   How long to wait for this engine's own /health
                                while holding the lock (default 1800). On
                                timeout the lock is released, the engine is
-                               stopped (SIGTERM, then SIGKILL 10s later) and
-                               the container exits 75 so the restart policy
-                               retries -- one wedged engine must not block the
-                               pool.
+                               stopped (SIGTERM, then SIGKILL 30s later), a
+                               crash note is written and the container exits
+                               75; the restarted launcher rests parked on the
+                               note until the spec changes -- one wedged
+                               engine must not block the pool, nor take the
+                               lock again and again.
   VLM_HEALTH_POLL_SECONDS      Interval between /health polls (default 2).
   VLM_STATE_FILE               Path on the shared volume naming the model that
                                should be serving (first non-empty line = a
@@ -163,8 +165,9 @@ SLOTS (the generic `vif-model-slot-N` services):
                                the model its deployment assigned it, "" to let
                                VIS choose one (it wins when set).
 
-A SLOT serves whichever model the catalog overlay adds and its deployment
-assigns it, so VIS cannot know from the catalog where that model's engine is.
+A SLOT serves whichever custom model the catalog overlay adds: the one its
+deployment pins to it, else the next one VIS assigns to a slot left free.
+Either way VIS cannot know from the catalog where that model's engine is.
 Before anything else the launcher registers on the state volume --
 <state dir>/slots/<slot>.json: the slot, its model, this container's hostname
 and a nonce new on every start -- and then:
@@ -200,15 +203,15 @@ couple of seconds; a spec whose content has not changed costs one read):
            cannot be woken from sleep.
 
 VIS moves an engine between those three by rewriting its spec; nothing else
-is needed on this side.
+is needed on this side. A sleep or a wake that fails is not retried until the
+spec changes: VIS decides what happens to an engine that would not move.
 
 A DISABLED ENGINE is one the catalog overlay takes out of the deployment. Its
 spec says `disabled: true` (and `parked`): the launcher serves the health stub
 for good, adds `"disabled": true` to what `/vif/parked` answers, and never
 loads the model, takes the load lock, reads the card or asks the hub about it
 -- `/vif/access` is not answered. A later spec without the flag is followed
-like any other change of desired state. A sleep or a wake that fails is not retried until the
-spec changes: VIS decides what happens to an engine that would not move.
+like any other change of desired state.
 
 THE POOL DUTIES, when several engines share one card:
 
@@ -355,12 +358,15 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-01.1"
+LAUNCHER_REVISION: str = "2026-10-05.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
-# Grace between SIGTERM and SIGKILL when this script stops a wedged engine.
-STOP_GRACE_SECONDS: int = 10
+# Grace between SIGTERM and SIGKILL when this script stops an engine (a park,
+# a reload, a wedged load). A clean exit of the largest model takes ~11 s with
+# its CUDA teardown, and only a clean exit frees the card before the next load
+# sizes itself against it; a kill also orphans vLLM's engine-core workers.
+STOP_GRACE_SECONDS: int = 30
 
 ENGINE_SPEC_VERSION: int = 1
 ENGINE_SPEC_DIRNAME: str = "engines"
@@ -373,7 +379,6 @@ ENGINE_PHASE_DIRNAME: str = "phase"
 ENGINE_SIZED_DIRNAME: str = "sized"
 ENGINE_SLOTS_DIRNAME: str = "slots"
 SLOT_ASSIGNMENT_SUFFIX: str = ".assignment.json"
-SLOT_POLL_SECONDS: float = 2.0
 ACTIVE_MODEL_FILENAME: str = "active-model"
 # Written by VIS, mode 0600: the HuggingFace token set in the Manager.
 HF_TOKEN_FILE: str = "secrets/hf-token"
@@ -1029,7 +1034,7 @@ def size_load(model: str, sizing: LoadSizing, card: CardMemory) -> SizedLoad:
     if not approved:
         reason = (
             f"{model} cannot be loaded on the card as it is now: "
-            f"{arithmetic}, less than its {sizing.weights_mib} MiB of weights."
+            f"{arithmetic}, less than the {sizing.weights_mib} MiB its pool needs."
         )
     else:
         cap: str = (
@@ -1366,7 +1371,7 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
         f'--limit-mm-per-prompt={{"image": {max_images}, "video": 0}}',
     ]
 
-    # Processor kwargs only when the model's env file sets pixel caps.
+    # Processor kwargs only when the engine's environment sets pixel caps.
     if min_pixels or max_pixels:
         pairs: list[str] = []
         if min_pixels:
@@ -2023,12 +2028,8 @@ class Engine:
         """Through a rename: VIS polls this file and must never read half of it."""
         if not path:
             return
-        target: Path = Path(path)
-        temporary: Path = target.with_name(f".{target.name}.tmp")
         try:
-            make_shared_dir(target.parent)
-            temporary.write_text(json.dumps(document) + "\n", encoding="utf-8")
-            os.replace(temporary, target)
+            write_json_atomically(Path(path), document)
         except OSError as exc:
             warn(f"the {what} marker {path} could not be written ({exc}).")
 
@@ -2703,9 +2704,20 @@ class Engine:
             self._forwarded = True
         health: int = self.wait_for_health()
         if health == 1:
+            # The same posture as a load that dies: without a crash note the
+            # restarted launcher would load the same spec again and hold the
+            # load lock for another full budget, for as long as it stays wedged.
+            reason: str = (
+                f"vLLM gave no /health in {self.plan.health_timeout_seconds}s "
+                "during its load"
+            )
+            self.record_crash(
+                self._load_digest, self._load_decision, None, None, reason
+            )
             warn(
                 f"no /health in {self.plan.health_timeout_seconds}s; "
-                "releasing the lock and stopping."
+                "releasing the lock and stopping. Not loading again until its "
+                "spec asks for something else."
             )
             self.release_load_lock()
             self.stop_child()
@@ -2745,7 +2757,8 @@ class Engine:
             self.state is DesiredState.PARKED
             and self._stub.disabled != self.plan.disabled
         ):
-            # The stub's answer says whether the engine is disabled.
+            # The flag changed while parked: restart the stub so /vif/parked
+            # answers for the spec now in force.
             self._stub.stop()
             self.hold_parked()
         if target is self.state:
@@ -2922,7 +2935,9 @@ def run_slot(environ: dict[str, str], slot: str) -> SlotLease:
     timeout: int = env_int(
         environ, "VIF_SPEC_TIMEOUT_SECONDS", DEFAULT_SPEC_TIMEOUT_SECONDS
     )
-    poll: float = env_float(environ, "VIF_WATCH_POLL_SECONDS", SLOT_POLL_SECONDS)
+    poll: float = env_float(
+        environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
+    )
     nonce: str = register_slot(state_dir, slot, model)
     stub: ParkedStub = ParkedStub(
         env_value(environ, "VIF_ENGINE_HOST", DEFAULT_ENGINE_HOST)
@@ -3041,10 +3056,11 @@ def main() -> int:
         log(f"revision {LAUNCHER_REVISION}")
         slot: str = env_value(dict(os.environ), "VIF_SLOT")
         lease: SlotLease | None = None
+        environ: dict[str, str] = dict(os.environ)
         if slot and not dry_run:
-            lease = run_slot(dict(os.environ), slot)
-            os.environ["VLM_MODEL"] = lease.model
-        plan: LaunchPlan = build_plan(dict(os.environ))
+            lease = run_slot(environ, slot)
+            environ["VLM_MODEL"] = lease.model
+        plan: LaunchPlan = build_plan(environ)
     except ConfigError as exc:
         warn(str(exc))
         return EXIT_CONFIG

@@ -622,16 +622,25 @@ An engine that is resting is **healthy** as far as Docker is concerned, so `dock
 
 ## Upgrading from the single sidecar, and going back
 
-Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `vlm-env/*.env` files and `VLM_CONF`. The managed engines replace it. The compatibility shim that carried those files and that variable for one release is gone: `vlm-env/`, `VLM_CONF` and `docker-compose.vlm-multi.yaml` no longer exist.
+Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `vlm-env/*.env` files and `VLM_CONF`. The managed engines replace it in one step: `vlm-env/`, `VLM_CONF` and `docker-compose.vlm-multi.yaml` no longer exist, and nothing reads them.
 
-**Upgrade through the release that introduced the managed engines first.** That release still reads `VLM_CONF` once, on the first start, to keep serving the model the old sidecar served. A stack that jumps straight from the single sidecar to a release without the shim loses that seed: VIS makes the first catalog model (Qwen) the only active model, whatever the old `.env` said. If you served another model, add it in **Stream Config Defaults → VLM**, make it the Default and remove Qwen after the first start. Custom per-model settings do not carry over either; write them as fields of the model's entry in `vis/models/vlm-catalog.local.json` (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
+**The model you served does not carry over by itself.** The active models live in the overlay's `serving` member, and the old sidecar never wrote one, so on the first start VIS seeds a set of one: the first catalog model (Qwen3-VL 4B), whatever `VLM_CONF` said. To come up serving the model the sidecar served instead, write the set into `./vis/models/vlm-catalog.local.json` before the first start (the file is created if it does not exist; `id` is the model's catalog id):
+
+```json
+{
+  "version": 1,
+  "serving": { "default": "nvidia/Cosmos3-Nano", "models": [{ "id": "nvidia/Cosmos3-Nano" }] }
+}
+```
+
+Or add the model in **Stream Config Defaults → VLM** after the first start, mark it Default and remove Qwen. Custom per-model settings (`VLM_*` in the old `.env`) do not carry over either; write them as fields of the model's entry in the same file (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
 
 **Upgrading.**
 
 1. Stop the old stack with the old release's files: `docker compose --profile default --profile vlm down`. The old sidecar holds the GPU.
-2. Pull this release and start it: `docker compose --profile default --profile vlm up -d --remove-orphans`.
-3. On the first start VIS makes the first catalog model (Qwen) the only active model. If the old sidecar served a different model, add it in **Stream Config Defaults → VLM** and mark it Default.
-4. Stream configs that point at `http://vlm.docker:8000/v1` keep working with no edit. The first time the Engine loads its configs after the upgrade it also moves every VLM block that names the old sidecar to the managed endpoint with an empty `model_name` (follows the Default model), keeping a `*.pre-follow-active` copy of each file it changed. The plugin reference, [`README.wse-plugin.md`](README.wse-plugin.md), describes that migration.
+2. If the sidecar served a model other than Qwen, write the `serving` member above into `./vis/models/vlm-catalog.local.json`.
+3. Pull this release and start it: `docker compose --profile default --profile vlm up -d --remove-orphans`.
+4. Stream configs that point at `http://vlm.docker:8000/v1` keep working with no edit. The first time the Engine loads its configs after the upgrade it also moves every VLM block that names the old sidecar to the managed endpoint with an empty `model_name` (follows the Default model), keeping a `*.pre-follow-active` copy of each file it changed. The plugin reference describes that migration: [Upgrading to the managed VLM engines, and back](README.wse-plugin.md#upgrading-to-the-managed-vlm-engines-and-back).
 5. The first boot downloads and compiles every active or hot model you did not already have, so it takes long; your existing `./vis/vlm-models` and `./vis/vlm-cache` are reused as they are.
 
 The old `VLM_*` knobs no longer configure anything; [move your tuning into the overlay](#per-model-settings-come-from-the-overlay).
@@ -639,7 +648,7 @@ The old `VLM_*` knobs no longer configure anything; [move your tuning into the o
 **Going back** to a release with the single `vlm` sidecar:
 
 1. Stop the engines with this release's files first: `docker compose --profile default --profile vlm down`.
-2. Restore the Engine's configs from the `*.pre-follow-active` copies (see the plugin reference), and name a model in any config you saved since that follows the Default model: earlier releases do not accept an empty `model_name`.
+2. Restore the Engine's configs from the `*.pre-follow-active` copies (see [the plugin reference](README.wse-plugin.md#upgrading-to-the-managed-vlm-engines-and-back)), and name a model in any config you saved since that follows the Default model: earlier releases do not accept an empty `model_name`.
 3. Bring the older release up, from that release's own files, with the same `.env`. That release picks its model with `VLM_CONF`: set it in `.env` if the model you were serving was not Qwen.
 
 The older release reuses `./vis/vlm-models` and `./vis/vlm-cache` as they are and ignores `./vis/vlm-state`.
