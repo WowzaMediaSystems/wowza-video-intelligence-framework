@@ -96,9 +96,9 @@ script execs `vllm serve` directly, exactly as the bash entrypoint did.
                                once. Unset = no locking.
   VLM_HEALTH_TIMEOUT_SECONDS   How long to wait for this engine's own /health
                                while holding the lock (default 1800). On
-                               timeout the lock is released, the engine is
-                               stopped (SIGTERM, then SIGKILL 30s later), a
-                               crash note is written and the container exits
+                               timeout a crash note is written, the engine is
+                               stopped (SIGTERM, then SIGKILL 30s later), the
+                               lock is released and the container exits
                                75; the restarted launcher rests parked on the
                                note until the spec changes -- one wedged
                                engine must not block the pool, nor take the
@@ -217,10 +217,11 @@ THE POOL DUTIES, when several engines share one card:
 
   * the LOAD LOCK serializes cold loads, so five engines starting at once do
     not thrash the disk and the GPU.
-  * BOOT ORDER: the engine that should be serving loads LAST. Each engine's
-    memory reservation is sized on the assumption that every other engine is
-    asleep while it loads, so the active one, which stays awake, cannot load
-    first. Before it asks for the lock it waits until every other engine whose
+  * BOOT ORDER: an engine whose spec says `awake` (a member of the active
+    set) loads LAST. Each engine's memory reservation is sized on the
+    assumption that every other engine is asleep while it loads, and one that
+    loads awake stays awake, so it cannot load first. Before it asks for the
+    lock it waits until every other engine whose
     spec says `asleep` has published its readiness marker (loaded, and asleep)
     or rests parked (spec `parked`, or `asleep` without sleep mode). Engines
     whose spec says `parked`, and engines held parked by a crash note about
@@ -248,7 +249,9 @@ THE POOL DUTIES, when several engines share one card:
 THE STATE VOLUME, shared with VIS and every other engine:
 
   <state dir>/engines/<key>.json  this engine's spec          (written by VIS)
-  <state dir>/active-model        the id that should serve    (written by VIS)
+  <state dir>/active-model        legacy (VLM_STATE_FILE) only: an older VIS's
+                                  serving id, which VIS moves into its
+                                  overlay and deletes
   <state dir>/ready/<key>         loaded, awake or asleep     (written here)
   <state dir>/awake/<key>         awake and serving           (written here)
   <state dir>/loading/<key>       a load is under way         (written here)
@@ -284,7 +287,7 @@ neither the crash note carries `access_problem` (token_missing, token_rejected
 or license_not_accepted) instead of an exit code. The parked stub answers
 `GET /vif/access` with the same verdict, checked right then, and says where
 the token came from (`token_source`: environment, manager, or empty), so VIS
-can refuse an activate before it drains the engine that is serving. The note
+can refuse an activate before it moves any engine. The note
 carries a fingerprint of the token it was decided with (a truncated SHA-256,
 never the token); once the token in force is another one -- set or removed in
 the Manager, or a restart with a new .env -- the note is dropped and the next
@@ -358,7 +361,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-06.1"
+LAUNCHER_REVISION: str = "2026-10-07.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -389,8 +392,8 @@ DEFAULT_STARTING_FILE: str = "/tmp/vif-engine-starting"
 # neighbours reach it by service name.
 DEFAULT_ENGINE_HOST: str = "0.0.0.0"
 DEFAULT_SPEC_TIMEOUT_SECONDS: int = 300
-# How often the desired state is re-read. Fast enough that a switch is not
-# noticeably slower for it, slow enough to be free.
+# How often the desired state is re-read. Fast enough that a move between
+# states is not noticeably slower for it, slow enough to be free.
 DEFAULT_WATCH_POLL_SECONDS: float = 2.0
 # How long the engine that should be serving waits for the rest of the hot
 # pool to load first: the shipped catalog has five models, so at most four
@@ -1864,11 +1867,11 @@ class Engine:
 
     def wait_for_pool(self, target: DesiredState) -> bool:
         """
-        Boot order: the engine that should be serving loads last.
+        Boot order: an engine that should be serving loads last.
 
         Every engine's memory reservation assumes the others are asleep while
         it loads, and an engine that loads awake stays awake. So before it
-        asks for the load lock, the engine that should be serving waits for
+        asks for the load lock, an engine that should be serving waits for
         every other engine whose spec says `asleep` to be loaded (its
         readiness marker) or to rest parked. Bounded: an engine that never
         arrives must not keep the pool from serving.
@@ -1950,7 +1953,7 @@ class Engine:
         """
         The load guard: an engine that should be asleep does not load beside a
         serving one, because the card has no room for it. An `awake` spec is
-        never guarded -- the manager retires what was there before it asks --
+        never guarded -- VIS sized it within its card's plan for the active set --
         and neither is one VIS sized to share its card (`gpu_shared`).
         """
         if target is not DesiredState.ASLEEP or self.plan.gpu_shared:
@@ -2716,10 +2719,11 @@ class Engine:
             )
             warn(
                 f"no /health in {self.plan.health_timeout_seconds}s; "
-                "releasing the lock and stopping. Not loading again until its "
-                "spec asks for something else."
+                "stopping it and releasing the lock. Not loading again until "
+                "its spec asks for something else."
             )
-            self.release_load_lock()
+            # stop_child releases the lock once the card is free: the next
+            # load sizes itself against the card as it finds it.
             self.stop_child()
             return EXIT_HEALTH_TIMEOUT
         if health == 2:
@@ -2938,7 +2942,13 @@ def run_slot(environ: dict[str, str], slot: str) -> SlotLease:
     poll: float = env_float(
         environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
     )
-    nonce: str = register_slot(state_dir, slot, model)
+    try:
+        nonce: str = register_slot(state_dir, slot, model)
+    except OSError as exc:
+        raise ConfigError(
+            f"slot {slot} cannot register on {state_dir} ({exc}) -- is the state "
+            "volume mounted and writable?"
+        ) from None
     stub: ParkedStub = ParkedStub(
         env_value(environ, "VIF_ENGINE_HOST", DEFAULT_ENGINE_HOST)
     )
