@@ -26,9 +26,12 @@ x-vif-model-engine-env: &vif-model-engine-env
     # set, it wins over that one.
     HF_TOKEN: ${HF_TOKEN:-}
     HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
-    # Kept from the single-sidecar layout: pins every engine to the given
-    # card(s). Unset = GPU 0, the card VIS measures and sizes every engine
-    # against; leave it unset (engines on another card are not supported).
+    # A HuggingFace mirror, for the weight downloads and the launcher's
+    # gated-model check. Left out of the container when unset: an empty value
+    # would break huggingface_hub's default.
+    HF_ENDPOINT:
+    # VIS pins each engine's card in its spec; this is only the fallback for
+    # a spec that names none. Leave it unset.
     VLM_GPU_IDS: ${VLM_GPU_IDS:-}
 
 x-vif-model-engine: &vif-model-engine
@@ -313,19 +316,18 @@ services:
 
     # ── Managed VLM engines (opt-in, `--profile vlm`) ──────────────────────
     # One container per model in the Video Intelligence Service's catalog.
-    # Every one of them is resident, but only one serves at a time: VIS decides
-    # which, and the others rest asleep (hot tier: weights in host RAM, back in
-    # a second or two) or parked (cold tier: no engine process, weights on
-    # disk, back in a cold start). Switching models is a call to VIS -- the
-    # Manager's model dropdown and Activate button make it -- and no container
-    # is recreated.
+    # The models in VIS's active set serve, each on its GPU; every other one
+    # rests asleep (hot tier: weights in host RAM, back in a second or two) or
+    # parked (cold tier: no engine process, weights on disk, back in a cold
+    # start). The active set and its Default are changed through VIS -- the
+    # Manager's VLM section -- and no container is recreated.
     #
     #   docker compose --profile default --profile vlm up -d
     #
     # Streams point at VIS's own endpoint,
     # `endpoint_url: http://video-intelligence-service.docker:5001/v1`, and
     # either name a model in `model_name` (pinned to it) or leave it empty
-    # (follow whichever model is active). The address the single sidecar used to
+    # (served by the Default model). The address the single sidecar used to
     # answer on (`http://vlm.docker:8000/v1`) is served the same way, so older
     # stream configs keep working without an edit. Full guide: docs/VLM_GUIDE.md.
     #
