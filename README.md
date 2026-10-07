@@ -184,7 +184,7 @@ In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount a
 - `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
 - `./wse/vif-vod-jobs -> /usr/local/WowzaStreamingEngine/vif-vod-jobs`
 - `./vis/models -> /build/models`
-- `./vis/vlm-models`, `./vis/vlm-cache` and `./vis/vlm-state` (the managed VLM engines' weights, compile cache and state; only with the `vlm` profile; see [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md))
+- `./vis/vlm-models`, `./vis/vlm-adapters`, `./vis/vlm-cache` and `./vis/vlm-state` (the managed VLM engines' weights, uploaded LoRA adapters, compile cache and state; see [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md))
 
 What this enables:
 
@@ -194,7 +194,7 @@ What this enables:
 - Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
 - Keeping VOD job records, results, and thumbnails across container recreation; without this mount they are lost when the container is replaced.
 - Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
-- Keeping the VLM weights (about 70 GB for the whole catalog), the active VLM model, and a saved HuggingFace token across restarts.
+- Keeping the VLM weights (about 70 GB for the whole catalog), uploaded LoRA adapters, the VLM settings and active models (`./vis/models/vlm-catalog.local.json`), and a saved HuggingFace token across restarts.
 
 This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:
 
@@ -238,7 +238,7 @@ docker compose --profile default --profile vlm up -d
 ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/vlm_mystream1"
 ```
 
-   The first start downloads the Default model's weights into `./vis/vlm-models` and loads it, which takes a while; later starts reuse them. Every other model stays parked, holding no GPU memory, until you add it to the active models or make it hot. The default model is Qwen3-VL 4B and needs a 24 GB GPU (the smallest catalog model runs on 8 GB). Streams follow the Default model by default: pick another one in the **Model Name** dropdown of the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page. The models that serve (one or several, with their GPU and memory share) are configured once in **Stream Config Defaults → VLM**. Gated models (Gemma) take a HuggingFace token, which you can also enter there.
+   The first start downloads the Default model's weights into `./vis/vlm-models` and loads it, which takes a while; later starts reuse them. Every other model stays parked, holding no GPU memory, until you add it to the active models or make it hot. The default model is Qwen3-VL 4B and needs a 24 GB GPU (the smallest catalog model runs on 8 GB). Streams follow the Default model by default: pick another one in the **Model Name** dropdown of the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page. The models that serve (one or several, with their GPU and memory share) are configured once in **Stream Config Defaults → VLM**. Gated models (Gemma) take a HuggingFace token, entered under the **Model Name** dropdown or set as `HF_TOKEN` in `.env`.
 
 7. Expected output for streams analyzed by VIF:
 
@@ -297,7 +297,7 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 ## Synthetic Video Detection (Optional)
 
-VIF can flag **synthetic / AI-generated** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC (VI-550 partnership) and needs an NVENC/NVDEC GPU (T4/A10/A16/A40/L4/L40/L40S/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
+VIF can flag **synthetic / AI-generated** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC and needs an NVENC/NVDEC GPU (T4/A10/A16/A40/L4/L40/L40S/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
 
 See [`docs/SYNTHETIC_VIDEO_DETECTOR.md`](docs/SYNTHETIC_VIDEO_DETECTOR.md) for the full deployment, GPU support matrix, air-gapped pre-seed, stream-config, and EU AI Act context.
 
@@ -318,7 +318,7 @@ Recommended baseline for self-hosted VIF: approximately 8 concurrent 720p stream
 - `NVMe` storage recommended
 - `10 GbE` networking preferred for multi-stream deployments
 
-The managed VLM engines (`--profile vlm`) add their own needs: a GPU with enough memory for the model you serve (8 GB for the smallest, 24 GB for the default, 40 GB for the largest), about 70 GB of disk for all models' weights, and host RAM for the models you make hot, which rest asleep (by default every model but the active ones is parked on disk, at the price of a cold start when switching to it). See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md).
+The managed VLM engines (`--profile vlm`) add their own needs: GPU memory for the models you serve at once (8 GB for the smallest, 24 GB for the default, 40 GB for the largest), about 70 GB of disk for all models' weights, and host RAM for the models you make hot, which rest asleep (by default every model outside the active ones is parked on disk, and adding it to the active models is a cold start of a minute or two). See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md).
 
 Actual capacity depends on the model variant, frame preprocessing, overlay configuration, event listeners, and downstream integrations. Higher density workloads, heavier models, or full-frame-rate analysis may require additional resources.
 
