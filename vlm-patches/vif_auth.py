@@ -46,7 +46,10 @@ class VifAuthMiddleware:
     def __call__(self, scope: Scope, receive: Receive, send: Send) -> Awaitable[None]:
         if self.token_digest is None:
             return self.app(scope, receive, send)
-        if scope["type"] not in ("http", "websocket") or scope.get("method") == "OPTIONS":
+        if (
+            scope["type"] not in ("http", "websocket")
+            or scope.get("method") == "OPTIONS"
+        ):
             return self.app(scope, receive, send)
 
         root_path: str = scope.get("root_path", "")
