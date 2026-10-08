@@ -232,6 +232,11 @@ services:
         #   MODEL_TRAINER_SCORE_TIMEOUT_SECONDS  read timeout of one scoring
         #                                        call (default 30)
           - MODEL_TRAINER_SCORE_TIMEOUT_SECONDS
+        #   MODEL_TRAINER_MAX_CHECKPOINT_MB      largest detector checkpoint
+        #                                        the service may publish into
+        #                                        models/ through POST
+        #                                        /models/import (default 2048)
+          - MODEL_TRAINER_MAX_CHECKPOINT_MB
         # License key string required to run VIS
           - VIS_LICENSE=${VIS_LICENSE}
         # Optional: Enable SSL/TLS for HTTPS and WSS
@@ -454,6 +459,15 @@ services:
             MODEL_TRAINER_MAX_UPLOAD_MB: ${MODEL_TRAINER_MAX_UPLOAD_MB:-512}
             MODEL_TRAINER_MAX_JOBS: ${MODEL_TRAINER_MAX_JOBS:-10}
             MODEL_TRAINER_JOB_TTL_SECONDS: ${MODEL_TRAINER_JOB_TTL_SECONDS:-2592000}
+            # Boxes, dataset versions and detector training. Passed through
+            # only when set in .env; the defaults are in docs/MODEL_TRAINER.md.
+            MODEL_TRAINER_DATASET_KEEP:
+            MODEL_TRAINER_MAX_IMPORT_MB:
+            MODEL_TRAINER_VLM_URL:
+            MODEL_TRAINER_VRAM_MIB_RFDETR_NANO:
+            MODEL_TRAINER_VRAM_MIB_RFDETR_SMALL:
+            MODEL_TRAINER_VRAM_MIB_RFDETR_MEDIUM:
+            MODEL_TRAINER_VRAM_MIB_RFDETR_LARGE:
         volumes:
             # projects/ (the store) beside jobs/ (training jobs)
             - ./model_trainer:/model_trainer
