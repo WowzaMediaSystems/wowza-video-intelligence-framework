@@ -138,7 +138,6 @@ services:
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
              - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs   # VOD job records, results, thumbnails
-             - ./wse/model_trainer:/usr/local/WowzaStreamingEngine/model_trainer   # Model Trainer judgements, confirmed frames and runs
 
         ports:
             - 80:80                     #HLS
@@ -188,10 +187,9 @@ services:
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
         restart: "no"
-        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "/build/model_trainer", "${LOG_DIR:-/logs}", "/vif-state", "/vif-adapters"]
+        entrypoint: ["chown", "-R", "1001:1001", "/build/models", "${LOG_DIR:-/logs}", "/vif-state", "/vif-adapters"]
         volumes:
           - ./vis/models:/build/models
-          - ./vis/model_trainer:/build/model_trainer
           - ./vis/logs:${LOG_DIR:-/logs}
           - ./vis/vlm-state:/vif-state
           - ./vis/vlm-adapters:/vif-adapters
@@ -225,15 +223,15 @@ services:
         # TensorRT: Specify which models to precompile (optional, defaults to scanning models/ folder)
         # - TRT_MODELS=object-detection-medium
         # - TRT_MODELS=object-detection-nano,my-custom-model.pth
-        # Model Trainer: where projects, example banks and exported packages
-        # live (the ./vis/model_trainer mount below). The upload cap must fit the
-        # largest export package the Engine sends back to VIS; the default
-        # (16 MB) fits examples, not a package.
-          - MODEL_TRAINER_STORE_DIR=/build/model_trainer
-          - MODEL_TRAINER_MAX_UPLOAD_MB=${MODEL_TRAINER_MAX_UPLOAD_MB:-512}
-        # Optional: cap the examples per class and pin the encoder's GPU
-        # - MODEL_TRAINER_MAX_EXAMPLES=200
-        # - MODEL_TRAINER_DEVICE=cuda:0
+        # Model Trainer: the resident model-trainer service owns the projects,
+        # scoring and selection; VIS forwards scoring to it and proxies its
+        # HTTP routes. MODEL_TRAINER_API_KEY is the service's own key (set it
+        # in .env; the service refuses to start without one).
+          - MODEL_TRAINER_URL=http://model-trainer.docker:5002
+          - MODEL_TRAINER_API_KEY=${MODEL_TRAINER_API_KEY:-}
+        #   MODEL_TRAINER_SCORE_TIMEOUT_SECONDS  read timeout of one scoring
+        #                                        call (default 30)
+          - MODEL_TRAINER_SCORE_TIMEOUT_SECONDS
         # License key string required to run VIS
           - VIS_LICENSE=${VIS_LICENSE}
         # Optional: Enable SSL/TLS for HTTPS and WSS
@@ -277,10 +275,6 @@ services:
         # engines, or write the cache at runtime. Swap the line below for:
         #   - ./vis/models:/build/models:ro
           - ./vis/models:/build/models
-        # Model Trainer projects, example banks and exports. Always writable:
-        # VIS writes here on every example upload and bank rebuild, so the
-        # read-only hardening above does not extend to this mount.
-          - ./vis/model_trainer:/build/model_trainer
         # Optional: Mount SSL certificates for HTTPS/WSS
         # - ./certs:/certs:ro
         # Optional: Mount for RT-DETR v2 model cache (for offline usage).
@@ -420,49 +414,52 @@ services:
             VIF_SLOT: vif-model-slot-2
             VLM_MODEL: ${VIF_SLOT_2_MODEL:-}
 
-    # ── Model Trainer service (resident, started by hand) ──────────────
-    # Turns a Model Trainer export into VLM training pairs, trains a LoRA
-    # adapter and publishes it to VIS, one job at a time. The Manager's Train
-    # tab on a Model Trainer project drives it (Stream Config Defaults -> Model Trainer holds
-    # its URL); the same image also runs the CLI commands one at a time, e.g.
-    #   docker compose --profile model-trainer run --rm model-trainer pairs \
-    #     --export /model_trainer/projects/<project id>/export/package.zip --out /work/pairs
+    # ── Model Trainer service (resident) ────────────────────────────────
+    # Owns the Model Trainer projects (examples, banks, runs, scored frames,
+    # review marks, exports), scores the frames VIS forwards and trains LoRA
+    # adapters from an export, one training job at a time. The Engine owns the
+    # run lifecycle and reaches the service through VIS, which proxies
+    # /model_trainer and /training to it; nothing else talks to it. The same
+    # image also runs the CLI commands one at a time, e.g.
+    #   docker compose run --rm model-trainer pairs \
+    #     --export /model_trainer/projects/<project id>/export/package.zip \
+    #     --out /model_trainer/jobs/cli/pairs
     #
-    # Opt-in via the `model-trainer` profile -- a bare `docker compose up`
-    # never starts it. Start it with:
-    #   docker compose --profile model-trainer up -d model-trainer
-    # Teardown: a bare `docker compose down` leaves it running; use
-    # `docker compose --profile model-trainer down` to stop it.
+    # It starts with the VIS profiles. MODEL_TRAINER_API_KEY is its own key
+    # (VIS sends it as X-API-Key) and has no default: with SECURE_MODE unset
+    # or true the service refuses to start without one. The image is built
+    # from the repository root of the Video Intelligence Service source, not
+    # its video-intelligence-service/ directory (see docs/MODEL_TRAINER.md);
+    # MODEL_TRAINER_IMAGE overrides the tag.
     #
-    # It requires VIS_API_KEY (callers send it as X-API-Key) unless
-    # SECURE_MODE=false. The image is built from the repository root of the
-    # Video Intelligence Service source, not its video-intelligence-service/
-    # directory (see docs/MODEL_TRAINER.md); MODEL_TRAINER_IMAGE overrides
-    # the tag.
-    #
-    # Training takes the whole GPU's free memory: free the card first by
-    # removing the engine that holds it from the Model Manager's active set
-    # (the Train form names the engine). While idle the service holds no GPU
-    # memory. MODEL_TRAINER_MAX_JOBS and MODEL_TRAINER_JOB_TTL_SECONDS bound
-    # how many finished jobs, and for how long, are kept under ./model_trainer.
+    # The encoders take a little GPU memory while a project is in use, and
+    # training takes the whole card's free memory: free it first by removing
+    # the engine that holds it from the Model Manager's active set (the Train
+    # form names the engine). MODEL_TRAINER_MAX_JOBS and
+    # MODEL_TRAINER_JOB_TTL_SECONDS bound how many finished training jobs, and
+    # for how long, are kept under ./model_trainer/jobs.
     model-trainer:
         hostname: model-trainer.docker
         image: ${MODEL_TRAINER_IMAGE:-wowza/wowza-video-intelligence-model-trainer:latest}
-        profiles: ["model-trainer"]
+        profiles: ["", "vi-service", "default", "vlm"]
         restart: unless-stopped
         command: ["serve"]
         environment:
             HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
             SECURE_MODE: ${SECURE_MODE:-true}
-            VIS_API_KEY: ${VIS_API_KEY:-}
+            MODEL_TRAINER_API_KEY: ${MODEL_TRAINER_API_KEY:-}
             VIS_URL: http://video-intelligence-service.docker:5001
+            VIS_API_KEY: ${VIS_API_KEY:-}
             VLLM_API_KEY: ${VLLM_API_KEY:-}
+            MODEL_TRAINER_MAX_UPLOAD_MB: ${MODEL_TRAINER_MAX_UPLOAD_MB:-512}
             MODEL_TRAINER_MAX_JOBS: ${MODEL_TRAINER_MAX_JOBS:-10}
             MODEL_TRAINER_JOB_TTL_SECONDS: ${MODEL_TRAINER_JOB_TTL_SECONDS:-2592000}
         volumes:
-            - ./vis/model_trainer:/model_trainer:ro
+            # projects/ (the store) beside jobs/ (training jobs)
+            - ./model_trainer:/model_trainer
+            # The encoders' checkpoints, downloaded and verified by the service
+            - ./model_trainer/models:/models
             - ./vis/vlm-models:/root/.cache/huggingface
-            - ./model_trainer:/work
         deploy:
             resources:
                 reservations:
