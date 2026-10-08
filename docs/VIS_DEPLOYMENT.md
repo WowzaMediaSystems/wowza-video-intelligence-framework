@@ -62,6 +62,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `MODEL_TRAINER_URL` | `http://model-trainer.docker:5002` | Base URL of the resident model-trainer service. VIS forwards scoring to it and proxies `/model_trainer` and `/training` to it; see [`MODEL_TRAINER.md`](MODEL_TRAINER.md) |
 | `MODEL_TRAINER_API_KEY` | — | The service's own key, sent to it as `X-API-Key`. Must equal the service's `MODEL_TRAINER_API_KEY` (set once in `.env`) |
 | `MODEL_TRAINER_SCORE_TIMEOUT_SECONDS` | `30` | Read timeout of one scoring call to the service; keep it below the Engine's response timeout for a frame batch |
+| `MODEL_TRAINER_MAX_CHECKPOINT_MB` | `2048` | Largest detector checkpoint `POST /models/import` accepts from the Model Trainer service (checked on `Content-Length` and while the body streams) |
 | `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
 | `SSL_KEYFILE_PASSWORD` | — | Password for encrypted SSL key |
@@ -77,6 +78,8 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
 
 VIS keeps no Model Trainer data: the projects live in the model-trainer service's volume (`./model_trainer`). VIS proxies its `/model_trainer` and `/training` routes to the service, streaming request and response bodies; the proxy requires the Engine's `X-API-Key` on them even when VIS itself runs without a key, and adds the service's own.
+
+A detector trained in the Model Trainer is published into `models/` with `POST /models/import` (the checkpoint as the raw body, streamed to disk) followed, when it replaces a model, by `POST /models/rescan`; the catalog updates without a restart and the model appears in the Manager's picker. Both routes accept `X-API-Key` equal to `MODEL_TRAINER_API_KEY` or to `VIS_API_KEY`, and VIS re-checks the file before keeping it (the refusal lists the failed checks). The workflow is in [`MODEL_TRAINER.md`](MODEL_TRAINER.md#training-a-detector).
 
 ### Logging
 
