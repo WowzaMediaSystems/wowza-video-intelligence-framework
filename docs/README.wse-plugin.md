@@ -96,7 +96,7 @@ Add  `--help` to the above commands to see all the options available.
 		<Properties>
 			<Property>
 				<Name>restUserHTTPHeaders</Name>
-				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag</Value>
+				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag,X-Frames</Value>
 				<Type>String</Type>
 			</Property>
 		</Properties>
