@@ -1,0 +1,74 @@
+name: wowza-model-trainer-standalone
+
+# Model Trainer on its own: no Wowza Streaming Engine, no Manager, no VIF
+# stack. Upload a video file, build a labelled frame set, review it, export
+# it and (with a GPU) train. The same image as the resident service of the
+# main docker-compose.yaml; see docs/MODEL_TRAINER.md ("Standalone").
+#
+#   cp .env.standalone.example .env.standalone    # then set the key
+#   docker compose -f docker-compose.standalone.yaml --env-file .env.standalone up -d
+#   open http://localhost:8090 and sign in with MODEL_TRAINER_API_KEY
+#
+# The service speaks plain HTTP. Put a reverse proxy that terminates TLS in
+# front of it before the key or the session cookie crosses a network you do
+# not control (docs/MODEL_TRAINER.md, "TLS in front").
+#
+# Projects, runs, exports and trained models live under ./model_trainer. Do
+# not point this file and the main docker-compose.yaml at the same directory
+# at the same time: pick one deployment per directory.
+services:
+    model-trainer:
+        image: ${MODEL_TRAINER_IMAGE:-wowza/wowza-video-intelligence-model-trainer:latest}
+        restart: unless-stopped
+        command: ["serve"]
+        ports:
+            # The UI and the API
+            - "${MODEL_TRAINER_PORT:-8090}:5002"
+        environment:
+            HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
+            SECURE_MODE: ${SECURE_MODE:-true}
+            # Required: the service refuses to start without it. It is the
+            # sign-in secret of the page and the X-API-Key of the API.
+            MODEL_TRAINER_API_KEY: ${MODEL_TRAINER_API_KEY:?set MODEL_TRAINER_API_KEY in .env.standalone}
+            # Optional. Without a reachable Video Intelligence Service the
+            # service still decodes, scores, reviews, exports and trains; it
+            # cannot publish a trained model and the VLM grounding backend of
+            # the boxes step is off.
+            VIS_URL: ${VIS_URL:-}
+            VIS_API_KEY: ${VIS_API_KEY:-}
+            VLLM_API_KEY: ${VLLM_API_KEY:-}
+            # Largest uploaded video, in MiB
+            MODEL_TRAINER_MAX_VIDEO_MB: ${MODEL_TRAINER_MAX_VIDEO_MB:-4096}
+            # Lifetime of the browser session, in seconds
+            MODEL_TRAINER_SESSION_TTL_SECONDS: ${MODEL_TRAINER_SESSION_TTL_SECONDS:-28800}
+            # Dataset versions kept per project; largest imported COCO or
+            # CVAT file, in MiB
+            MODEL_TRAINER_DATASET_KEEP: ${MODEL_TRAINER_DATASET_KEEP:-5}
+            MODEL_TRAINER_MAX_IMPORT_MB: ${MODEL_TRAINER_MAX_IMPORT_MB:-256}
+            # Upload cap of one example image
+            MODEL_TRAINER_MAX_UPLOAD_MB: ${MODEL_TRAINER_MAX_UPLOAD_MB:-512}
+            MODEL_TRAINER_MAX_JOBS: ${MODEL_TRAINER_MAX_JOBS:-10}
+            MODEL_TRAINER_JOB_TTL_SECONDS: ${MODEL_TRAINER_JOB_TTL_SECONDS:-2592000}
+            # Free-VRAM pre-flight of a training job, in MiB, when the card
+            # reports less than the default need (see docs/MODEL_TRAINER.md).
+            # Uncomment the ones you need:
+            # MODEL_TRAINER_VRAM_MIB_QWEN_QWEN3_VL_2B_INSTRUCT: 16000
+            # MODEL_TRAINER_VRAM_MIB_RFDETR_NANO: 6000
+            # MODEL_TRAINER_VRAM_MIB_RFDETR_SMALL: 8000
+            # MODEL_TRAINER_VRAM_MIB_RFDETR_MEDIUM: 11000
+            # MODEL_TRAINER_VRAM_MIB_RFDETR_LARGE: 16000
+        volumes:
+            # projects/ (the store), jobs/ (training jobs)
+            - ./model_trainer:/model_trainer
+            # The encoders' and trainers' checkpoints, downloaded and verified
+            # by the service
+            - ./model_trainer/models:/models
+            # Hugging Face downloads (boxes backends, VLM training base)
+            - ./model_trainer/hf-cache:/root/.cache/huggingface
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          capabilities: [gpu, compute, utility]
+                          count: all
