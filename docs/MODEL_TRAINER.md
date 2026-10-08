@@ -1,11 +1,70 @@
-# Training a VLM adapter from a Model Trainer export
+# Model Trainer service
+
+The Model Trainer turns example images and footage into a labelled frame set, and the labelled
+frame set into a VLM adapter. It is one resident `model-trainer` service in the compose stack,
+started with the rest of it.
+
+## How the pieces fit
+
+```
+Manager UI -> Engine --frames (WebSocket)--> VIS --HTTP--> model-trainer service
+                |                              |                (GPU, one volume)
+                +------- REST relays ----------+ proxy
+```
+
+- **The service** owns everything the Model Trainer keeps: projects, example images, encoders and
+  banks, runs, scoring and frame selection, the kept frames, review marks, labels, the export
+  package and the embedding cache, plus the training jobs. It has one HTTP API and one API key of
+  its own (`MODEL_TRAINER_API_KEY`).
+- **The Engine** owns the run lifecycle: it opens a run when a VOD job or a live window starts,
+  feeds frames to VIS as it always has, and closes the run when the job or window ends. It keeps no
+  Model Trainer files; the Manager's pages reach the service through the Engine's REST routes, which
+  relay to VIS.
+- **VIS** forwards each frame batch to the service for scoring and answers the Engine with the
+  same scores as before. It proxies `/model_trainer` and `/training` to the service, and requires
+  its own API key on them even when VIS itself runs without one.
+
+It is one deployment: the Engine, VIS and the service are upgraded together. The service is not
+optional; without it no Model Trainer run can start.
+
+## Timeouts
+
+Each hop waits at least as long as the one behind it, so the inner timeout reports first.
+
+| Hop | Connect | Read |
+|---|---|---|
+| Engine to VIS relay (projects, items, marks) | 5 s | 30 s |
+| Engine to VIS relay (operations: the Engine receives `202` and polls) | 5 s | 30 s |
+| VIS proxy to the service | 5 s | 600 s |
+| VIS scoring call to the service | 5 s | 30 s |
+
+A scoring call is kept below the Engine's 120 s response timeout for a frame batch. Long work (an
+export, a bank rebuild) is an operation: the request answers `202` and the Manager polls it, so
+no single request waits for the work. Uploads and downloads stream through the proxy; the service
+caps their size with `MODEL_TRAINER_MAX_UPLOAD_MB`.
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MODEL_TRAINER_API_KEY` | none | The service's key. Required: with `SECURE_MODE` unset or `true` the service refuses to start without one. VIS gets the same value and sends it as `X-API-Key`; the Engine and the Manager never see it |
+| `MODEL_TRAINER_IMAGE` | `wowza/wowza-video-intelligence-model-trainer:latest` | Image tag; see [Before you start](#before-you-start) |
+| `MODEL_TRAINER_MAX_UPLOAD_MB` | `512` | Cap per upload body: an example image, a judged frame during a bank rebuild or a video source |
+| `MODEL_TRAINER_MAX_JOBS`, `MODEL_TRAINER_JOB_TTL_SECONDS` | `10`, `2592000` | Retention of finished training jobs |
+
+The VIS side of the connection (`MODEL_TRAINER_URL` and friends) is in
+[`VIS_DEPLOYMENT.md`](VIS_DEPLOYMENT.md#configuration-reference). The compose file mounts
+`./model_trainer` at `/model_trainer` (the project store in `projects/`, training jobs in `jobs/`)
+and `./model_trainer/models` at `/models`, where the service downloads and verifies its encoder
+checkpoints. Back up `./model_trainer` to keep your projects.
+
+## Training a VLM adapter from a Model Trainer export
 
 The Model Trainer tab produces a labelled frame set: a zip with a `manifest.json` of image-level labels and
-the judged frames. The `model-trainer` service turns that export into training pairs for a
+the judged frames. The service turns that export into training pairs for a
 vision-language model, trains a LoRA adapter on `Qwen/Qwen3-VL-2B-Instruct`, publishes it to the VIS
 model manager and scores it against the base model. You drive it from the project's **Train** tab in
-the Manager, or from the command line on a host without one. The service is behind the `model-trainer`
-compose profile: nothing here starts with the stack, and it runs one job at a time.
+the Manager, or from the command line on a host without one. Training runs one job at a time.
 
 The adapter learns your classes as the VLM's **Detect** mode answers them: the trained request is the
 exact request VIS sends for a Detect stream, with your project's class names as the candidate list.
@@ -15,18 +74,17 @@ LoRA adapters in general.
 
 ## Before you start
 
-- **An export in VIS.** Export the project from the Model Trainer tab; VIS keeps the package at
-  `./vis/model_trainer/projects/<project id>/export/package.zip`, which the service mounts read-only at
-  `/model_trainer`.
+- **An export.** Export the project from the Model Trainer tab; the service keeps the package at
+  `./model_trainer/projects/<project id>/export/package.zip`.
 - **The image.** It is built from the `model_trainer/` directory of the Video Intelligence Service
   source, with the repository root as the build context:
   `docker build -f model_trainer/Dockerfile -t wowza/wowza-video-intelligence-model-trainer .`
   Set `MODEL_TRAINER_IMAGE` in `.env` to use another tag.
-- **A key.** The service authenticates callers the way VIS does: they send `VIS_API_KEY` as
-  `X-API-Key`, and with `SECURE_MODE` unset or `true` the service refuses to start without a key. Only
-  `SECURE_MODE=false` runs it keyless. It listens on the compose network (port 5002) and a job names a
-  model to load, so keep the key set unless the host is internal-only. `VLLM_API_KEY` is passed through
-  for the evaluation.
+- **A key.** Set `MODEL_TRAINER_API_KEY` in `.env`. Callers send it as `X-API-Key`, and with
+  `SECURE_MODE` unset or `true` the service refuses to start without one. Only `SECURE_MODE=false`
+  runs it keyless. It listens on the compose network (port 5002) and a job names a model to load,
+  so keep the key set unless the host is internal-only. The service also calls VIS with
+  `VIS_API_KEY` to publish adapters, and `VLLM_API_KEY` is passed through for the evaluation.
 - **A free GPU for training.** Training takes the free memory of the card, and the managed VLM engines
   hold most of it. Free it through the Model Manager's active set (Stream Config Defaults -> VLM): remove
   the engine the Train form names, then add it back when the job ends. `pairs`, `publish` and `eval`
@@ -39,21 +97,15 @@ LoRA adapters in general.
 - **Weights.** The base downloads into `./vis/vlm-models` on first use. On an air-gapped host,
   pre-seed that directory and set `HF_HUB_OFFLINE=1`.
 
-The service keeps its jobs under `./model_trainer` next to `docker-compose.yaml`, mounted at `/work`.
-The container runs as root, so give the files back to yourself afterwards (`sudo chown -R "$USER" model_trainer`).
+The service keeps its jobs under `./model_trainer/jobs` next to `docker-compose.yaml`, mounted at
+`/model_trainer/jobs`. The container runs as root, so give the files back to yourself afterwards
+(`sudo chown -R "$USER" model_trainer`).
 
 ## Training from the Manager
 
-1. **Start the service.** It is not part of `docker compose up`:
-
-   ```bash
-   docker compose --profile model-trainer up -d model-trainer
-   ```
-
-   A bare `docker compose down` leaves it running; stop it with
-   `docker compose --profile model-trainer down`.
+1. **Check the service is up.** It starts with the stack (`docker compose ps model-trainer`).
 2. **Open the project's Train tab** (Model Trainer -> the project -> Train). If the service does not answer, or
-   rejects the Engine's key, the tab says so, shows the URL it tried and the start command above.
+   rejects the key, the tab says so and points at the service's logs.
 3. **Read the form.** It shows the export it will train on (when it was made and its size; with none, a
    link to the Export tab, and Train stays disabled), the adapter name with the project's slug as
    prefix, the base (the LoRA-capable models of the catalog, the 2B preselected), the epochs, the rank,
@@ -86,14 +138,13 @@ are removed, oldest first. The job that produced VIS's current Default adapter i
 sized in gigabytes, so mind the disk. A job running when the service restarts becomes `failed`
 (`service_restarted`); nothing resumes.
 
-**Where the Engine looks.** Stream Config Defaults -> Model Trainer has one field, the training service URL,
-default `http://model-trainer.docker:5002`: the compose service needs no change. It is a default-config
-setting only; streams and stream groups cannot override it. The Engine sends its own service key as
-`X-API-Key`.
+**Where the Engine looks.** Nowhere: the Engine has no setting for the service. Its Train tab calls
+VIS's `/training` proxy with the VIS key, and VIS adds the service's key. When VIS cannot reach the
+service, the tab says so.
 
-**Two Engines on one VIS** share the jobs of a project, because project ids are VIS's: either Engine
-sees a project's jobs and may cancel them. A job started from another Engine appears in the Train tab
-labelled with that Engine's host name.
+**Two Engines on one VIS** share the projects, runs and jobs of the service: either Engine
+sees a project's jobs and may cancel them. A run or job started from another Engine appears in the
+Manager labelled with that Engine's host name. Run one VIS and one service per Engine when that matters.
 
 ## From the command line
 
@@ -102,20 +153,20 @@ image and the same `./model_trainer` directory as the service. `docker compose r
 container, so do not run `train-lora` while a job of the service is training on the same card.
 
 ```bash
-alias mt='docker compose --profile model-trainer run --rm model-trainer'
+alias mt='docker compose run --rm model-trainer'
 
 # 1. Pairs: no GPU. Whole sources go to validation until it holds at least 20 % of the frames;
 #    a project with a single source keeps its last 20 % by time.
-mt pairs --export /model_trainer/projects/<project id>/export/package.zip --out /work/pairs
+mt pairs --export /model_trainer/projects/<project id>/export/package.zip --out /model_trainer/jobs/cli/pairs
 
 # 2. Train: a few hundred samples over three epochs take minutes on a data-centre GPU. Per-epoch adapters,
-#    the final adapter and adapter.zip land in /work/train.
-mt train-lora --pairs /work/pairs --out /work/train
+#    the final adapter and adapter.zip land in /model_trainer/jobs/cli/train.
+mt train-lora --pairs /model_trainer/jobs/cli/pairs --out /model_trainer/jobs/cli/train
 
 # 3. Publish: uploads the adapter and declares it in the overlay. Re-running with the same id needs
 #    --version-from-catalog, which picks the next -vN: ids are never replaced. The id takes
 #    letters, digits, `.`, `_` and `-` per segment: use a slug, not a project name with spaces.
-mt publish --adapter /work/train/adapter.zip --vis-url http://video-intelligence-service.docker:5001 \
+mt publish --adapter /model_trainer/jobs/cli/train/adapter.zip --vis-url http://video-intelligence-service.docker:5001 \
    --id <project slug>/wear --version-from-catalog
 ```
 
@@ -137,7 +188,7 @@ adapter serves at a time, as the Default.
 
 ```bash
 # 4. Evaluate on the validation split, adapter against base.
-mt eval --pairs /work/pairs --endpoint http://video-intelligence-service.docker:5001/v1 \
+mt eval --pairs /model_trainer/jobs/cli/pairs --endpoint http://video-intelligence-service.docker:5001/v1 \
    --model <project slug>/wear --baseline Qwen/Qwen3-VL-2B-Instruct
 ```
 
@@ -156,3 +207,30 @@ managed `/v1` endpoint takes `VLLM_API_KEY` as its bearer.
 - Retrain whenever the classes change. After a VIS upgrade that changes the Detect prompts,
   re-run `pairs` and `train-lora`: `dataset.json` and `manifest.json` record a digest of the prompts
   an adapter was trained on.
+
+## Migrating from a previous deployment
+
+Earlier releases split a project's data across two volumes: the examples, banks and exports on
+VIS's volume (`./vis/model_trainer`) and the judgements, confirmed frames and runs on the
+Engine's (`./wse/model_trainer`). The service keeps all of it in its own volume, so an
+existing deployment moves its projects once, as part of the same upgrade that brings the Engine,
+VIS and the service up together.
+
+The `model-trainer import-engine-store` command, which arrives with the migration release, does
+the move:
+
+```bash
+model-trainer import-engine-store <engine model_trainer dir> --project <id> --owner <engine>
+```
+
+For each run in the Engine's store it imports `run.json` (the run becomes `finished`, owned by
+the importing Engine), `items.jsonl`, `scores.csv`, `frames/` and `thumbs/`, and the project's
+`labels.json` and `confirmed/`. It is idempotent by run id and by `(source, frame id)`, so a
+partial import can be repeated. Move VIS's project store as a directory into
+`./model_trainer/projects`; the embedding caches stay valid. Until the command ships, keep the old
+volumes untouched: they are the only copy of the judgements.
+
+## Standalone mode (coming)
+
+A later release runs the service on its own, without the Engine or VIS, on uploaded video files.
+It will have its own compose file and guide.

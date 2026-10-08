@@ -20,6 +20,7 @@ For compute requirements, see the [Compute Requirements](../README.md#compute-re
    cp .env.example .env
    # Edit .env and set VIS_LICENSE to your license string
    # Edit .env and set VIS_API_KEY to a shared secret
+   # Edit .env and set MODEL_TRAINER_API_KEY to a second secret (the Model Trainer service)
    ```
 
 2. Start the service:
@@ -58,11 +59,9 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `NVIDIA_VISIBLE_DEVICES` | `all` | GPU devices to expose (e.g., `0,1`) |
 | `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` | Required NVIDIA capabilities |
 | `TRT_MODELS` | — | Models to precompile at startup (e.g., `object-detection-medium`); default is to scan the `models/` folder |
-| `MODEL_TRAINER_STORE_DIR` | `./model_trainer` (`/build/model_trainer` in the compose stack) | Model Trainer store: projects, example banks and exported packages. Must be writable; see the `./vis/model_trainer` mount |
-| `MODEL_TRAINER_MAX_UPLOAD_MB` | `16` (`512` in the compose stack) | Cap per upload body on the Model Trainer HTTP API: an example image, a judged frame during a bank rebuild, or an export package. Size it for the largest package the Engine sends back |
-| `MODEL_TRAINER_MAX_EXAMPLES` | `200` | Maximum example images per class; adding one to a class that is at the cap is refused |
-| `MODEL_TRAINER_CACHE_MAX_MB` | `1024` | Per project, the most disk the embedding cache of its runs may use under `MODEL_TRAINER_STORE_DIR`. A bank rebuild reads judged frames' vectors from this cache instead of re-embedding them; when a project goes over the cap the oldest runs' vectors are evicted first, never those of a run still being written. An evicted run's frames are embedded again on the next rebuild |
-| `MODEL_TRAINER_DEVICE` | — | GPU the Model Trainer encoder loads on (e.g., `cuda:1`); unset picks the first CUDA device |
+| `MODEL_TRAINER_URL` | `http://model-trainer.docker:5002` | Base URL of the resident model-trainer service. VIS forwards scoring to it and proxies `/model_trainer` and `/training` to it; see [`MODEL_TRAINER.md`](MODEL_TRAINER.md) |
+| `MODEL_TRAINER_API_KEY` | — | The service's own key, sent to it as `X-API-Key`. Must equal the service's `MODEL_TRAINER_API_KEY` (set once in `.env`) |
+| `MODEL_TRAINER_SCORE_TIMEOUT_SECONDS` | `30` | Read timeout of one scoring call to the service; keep it below the Engine's response timeout for a frame batch |
 | `SSL_KEYFILE` | — | Path to SSL private key (inside container) |
 | `SSL_CERTFILE` | — | Path to SSL certificate (inside container) |
 | `SSL_KEYFILE_PASSWORD` | — | Password for encrypted SSL key |
@@ -74,9 +73,10 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | Host Path | Container Path | Purpose |
 |---|---|---|
 | `./vis/models` | `/build/models` | Model checkpoints and cached TensorRT engines |
-| `./vis/model_trainer` | `/build/model_trainer` | Model Trainer projects, example banks and exported packages (always writable) |
 | `./vis/logs` | `/logs` (or `$LOG_DIR`) | Log files |
 | `./certs` | `/certs:ro` | SSL certificates (optional, read-only) |
+
+VIS keeps no Model Trainer data: the projects live in the model-trainer service's volume (`./model_trainer`). VIS proxies its `/model_trainer` and `/training` routes to the service, streaming request and response bodies; the proxy requires the Engine's `X-API-Key` on them even when VIS itself runs without a key, and adds the service's own.
 
 ### Logging
 
@@ -84,7 +84,7 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 
 > **Non-root user (handled automatically).** The image runs as the non-root
 > `vis` user (uid/gid **1001**). A bundled one-shot `vis-init` service `chown`s
-> the `./vis/models`, `./vis/model_trainer` and `./vis/logs` mounts to `1001` before
+> the `./vis/models` and `./vis/logs` mounts to `1001` before
 > VIS starts, so no manual `chown` is required.
 
 > **Hardening — read-only models mount (optional).** VIS deserializes `.pth`
@@ -94,19 +94,18 @@ VIS always writes logs to a file under `LOG_PATH` in addition to stderr. The fil
 > the directory read-only in `docker-compose.yaml`:
 > `- ./vis/models:/build/models:ro`. Read-only, VIS cannot download weights,
 > build/refresh engines, or write the cache at runtime — so seed everything
-> first. The `./vis/model_trainer` mount stays writable either way: it holds no
-> model weights, only images and vectors, and VIS writes it at runtime.
+> first.
 
-> **Model Trainer and shared VIS instances.** Model Trainer projects are keyed by
-> the shared `VIS_API_KEY`, not by the Engine that created them: two Engines
-> pointed at one VIS see, and can delete, each other's projects. They can also
-> rebuild a bank that the other Engine's paused run is scoring against: a run
-> pins its thresholds and bank version when it starts and does not re-check
-> them on resume, so frames scored after the resume are compared against the
-> new bank with the old thresholds and nothing warns. An Engine only blocks a
-> rebuild for its own jobs. Run one VIS per Engine when that matters. A run also loads one more model on the GPU
-> while its projects are in use: the project's encoder, CLIP (about 0.4 GB) or
-> DINOv2 (about 0.7 GB), chosen when the project is created.
+> **Model Trainer and shared VIS instances.** Model Trainer projects live in the
+> model-trainer service, which is keyed by the shared key, not by the Engine that
+> created a project: two Engines pointed at one VIS see, and can delete, each
+> other's projects. They can also rebuild a bank that the other Engine's paused
+> run is scoring against: a run pins its thresholds and bank version when it
+> starts and does not re-check them on resume. An Engine only blocks a rebuild
+> for its own jobs. Run one VIS and one service per Engine when that matters. A
+> run also loads one more model on the service's GPU while its projects are in
+> use: the project's encoder, CLIP (about 0.4 GB) or DINOv2 (about 0.7 GB),
+> chosen when the project is created.
 
 > **Model Trainer on a live stream.** The Run view can score frames from a running
 > stream instead of an On-Demand file, for a window of up to 4 hours (14,400
@@ -132,7 +131,6 @@ VIS downloads each of the following at first start when the file is not already 
 |---|---|---|
 | Object detection (RF-DETR) | `rfdetr-<variant>.pth` | Wowza hosting; see [Object Detection](#object-detection-rf-detr) |
 | Scene analysis | `scene-detector.pth` | Wowza hosting; see [Scene Analysis](#scene-analysis-experimental) |
-| Model Trainer with the DINOv2 encoder | `dinov2-base.safetensors` | `https://huggingface.co/facebook/dinov2-base/resolve/main/model.safetensors`, SHA-256 `d73036b56966966d07975d696bde331762f37297e2f095de8cea0040c3aa0841` |
 
 ### Object Detection (RF-DETR)
 
@@ -178,10 +176,10 @@ SHA-256: `ff6a69a2641532518cbcd4497a2f246c67ac5e0a930cc7ae90e7fd200ddf5714`
 
 ### Model Trainer
 
-The Model Trainer tab scores frames with one of two encoders, chosen per project. CLIP reuses the scene analysis weights above. DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face at first start, like the other checkpoints, so an air-gapped deployment must pre-seed it before a project uses it:
+The model-trainer service loads its encoders from its own models volume (`./model_trainer/models`), not from `vis/models/`, and downloads each one at first use when it is missing. CLIP is the scene analysis checkpoint (`scene-detector.pth`, see above); copy it into `model_trainer/models/` as well. DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face, so an air-gapped deployment must pre-seed both before a project uses them:
 
 ```bash
-curl -L -o vis/models/dinov2-base.safetensors \
+curl -L -o model_trainer/models/dinov2-base.safetensors \
   https://huggingface.co/facebook/dinov2-base/resolve/main/model.safetensors
 ```
 

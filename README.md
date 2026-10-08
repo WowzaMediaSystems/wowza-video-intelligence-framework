@@ -111,6 +111,7 @@ VIS_PROTOCOL=ws
 VIS_HOST=video-intelligence-service.docker
 VIS_PORT=5001
 VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
+MODEL_TRAINER_API_KEY=REPLACE_WITH_YOUR_MODEL_TRAINER_API_KEY
 VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 ```
 
@@ -122,6 +123,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 > [!CAUTION]  
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
 > `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
+> `MODEL_TRAINER_API_KEY` is the Model Trainer service's own key (VIS sends it to the service); the service refuses to start without one. Use a different long, random value.  
 
 #### 2. Verify your GPU and Docker can see it:
 
@@ -183,8 +185,8 @@ In the current `docker-compose.yaml`, WSE bind mounts and the VIS models mount a
 - `./wse/transcoder -> /usr/local/WowzaStreamingEngine/transcoder`
 - `./wse/logs -> /usr/local/WowzaStreamingEngine/logs`
 - `./wse/vif-vod-jobs -> /usr/local/WowzaStreamingEngine/vif-vod-jobs`
-- `./wse/model_trainer -> /usr/local/WowzaStreamingEngine/model_trainer`
 - `./vis/models -> /build/models`
+- `./model_trainer -> /model_trainer` (the model-trainer service's projects, runs, judgements and training jobs; see [`docs/MODEL_TRAINER.md`](docs/MODEL_TRAINER.md))
 - `./vis/vlm-models`, `./vis/vlm-cache` and `./vis/vlm-state` (the managed VLM engines' weights, compile cache and state; only with the `vlm` profile; see [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md))
 
 What this enables:
@@ -194,7 +196,6 @@ What this enables:
 - Keeping WSE logs on the host for troubleshooting and historical inspection.
 - Keeping transcoder templates/content under source control (or local backup) instead of only inside container storage.
 - Keeping VOD job records, results, and thumbnails across container recreation; without this mount they are lost when the container is replaced.
-- Keeping Model Trainer judgements, confirmed frames, and runs across container recreation; without this mount every judgement you made in the Model Trainer tab is lost when the container is replaced.
 - Persisting VIS model files, custom model weights/checkpoints, downloaded checkpoints, and generated TensorRT engines across restarts.
 - Keeping the VLM weights (about 70 GB for the whole catalog), the active VLM model, and a saved HuggingFace token across restarts.
 
@@ -233,7 +234,7 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
 ffmpeg -stream_loop -1 -re -i "./videos/vi-scene-detection.mp4" -r 25 -g 50 -c:v libx264 -preset veryfast -b:v 2000k -c:a aac -b:a 128k -f flv "rtmp://localhost/live/scene_mystream1"
 ```
 
-6. To build a custom detector from your own footage, open the **Model Trainer** tab in the VIF Manager pages: a project takes two example images per class and an encoder (CLIP for classes that are different kinds of shot, DINOv2 for a detail or state within the same framing), scores a file from the On-Demand library, or a window of up to 4 hours on a running stream, against them, and queues the closest frames for you to confirm. The confirmed frames export as a labelled frame set: a zip with a `manifest.json` of image-level labels per group (the positives and a `<group>_none` negative for each judged frame) and the judged frames themselves. It carries no bounding boxes and no COCO annotations, so add boxes with an annotation tool before using it with the [RF-DETR fine-tuning notebook](how_to_finetune_rf_detr_on_detection_dataset.ipynb) in this repository; the resulting `.pth` goes into `./vis/models` and, after a VIS restart, appears as a custom model in the stream configuration. A live window replaces the stream's detector while it lasts (its webhooks and overlays pause) and returns the stream to its stored configuration when it ends or the Engine restarts; it never edits a stored configuration, and it covers the frames the stream could send. Projects are split across two mounts: on the Engine side the judgements, confirmed frames, and runs live under `./wse/model_trainer`; on the VIS side the examples and banks live under `./vis/model_trainer` (see [VIS deployment](docs/VIS_DEPLOYMENT.md#volumes)). To train a VLM adapter on the exported frames, start the `model-trainer` service (`docker compose --profile model-trainer up -d model-trainer`) and use the project's **Train** tab, or the command line; see [`docs/MODEL_TRAINER.md`](docs/MODEL_TRAINER.md).
+6. To build a custom detector from your own footage, open the **Model Trainer** tab in the VIF Manager pages: a project takes two example images per class and an encoder (CLIP for classes that are different kinds of shot, DINOv2 for a detail or state within the same framing), scores a file from the On-Demand library, or a window of up to 4 hours on a running stream, against them, and queues the closest frames for you to confirm. The confirmed frames export as a labelled frame set: a zip with a `manifest.json` of image-level labels per group (the positives and a `<group>_none` negative for each judged frame) and the judged frames themselves. It carries no bounding boxes and no COCO annotations, so add boxes with an annotation tool before using it with the [RF-DETR fine-tuning notebook](how_to_finetune_rf_detr_on_detection_dataset.ipynb) in this repository; the resulting `.pth` goes into `./vis/models` and, after a VIS restart, appears as a custom model in the stream configuration. A live window replaces the stream's detector while it lasts (its webhooks and overlays pause) and returns the stream to its stored configuration when it ends or the Engine restarts; it never edits a stored configuration, and it covers the frames the stream could send. Projects, judgements, confirmed frames and runs live in the resident `model-trainer` service's volume (`./model_trainer`; see [Model Trainer](docs/MODEL_TRAINER.md)). To train a VLM adapter on the exported frames, use the project's **Train** tab (the `model-trainer` service starts with the stack; set `MODEL_TRAINER_API_KEY` in `.env`), or the command line; see [`docs/MODEL_TRAINER.md`](docs/MODEL_TRAINER.md).
 
 7. For VLM analysis, start the full stack with the managed VLM engines and publish a stream matching the default `vlm.*` rule:
 
