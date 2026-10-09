@@ -101,6 +101,18 @@ For a stage that needs fewer frames, add
 `first`, `middle`, `last` and `every_nth`; the last requires `stride >= 2`
 and always includes the first and last captured frames.
 
+## Choose an execution mode
+
+| Mode | Who picks the next stage | Use it when |
+|---|---|---|
+| `linear` (default) | The stage order | Every window should run the same stages. |
+| `conditional` | Routing rules in the config | The next stage depends only on which classes the last stage found, how many, and how confidently. No code. |
+| `dynamic` | Your Java class, installed in Engine | The decision needs anything else: the text of a VLM answer, earlier stages in the window, earlier windows, time of day, or a system outside Video Intelligence. |
+
+Start with `conditional` when its rules can express the decision; move to
+`dynamic` when they cannot. Dynamic mode supports frame detectors only (no
+synthetic stages).
+
 ## Review only synthetic windows
 
 This conditional chain scores each video window and asks the VLM to review only
@@ -183,18 +195,27 @@ and detection.
 
 ## Let an installed Java listener choose the next stage
 
-Dynamic chains support frame detectors on both VOD and live streams. Configure
-the same stages with `mode: dynamic` and a decision listener:
+In dynamic mode, Engine calls your Java class after every stage execution, and
+the class returns the next stage to run, optionally on crops, or ends the window.
+Because it is ordinary Java running inside Engine, it can base that choice on
+anything it can compute or reach: the full result of the stage that just ran,
+including VLM text; the earlier executions in the window; state kept across
+windows; or a system outside Video Intelligence. Dynamic chains run on VOD and
+live streams and support frame detectors only.
+
+### A minimal listener
+
+This chain looks for people on every window but asks the VLM to describe them at
+most once per cooldown period, a limit that routing rules cannot express:
 
 ```json
 {
   "type": "chain",
   "mode": "dynamic",
   "decision_timeout_seconds": 5,
-  "dispatch_intermediate_rings": false,
   "decision_listener": {
     "class_name": "com.example.PersonReviewDecision",
-    "properties": { "reviewStage": "describe" }
+    "properties": { "cooldownSeconds": 60 }
   },
   "stages": [
     { "name": "objects", "detector": { "type": "object", "classes": ["person"] } },
@@ -204,7 +225,7 @@ the same stages with `mode: dynamic` and a decision listener:
 ```
 
 Compile your class against the installed Engine and plugin APIs, put its JAR in
-the Engine's library directory, and restart Engine before using it. For example:
+the Engine's library directory, and restart Engine before using it:
 
 ```java
 package com.example;
@@ -216,37 +237,321 @@ import com.wowza.wms.plugin.videointelligence.api.ChainDecisionContext;
 import com.wowza.wms.plugin.videointelligence.api.IVifChainDecisionListener;
 
 public class PersonReviewDecision implements IVifChainDecisionListener {
+    private long cooldownMs;
+    private long lastReviewMs;
+
     public static String getVersion() { return "1.0.0"; }
+
     public void onInit(IApplicationInstance app, IMediaStream stream,
-                       HashMap<String, Object> properties) {}
+                       HashMap<String, Object> properties) {
+        cooldownMs = 1000L * Long.parseLong(
+            String.valueOf(properties.getOrDefault("cooldownSeconds", 60)));
+    }
+
     public void onShutdown() {}
 
     public String decideNextStage(ChainDecisionContext context) {
-        if ("objects".equals(context.currentStageName) && context.sawClass("person"))
-            return String.valueOf(context.properties.getOrDefault("reviewStage", "describe"));
-        return null;
+        if (!"objects".equals(context.currentStageName) || !context.sawClass("person"))
+            return null;
+        long now = System.currentTimeMillis();
+        if (now - lastReviewMs < cooldownMs)
+            return null;
+        lastReviewMs = now;
+        return "describe";
     }
 }
 ```
 
-The callback always sees every execution. Returning a stage name advances;
-returning null completes the window. For crop decisions, override
-`decide(ChainDecisionContext)` and return
-`ChainDecision.advanceCropped(name, CropSpec.ofClasses("person"))`.
-The callback class must be public and concrete, implement
-`IVifChainDecisionListener`, and expose a public no-argument constructor.
-A static `getVersion()` is recommended for version reporting. Configuration
-reads and writes never execute its decisions; the class is checked before
-activating analysis. Use `currentStageName` to identify the configured stage and
-`executionIndex()` to count executions, including revisits.
+Returning a stage name runs that stage next; returning null, `"__done__"` or an
+unknown name completes the window. A stage may be chosen again (revisited), up
+to `max_rings` executions per window.
+
+The class must be public and concrete, implement `IVifChainDecisionListener`,
+and expose a public no-argument constructor. A static `getVersion()` is
+recommended for version reporting. Configuration reads and writes never execute
+its decisions; the class is checked before analysis starts.
+
+### What a decision can read
+
+`ChainDecisionContext` describes the execution that just finished:
+
+| Member | Contents |
+|---|---|
+| `currentStageName` | Configured name of the stage that just ran. |
+| `currentRingResult` | That execution's full result. `getDetections()` returns its detections, each with `className`, `confidence` and, for VLM stages, `reasoning`. A VLM in describe mode returns one detection whose class is `description` and whose `reasoning` holds the text. |
+| `priorRingResults` | The earlier executions in this window, oldest first, excluding the current one. Each carries its `stageName`. |
+| `stageNames()` | The path so far: the stage name of every execution in this window, ending with the current one. |
+| `executionIndex()` | Zero-based count of executions in this window, including revisits. |
+| `sawClass(name)`, `count(name)` | Whether, and how many, detections of the current execution have exactly that class name. Unlike routing rules, the comparison is case-sensitive. |
+| `streamName` | The stream name. For a VOD job, the job's stream name. |
+| `properties` | The configured `properties`, plus `stream_name` and `detector_type`. VOD jobs add `job_id` and `source_file`. This is the same map `onInit` received. |
+
+### Choosing crops
+
+To run the next stage on crops of the current execution's boxes, override
+`decide(ChainDecisionContext)` and return a `ChainDecision`:
+
+```java
+@Override
+public ChainDecision decide(ChainDecisionContext context) {
+    if (context.count("car") == 0)
+        return ChainDecision.done();
+    return ChainDecision.advanceCropped("plates",
+        CropSpec.ofClasses("car").withMinConfidence(0.5).withPadding(0.1).withMaxCrops(8));
+}
+```
+
+`ChainDecision.advance(name)` and `ChainDecision.done()` cover the uncropped
+cases. `CropSpec.all()` crops every class. Unset crop fields use the same
+defaults as a configured `crop`. Engine calls `decide`; its default
+implementation delegates to `decideNextStage`, so when you override `decide`,
+`decideNextStage` can simply return null. Crops come from object detections.
+A cropped object stage must have tracking and tiling disabled.
+
+### Instance lifecycle and threading
+
+- Engine creates one instance of your class per live stream and per VOD job, and
+  calls `onInit` once before the first window. Streams that name the same class
+  get separate instances, so instance fields hold per-stream state. To share
+  state across streams, use your own static or external store.
+- On a live stream, `onInit` receives the application instance and the stream.
+  For a VOD job the application instance is null and the stream answers only
+  `getName()`.
+- `onShutdown` runs when the stream stops, its analysis is disabled, or the VOD
+  job ends. Any edit to a running stream's chain detector restarts analysis:
+  the old instance is shut down and a new one initialized, so instance state does
+  not carry over. A resumed VOD job also starts with a new instance.
+- An instance receives one decision at a time, on an Engine worker thread rather
+  than the thread that called `onInit`. Fields that only your decision code
+  touches need no locking. State that your own threads (pollers, callbacks from
+  other systems) also update must be thread-safe, for example `volatile` fields
+  or concurrent collections.
+- Keep decisions fast and never wait on the network inside one. When a decision
+  exceeds `decision_timeout_seconds`, Engine interrupts it, completes the window
+  with the results obtained, and makes later decisions on a fresh thread. A
+  decision that ignores the interrupt can still be running when the next one
+  starts. Fetch outside data ahead of time instead, as in the next example.
+
+### Example: combine detections with an access-control system
+
+A loading dock has an access-control system that reports whether the door alarm
+is armed and when the last badge was presented. The goal: when someone is on
+camera while the door is armed and no badge was presented recently, check
+whether they are wearing a high-visibility vest; if nobody is, produce an
+incident description, at most once every two minutes per camera.
+
+The access-control system answers `GET <doorStateUrl>` with:
+
+```json
+{ "armed": true, "lastBadgeMs": 1760102345000 }
+```
+
+The chain:
+
+```json
+{
+  "type": "chain",
+  "mode": "dynamic",
+  "result_mode": "combined",
+  "decision_timeout_seconds": 1,
+  "decision_listener": {
+    "class_name": "com.example.DockAccessDecision",
+    "properties": {
+      "doorStateUrl": "http://access-control.example.internal/api/doors/dock-2",
+      "badgeGraceSeconds": 30,
+      "cooldownSeconds": 120
+    }
+  },
+  "stages": [
+    { "name": "people", "detector": { "type": "object", "classes": ["person"] } },
+    {
+      "name": "ppe",
+      "detector": {
+        "type": "vlm",
+        "mode": "detect",
+        "detect": { "classes": ["high-visibility vest"] }
+      },
+      "frame_selection": { "mode": "middle" }
+    },
+    {
+      "name": "incident",
+      "detector": { "type": "vlm", "mode": "describe" },
+      "frame_selection": { "mode": "middle" }
+    }
+  ]
+}
+```
+
+The listener:
+
+```java
+package com.example;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wowza.wms.application.IApplicationInstance;
+import com.wowza.wms.stream.IMediaStream;
+import com.wowza.wms.plugin.videointelligence.api.ChainDecision;
+import com.wowza.wms.plugin.videointelligence.api.ChainDecisionContext;
+import com.wowza.wms.plugin.videointelligence.api.CropSpec;
+import com.wowza.wms.plugin.videointelligence.api.IVifChainDecisionListener;
+import com.wowza.wms.plugin.videointelligence.message.DetectionData;
+
+public class DockAccessDecision implements IVifChainDecisionListener {
+    private static final long STALE_AFTER_MS = 10_000;
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private record DoorState(boolean armed, long lastBadgeMs, long fetchedMs) {}
+
+    private final HttpClient http = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(2)).build();
+    private volatile DoorState door = new DoorState(true, 0, 0);
+    private ScheduledExecutorService poller;
+    private URI doorStateUrl;
+    private long badgeGraceMs;
+    private long cooldownMs;
+    private long lastIncidentMs;
+
+    public static String getVersion() { return "1.0.0"; }
+
+    public void onInit(IApplicationInstance app, IMediaStream stream,
+                       HashMap<String, Object> properties) {
+        doorStateUrl = URI.create(String.valueOf(properties.get("doorStateUrl")));
+        badgeGraceMs = 1000L * longProperty(properties, "badgeGraceSeconds", 30);
+        cooldownMs = 1000L * longProperty(properties, "cooldownSeconds", 120);
+        poller = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "dock-door-poller");
+            thread.setDaemon(true);
+            return thread;
+        });
+        poller.scheduleWithFixedDelay(this::pollDoor, 0, 2, TimeUnit.SECONDS);
+    }
+
+    public void onShutdown() {
+        if (poller != null)
+            poller.shutdownNow();
+    }
+
+    public String decideNextStage(ChainDecisionContext context) { return null; }
+
+    @Override
+    public ChainDecision decide(ChainDecisionContext context) {
+        switch (context.currentStageName) {
+            case "people": return afterPeople(context);
+            case "ppe":    return afterPpe(context);
+            default:       return ChainDecision.done();
+        }
+    }
+
+    private ChainDecision afterPeople(ChainDecisionContext context) {
+        if (!found(context, "person"))
+            return ChainDecision.done();
+        DoorState state = door;
+        long now = System.currentTimeMillis();
+        boolean current = now - state.fetchedMs() < STALE_AFTER_MS;
+        if (current && !state.armed())
+            return ChainDecision.done();
+        if (current && now - state.lastBadgeMs() < badgeGraceMs)
+            return ChainDecision.done();
+        return ChainDecision.advanceCropped("ppe",
+            CropSpec.ofClasses("person").withMinConfidence(0.6).withPadding(0.15).withMaxCrops(4));
+    }
+
+    private ChainDecision afterPpe(ChainDecisionContext context) {
+        if (found(context, "high-visibility vest"))
+            return ChainDecision.done();
+        long now = System.currentTimeMillis();
+        if (now - lastIncidentMs < cooldownMs)
+            return ChainDecision.done();
+        lastIncidentMs = now;
+        return ChainDecision.advance("incident");
+    }
+
+    private void pollDoor() {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(doorStateUrl)
+                .timeout(Duration.ofSeconds(2)).GET().build();
+            JsonNode body = JSON.readTree(
+                http.send(request, HttpResponse.BodyHandlers.ofString()).body());
+            door = new DoorState(
+                body.required("armed").asBoolean(),
+                body.required("lastBadgeMs").asLong(),
+                System.currentTimeMillis());
+        } catch (Exception e) {
+            // Keep the last state; decisions treat it as unknown once it is stale.
+        }
+    }
+
+    private static boolean found(ChainDecisionContext context, String className) {
+        if (context.currentRingResult == null)
+            return false;
+        List<DetectionData> detections = context.currentRingResult.getDetections();
+        if (detections == null)
+            return false;
+        for (DetectionData detection : detections)
+            if (className.equalsIgnoreCase(detection.className))
+                return true;
+        return false;
+    }
+
+    private static long longProperty(HashMap<String, Object> properties, String name, long fallback) {
+        Object value = properties.get(name);
+        return value == null ? fallback : Long.parseLong(String.valueOf(value));
+    }
+}
+```
+
+What each window does:
+
+1. `people` runs on every window. With nobody in view, the window ends there.
+2. With someone in view, the listener reads the door state the poller fetched
+   most recently. A disarmed door, or a badge presented within the last 30
+   seconds, ends the window: the visit is authorized.
+3. Otherwise `ppe` asks the VLM about crops of up to four people from the
+   window's middle frame.
+4. If the VLM finds no vest, `incident` describes the full frame, unless an
+   incident was already described on this stream within the cooldown.
+
+Design points the example illustrates:
+
+- **Outside state is fetched ahead of time.** The poller refreshes the door state
+  every 2 seconds on its own thread and publishes it through a `volatile`
+  field, so a decision only reads memory and a slow access-control system cannot
+  push it past the 1-second `decision_timeout_seconds`.
+  It parses the response with Jackson, which Engine already provides, so the
+  listener JAR needs no extra dependencies.
+- **Choose how to fail.** When the door state is more than 10 seconds old, the
+  listener ignores it and reviews the person anyway. If false alarms cost you
+  more than missed entries, end the window instead.
+- **State lives in the instance.** The cooldown is per stream and starts over
+  whenever analysis restarts. The example uses wall-clock time, which suits live
+  streams; a VOD job is analyzed faster than real time.
+- **Image budget.** `frame_selection` is applied before cropping, so `ppe` sends
+  at most four images per window, within the VLM's per-request image limit.
+- **Results.** `result_mode: combined` delivers every execution of the window to
+  your event listeners, so a webhook receives the person boxes, the vest verdict
+  and the incident text together.
+
+### Timeouts, failures and intermediate events
 
 The timeout uses seconds with millisecond precision, from 0.001 through
 2147483.647. Timeout or callback failure finishes the current window with the
-results obtained; repeated callback exceptions disable that listener.
-`dispatch_intermediate_rings: true` also sends intermediate events to ordinary
-event listeners. They do not count as completed VOD windows or create resume
-checkpoints. Synthetic stages and conditional routing are unavailable in dynamic
-mode.
+results obtained. Five consecutive callback exceptions disable the listener and
+call its `onShutdown`. `dispatch_intermediate_rings: true` also sends
+intermediate events to ordinary event listeners. They do not count as completed
+VOD windows or create resume checkpoints. Synthetic stages and conditional
+routing are unavailable in dynamic mode.
 
 ## Save and reuse the definition
 
