@@ -1,0 +1,12 @@
+# Gives the standalone Model Trainer the host's NVIDIA GPUs. Needs the NVIDIA
+# container runtime; use it on top of docker-compose.standalone.yaml:
+#   docker compose -f docker-compose.standalone.yaml -f docker-compose.standalone.gpu.yaml --env-file .env.standalone up -d
+services:
+    model-trainer:
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          capabilities: [gpu, compute, utility]
+                          count: all

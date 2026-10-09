@@ -9,6 +9,11 @@ name: wowza-model-trainer-standalone
 #   docker compose -f docker-compose.standalone.yaml --env-file .env.standalone up -d
 #   open http://localhost:8090 and sign in with MODEL_TRAINER_API_KEY
 #
+# This file runs on a host without a GPU. With the NVIDIA container runtime,
+# add docker-compose.standalone.gpu.yaml to give the service the card (the
+# box backends and training need it):
+#   docker compose -f docker-compose.standalone.yaml -f docker-compose.standalone.gpu.yaml --env-file .env.standalone up -d
+#
 # The service speaks plain HTTP. Put a reverse proxy that terminates TLS in
 # front of it before the key or the session cookie crosses a network you do
 # not control (docs/MODEL_TRAINER.md, "TLS in front").
@@ -65,10 +70,3 @@ services:
             - ./model_trainer/models:/models
             # Hugging Face downloads (boxes backends, VLM training base)
             - ./model_trainer/hf-cache:/root/.cache/huggingface
-        deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          capabilities: [gpu, compute, utility]
-                          count: all

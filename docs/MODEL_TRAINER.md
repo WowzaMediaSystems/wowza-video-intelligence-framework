@@ -131,6 +131,15 @@ cp .env.standalone.example .env.standalone
 docker compose -f docker-compose.standalone.yaml --env-file .env.standalone up -d
 ```
 
+That runs on a host without a GPU: the encoders run on the CPU and the box backends and training are
+unavailable. On a host with the NVIDIA container runtime, add the GPU file to give the service the card;
+the box backends and training need it:
+
+```bash
+docker compose -f docker-compose.standalone.yaml -f docker-compose.standalone.gpu.yaml \
+  --env-file .env.standalone up -d
+```
+
 The page is at `http://<host>:8090`. Sign in with `MODEL_TRAINER_API_KEY`: the service exchanges it
 for a short browser session (`MODEL_TRAINER_SESSION_TTL_SECONDS`, 8 hours by default) so the key
 itself never sits in the browser. Changing the key ends every session. Everything is kept under
