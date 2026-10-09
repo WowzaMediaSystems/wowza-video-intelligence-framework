@@ -94,7 +94,8 @@ optional; without it no Model Trainer run can start.
 The VIS side of the connection (`MODEL_TRAINER_URL` and friends) is in
 [`VIS_DEPLOYMENT.md`](VIS_DEPLOYMENT.md#configuration-reference). The compose file mounts
 `./model_trainer` at `/model_trainer` (the project store in `projects/`, training jobs in `jobs/`)
-and `./model_trainer/models` at `/models`, where the service downloads and verifies its checkpoints.
+and `./model_trainer/models` at `/models`, where the service downloads and verifies its checkpoints (`ViT-B-16.pt` for CLIP and
+`dinov2-base.safetensors` for DINOv2; the RF-DETR bases are fetched the same way when training one).
 
 **Two Engines on one VIS** share the projects, runs and jobs of the service: either Engine sees a
 project's jobs and may cancel them. A run or job started from another Engine appears in the Manager

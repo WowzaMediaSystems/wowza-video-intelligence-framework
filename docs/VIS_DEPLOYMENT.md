@@ -179,7 +179,14 @@ SHA-256: `ff6a69a2641532518cbcd4497a2f246c67ac5e0a930cc7ae90e7fd200ddf5714`
 
 ### Model Trainer
 
-The model-trainer service loads its encoders from its own models volume (`./model_trainer/models`), not from `vis/models/`, and downloads each one at first use when it is missing. CLIP is the scene analysis checkpoint (`scene-detector.pth`, see above); copy it into `model_trainer/models/` as well. DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face, so an air-gapped deployment must pre-seed both before a project uses them:
+The model-trainer service loads its encoders from its own models volume (`./model_trainer/models`), not from `vis/models/`, and downloads each one at first use when it is missing. An air-gapped deployment must pre-seed both before a project uses them. CLIP is `ViT-B-16.pt`, which is not the scene analysis checkpoint (`scene-detector.pth`): VIS downloads it into `vis/models/` at first start, so copy `vis/models/ViT-B-16.pt` into `model_trainer/models/`, or fetch it directly (SHA-256 `5806e77cd80f8b59890b7e101eabd078d9fb84e6937f9e85e4ecb61988df416f`):
+
+```bash
+curl -o model_trainer/models/ViT-B-16.pt \
+  https://storage.vi.wowza.com/scene-detection/v1-0/ViT-B-16.pt
+```
+
+DINOv2 (`facebook/dinov2-base`, Apache 2.0) is downloaded from Hugging Face as `dinov2-base.safetensors`:
 
 ```bash
 curl -L -o model_trainer/models/dinov2-base.safetensors \
