@@ -31,7 +31,8 @@ publish.
   sets it to a placeholder as well. Use a long random value.
 - **A GPU.** Decoding a video needs none. The encoders, the box backends and training use the card
   when there is one; the idle service holds no GPU memory, and the encoders unload after a minute
-  of idleness.
+  of idleness. The main `docker-compose.yaml` reserves the card for the service; the standalone
+  compose runs on the CPU unless `docker-compose.standalone.gpu.yaml` is added (see [Standalone](#standalone)).
 - **Disk.** Projects, kept frames, dataset versions, checkpoints and training jobs live under
   `./model_trainer` next to the compose file, which can reach tens of gigabytes. The container runs
   as root, so give the files back to yourself afterwards (`sudo chown -R "$USER" model_trainer`).
