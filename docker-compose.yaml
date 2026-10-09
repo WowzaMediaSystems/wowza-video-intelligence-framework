@@ -226,9 +226,9 @@ services:
         # Model Trainer: the resident model-trainer service owns the projects,
         # scoring and selection; VIS forwards scoring to it and proxies its
         # HTTP routes. MODEL_TRAINER_API_KEY is the service's own key (set it
-        # in .env; the service refuses to start without one).
+        # in .env; docker compose refuses to run without it).
           - MODEL_TRAINER_URL=http://model-trainer.docker:5002
-          - MODEL_TRAINER_API_KEY=${MODEL_TRAINER_API_KEY:-}
+          - MODEL_TRAINER_API_KEY=${MODEL_TRAINER_API_KEY:?set MODEL_TRAINER_API_KEY in .env (docs/MODEL_TRAINER.md)}
         #   MODEL_TRAINER_SCORE_TIMEOUT_SECONDS  read timeout of one scoring
         #                                        call (default 30)
           - MODEL_TRAINER_SCORE_TIMEOUT_SECONDS
@@ -431,8 +431,9 @@ services:
     #     --out /model_trainer/jobs/cli/pairs
     #
     # It starts with the VIS profiles. MODEL_TRAINER_API_KEY is its own key
-    # (VIS sends it as X-API-Key) and has no default: with SECURE_MODE unset
-    # or true the service refuses to start without one. The image is built
+    # (VIS sends it as X-API-Key) and is mandatory: docker compose
+    # refuses to run without it (SECURE_MODE=false is the way to run keyless,
+    # with the variable set to any placeholder). The image is built
     # from the repository root of the Video Intelligence Service source, not
     # its video-intelligence-service/ directory (see docs/MODEL_TRAINER.md);
     # MODEL_TRAINER_IMAGE overrides the tag.
@@ -452,7 +453,7 @@ services:
         environment:
             HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
             SECURE_MODE: ${SECURE_MODE:-true}
-            MODEL_TRAINER_API_KEY: ${MODEL_TRAINER_API_KEY:-}
+            MODEL_TRAINER_API_KEY: ${MODEL_TRAINER_API_KEY:?set MODEL_TRAINER_API_KEY in .env (docs/MODEL_TRAINER.md)}
             VIS_URL: http://video-intelligence-service.docker:5001
             VIS_API_KEY: ${VIS_API_KEY:-}
             VLLM_API_KEY: ${VLLM_API_KEY:-}

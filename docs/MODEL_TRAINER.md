@@ -26,8 +26,9 @@ publish.
   Set `MODEL_TRAINER_IMAGE` to use another tag.
 - **A key.** `MODEL_TRAINER_API_KEY` is the service's own key, never the Video Intelligence
   Service's. Callers send it as `X-API-Key`. With `SECURE_MODE` unset or `true` the service refuses
-  to start without one; only `SECURE_MODE=false` runs it keyless, which suits an internal-only host.
-  Use a long random value.
+  to start without one; only `SECURE_MODE=false` runs it keyless, which suits an internal-only host. The main
+  `docker-compose.yaml` refuses to run while `MODEL_TRAINER_API_KEY` is empty, so a keyless host
+  sets it to a placeholder as well. Use a long random value.
 - **A GPU.** Decoding a video needs none. The encoders, the box backends and training use the card
   when there is one; the idle service holds no GPU memory, and the encoders unload after a minute
   of idleness.
@@ -80,7 +81,7 @@ optional; without it no Model Trainer run can start.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MODEL_TRAINER_API_KEY` | none | The service's key. Required. VIS gets the same value and sends it as `X-API-Key`; the Engine and the Manager never see it |
+| `MODEL_TRAINER_API_KEY` | none | The service's key. Required: `docker compose` refuses to run without it. VIS gets the same value and sends it as `X-API-Key`; the Engine and the Manager never see it |
 | `MODEL_TRAINER_IMAGE` | `wowza/wowza-video-intelligence-model-trainer:latest` | Image tag |
 | `MODEL_TRAINER_MAX_UPLOAD_MB` | `512` | Cap per upload body: an example image or a judged frame during a bank rebuild |
 | `MODEL_TRAINER_MAX_JOBS`, `MODEL_TRAINER_JOB_TTL_SECONDS` | `10`, `2592000` | Retention of finished training jobs |
