@@ -233,6 +233,7 @@ package com.example;
 import java.util.HashMap;
 import com.wowza.wms.application.IApplicationInstance;
 import com.wowza.wms.stream.IMediaStream;
+import com.wowza.wms.plugin.videointelligence.api.ChainDecision;
 import com.wowza.wms.plugin.videointelligence.api.ChainDecisionContext;
 import com.wowza.wms.plugin.videointelligence.api.IVifChainDecisionListener;
 
@@ -250,21 +251,22 @@ public class PersonReviewDecision implements IVifChainDecisionListener {
 
     public void onShutdown() {}
 
-    public String decideNextStage(ChainDecisionContext context) {
-        if (!"objects".equals(context.currentStageName) || !context.sawClass("person"))
-            return null;
+    public ChainDecision decide(ChainDecisionContext context) {
+        if (!"objects".equals(context.stageName()) || !context.sawClass("person"))
+            return ChainDecision.done();
         long now = System.currentTimeMillis();
         if (now - lastReviewMs < cooldownMs)
-            return null;
+            return ChainDecision.done();
         lastReviewMs = now;
-        return "describe";
+        return ChainDecision.advance("describe");
     }
 }
 ```
 
-Returning a stage name runs that stage next; returning null, `"__done__"` or an
-unknown name completes the window. A stage may be chosen again (revisited), up
-to `max_rings` executions per window.
+`ChainDecision.advance(name)` runs that stage next; `ChainDecision.done()`
+completes the window. Returning null or an unknown stage name also completes
+it, with a warning in the Engine log. A stage may be chosen again (revisited),
+up to `max_rings` executions per window.
 
 The class must be public and concrete, implement `IVifChainDecisionListener`,
 and expose a public no-argument constructor. A static `getVersion()` is
@@ -277,22 +279,33 @@ its decisions; the class is checked before analysis starts.
 
 | Member | Contents |
 |---|---|
-| `currentStageName` | Configured name of the stage that just ran. |
-| `currentRingResult` | That execution's full result. `getDetections()` returns its detections, each with `className`, `confidence` and, for VLM stages, `reasoning`. A VLM in describe mode returns one detection whose class is `description` and whose `reasoning` holds the text. |
-| `priorRingResults` | The earlier executions in this window, oldest first, excluding the current one. Each carries its `stageName`. |
-| `stageNames()` | The path so far: the stage name of every execution in this window, ending with the current one. |
+| `stageName()` | Configured name of the stage that just ran. |
+| `current()` | That execution's result, a `StageResult`. |
+| `history()` | The earlier executions in this window as `StageResult`s, oldest first, excluding the current one. |
+| `path()` | The stage name of every execution so far, oldest first, ending with the current stage. |
 | `executionIndex()` | Zero-based count of executions in this window, including revisits. |
-| `sawClass(name)`, `count(name)` | Whether, and how many, detections of the current execution have exactly that class name. Unlike routing rules, the comparison is case-sensitive. |
-| `streamName` | The stream name. For a VOD job, the job's stream name. |
-| `properties` | The configured `properties`, plus `stream_name` and `detector_type`. VOD jobs add `job_id` and `source_file`. This is the same map `onInit` received. |
+| `sawClass(name)`, `count(name)` | Whether, and how many, detections of the current execution have that class name — ignoring case, like routing rules. |
+| `streamName()` | The stream name. For a VOD job, the job's stream name. |
+| `properties()` | The configured `properties`, plus `stream_name` and `detector_type`. VOD jobs add `job_id` and `source_file`. This is the same map `onInit` received. |
+
+A `StageResult` carries `stageName()`, `detections()` (never null), the same
+`count`/`has` class queries, and `window()` with the covered media range
+(`fromMs()`/`toMs()`, and frame ids where the source has them). Each
+`Detection` carries `className()`, `confidence()` and `reasoning()`; detections
+from an object stage also carry `box()` (full-frame pixel coordinates) and
+`trackId()` when tracking. A VLM in describe mode yields one detection whose
+class is `description` and whose `reasoning()` holds the text.
+
+Because the context is built from these two small interfaces, your listener is
+unit-testable without Engine: construct a `ChainDecisionContext` from your own
+fake `StageResult`s and assert on the returned `ChainDecision`.
 
 ### Choosing crops
 
-To run the next stage on crops of the current execution's boxes, override
-`decide(ChainDecisionContext)` and return a `ChainDecision`:
+To run the next stage on crops of the current execution's boxes, return
+`ChainDecision.advanceCropped` with a `CropSpec`:
 
 ```java
-@Override
 public ChainDecision decide(ChainDecisionContext context) {
     if (context.count("car") == 0)
         return ChainDecision.done();
@@ -301,12 +314,9 @@ public ChainDecision decide(ChainDecisionContext context) {
 }
 ```
 
-`ChainDecision.advance(name)` and `ChainDecision.done()` cover the uncropped
-cases. `CropSpec.all()` crops every class. Unset crop fields use the same
-defaults as a configured `crop`. Engine calls `decide`; its default
-implementation delegates to `decideNextStage`, so when you override `decide`,
-`decideNextStage` can simply return null. Crops come from object detections.
-A cropped object stage must have tracking and tiling disabled.
+`CropSpec.all()` crops every class. Unset crop fields use the same defaults as
+a configured `crop`. Crops come from object detections. A cropped object stage
+must have tracking and tiling disabled.
 
 ### Instance lifecycle and threading
 
@@ -331,6 +341,23 @@ A cropped object stage must have tracking and tiling disabled.
   with the results obtained, and makes later decisions on a fresh thread. A
   decision that ignores the interrupt can still be running when the next one
   starts. Fetch outside data ahead of time instead, as in the next example.
+
+### Share one instance with an event listener
+
+When a `custom` event listener on the same stream names the decision listener's
+class, both roles get **one shared instance**, so instance fields can carry
+state between deciding stages and reacting to results — for example, posting an
+incident back to the external system the decisions already poll. The contract:
+
+- `onInit` runs twice on the shared object: the event-role call first, with the
+  event listener's `properties`, then the decision-role call with the decision
+  listener's. `onShutdown` runs once.
+- On a VOD job the event role is skipped unless your class overrides
+  `requires()` to declare what it actually needs, so only the decision-role
+  `onInit` runs there.
+- A config whose decision listener class matches **more than one** event
+  listener is refused at submit: with several candidates, which one would share
+  its instance (and whose properties `onInit` would see) is ambiguous.
 
 ### Example: combine detections with an access-control system
 
@@ -393,7 +420,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashMap;
-import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -406,7 +432,6 @@ import com.wowza.wms.plugin.videointelligence.api.ChainDecision;
 import com.wowza.wms.plugin.videointelligence.api.ChainDecisionContext;
 import com.wowza.wms.plugin.videointelligence.api.CropSpec;
 import com.wowza.wms.plugin.videointelligence.api.IVifChainDecisionListener;
-import com.wowza.wms.plugin.videointelligence.message.DetectionData;
 
 public class DockAccessDecision implements IVifChainDecisionListener {
     private static final long STALE_AFTER_MS = 10_000;
@@ -443,11 +468,8 @@ public class DockAccessDecision implements IVifChainDecisionListener {
             poller.shutdownNow();
     }
 
-    public String decideNextStage(ChainDecisionContext context) { return null; }
-
-    @Override
     public ChainDecision decide(ChainDecisionContext context) {
-        switch (context.currentStageName) {
+        switch (context.stageName()) {
             case "people": return afterPeople(context);
             case "ppe":    return afterPpe(context);
             default:       return ChainDecision.done();
@@ -455,7 +477,7 @@ public class DockAccessDecision implements IVifChainDecisionListener {
     }
 
     private ChainDecision afterPeople(ChainDecisionContext context) {
-        if (!found(context, "person"))
+        if (!context.sawClass("person"))
             return ChainDecision.done();
         DoorState state = door;
         long now = System.currentTimeMillis();
@@ -469,7 +491,7 @@ public class DockAccessDecision implements IVifChainDecisionListener {
     }
 
     private ChainDecision afterPpe(ChainDecisionContext context) {
-        if (found(context, "high-visibility vest"))
+        if (context.sawClass("high-visibility vest"))
             return ChainDecision.done();
         long now = System.currentTimeMillis();
         if (now - lastIncidentMs < cooldownMs)
@@ -491,18 +513,6 @@ public class DockAccessDecision implements IVifChainDecisionListener {
         } catch (Exception e) {
             // Keep the last state; decisions treat it as unknown once it is stale.
         }
-    }
-
-    private static boolean found(ChainDecisionContext context, String className) {
-        if (context.currentRingResult == null)
-            return false;
-        List<DetectionData> detections = context.currentRingResult.getDetections();
-        if (detections == null)
-            return false;
-        for (DetectionData detection : detections)
-            if (className.equalsIgnoreCase(detection.className))
-                return true;
-        return false;
     }
 
     private static long longProperty(HashMap<String, Object> properties, String name, long fallback) {
