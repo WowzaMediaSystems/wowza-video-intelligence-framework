@@ -34,10 +34,10 @@ Add  `--help` to the above commands to see all the options available.
 	* commons-text-1.15.0.jar
 	* jakarta.websocket-api-2.1.1.jar
 	* jakarta.websocket-client-api-2.1.1.jar
-	* jetty-ee10-websocket-jakarta-client-12.1.9.jar
-	* jetty-ee10-websocket-jakarta-common-12.1.9.jar
-	* jetty-websocket-core-client-12.1.9.jar
-	* jetty-websocket-core-common-12.1.9.jar
+	* jetty-ee10-websocket-jakarta-client-12.1.11.jar
+	* jetty-ee10-websocket-jakarta-common-12.1.11.jar
+	* jetty-websocket-core-client-12.1.11.jar
+	* jetty-websocket-core-common-12.1.11.jar
 
 * copy the lib-native `.so` or `.dll` files to the WSE lib-native folder, depending on your architecture
     * x86_64
@@ -120,9 +120,9 @@ Add  `--help` to the above commands to see all the options available.
 			<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
 		</Module>
 		<Module>
-			<Name>ID3AndPDTInjectionModule</Name>
-			<Description>ID3AndPDTInjectionModule</Description>
-			<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
+			<Name>MetadataInjectionModule</Name>
+			<Description>MetadataInjectionModule</Description>
+			<Class>com.wowza.wms.plugin.metadatainjection.MetadataInjectionModule</Class>
 		</Module>
 		<Module>
 			<Name>OverlayModule</Name>
@@ -231,13 +231,61 @@ Update the Default.json `vi_service_url` and `vi_service_api_key` to point to th
 | catch_up_max_behind_seconds | null (=2s) | **Scene/VLM:** how far behind live (seconds) detections may fall before catch-up skips to live. **Object:** not used — object latency is bounded by the `inference_fps` throttle toward the sustainable rate, and the slow-inference warning fires at a fixed ~1s single-frame round-trip. For **Scene/VLM**, unset derives to the buffer's design headroom (~2s), bounding latency near `inference_time + 2s`; lower for tighter latency, raise to tolerate more lag. |
 | auto_frame_throttle | false | Opt-in frame-rate throttle (default **off**, all modes): reduce `inference_fps` when inference falls behind. **Object detection:** its latency lever — keeps the analyzed frame near live and contiguous for the tracker. **Scene/VLM:** a pre-step that throttles before `catch_up_to_live` resorts to skipping, for fewer coverage gaps. Renamed from `auto_scene_frame_throttle` (still accepted on read). |
 | use_transcoder| true | use transcoder to grab frames |
-| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true. **VLM:** each analysis window is one request carrying `duration × inference_fps` images, and the VLM endpoint caps images per prompt (the bundled vLLM sidecar allows 8) — keep `duration × inference_fps` at 8 or below (e.g. 2 fps × 2s, the example config's values). `-1` resolves to the source frame rate and will exceed the cap, so it is not supported for VLM; the Stream Manager UI enforces this. |
+| inference_fps | -1 | number of frames to send to inferencing per second when use_transcoder = true. **VLM:** each analysis window is one request carrying `duration × inference_fps` images, and the VLM endpoint caps images per prompt (the managed models allow 8) — keep `duration × inference_fps` at 8 or below (e.g. 2 fps × 2s, the example config's values). `-1` resolves to the source frame rate and will exceed the cap, so it is not supported for VLM; the Stream Manager UI enforces this. |
 | inference_video_height| -1 | height of the video to be inferenced. -1 = source, 0 = model, >0 actual value |
 | frame_grab_interval | 1 | number of seconds to grab a frame when use_transcoder = false |
 
+#### The managed VLM models in the Manager
+
+When the Video Intelligence Service (VIS) manages its own VLM engines (the framework's `vlm` compose profile, or the Linux `-vlm` package), the VLM Analysis section of the VIF configuration page (and the VOD analysis editor) gains controls for them. Nothing here is stored in a stream's config beyond `endpoint_url` and `model_name`; the rest is read from VIS through the Engine's `/v2/vif/vlm/*` routes.
+
+- **VLM Server.** A select offers **Managed by this deployment** (the endpoint VIS announces, `http://video-intelligence-service.docker:5001/v1` in the framework compose) and **Your own endpoint (advanced)**, where the address field appears. It is offered only when VIS reports engine capability. Otherwise the field is the whole choice and **Model Name** is a static list of suggested names plus **Other…**.
+- **Model Name.** On the managed endpoint the dropdown lists the deployment's models, each labelled with its state and tier, for example `Gemma 3 4B Instruct (status: asleep · hot tier)`. The first choice, **Default**, names what it inherits: `Default (follows <label>)` stores no model of its own, so the stream runs what the global block names — an empty `model_name` there, which VIS resolves to the active model that carries the Default marker on every request, so moving the Default carries the stream along. A stream can also follow the Default of its own, with a `Follow the Default model` entry that stores the empty `model_name` on the stream itself; it keeps following when the global block later pins a model. A default set in **Stream Config Defaults** is inherited unless the stream picks a model. Picking a model by name **pins** the stream to it, and a pinned stream degrades (`degraded: true`, the **AI offline** badge) while its model is not in the active set (it reads `not active: add it in Stream Config Defaults → VLM`).
+- **Statuses.** The **?** beside the dropdown explains them: `active`/`ready` (in the active set and serving), `default` (the active model streams with no model of their own follow), `not active` (outside the active set), `asleep` (hot tier: weights in host RAM, wakes in 1 to 2 s), `parked` (cold tier: no engine process, cold start in 1 to 2 min), `loading` (downloading or compiling), `starting`/`absent` (its container is starting or not running), `not deployed` (a custom model with no slot serving it), `quarantined` (a wake failed; it cold-starts until VIS restarts) and `failed` (its last load failed; see the engine logs). A model that does not fit the host says so.
+- **HuggingFace token.** Under a gated model (Gemma), a **HuggingFace token** field takes a read token for an account that accepted the model's license. **Save** checks it against HuggingFace and keeps it for the engines: VIS stores it on its state volume, the Engine keeps nothing, no container is recreated and the next load uses it. Saving and removing it are for Manager admins. The field then shows `***` with a **Remove** button; the value is never shown again or returned by any route. A token set as `HF_TOKEN` in the deployment's `.env` wins over this one. The token belongs to the deployment, not to the stream being edited.
+- **Engine logs.** An **Engine logs** disclosure under the dropdown shows the last lines of any engine's output, with an engine picker and **Refresh**; it refreshes by itself while open. It opens on the engine that is loading, else the Default's. Open it when a download stalls or a start fails.
+- **VLM section of Stream Config Defaults.** The models the deployment serves are configured once, for every stream and job, in the **VLM** section of the Stream Config Defaults page (shown when VIS reports engine capability), not in any config. It has its own **Apply**, separate from **Save all changes**, which writes the whole overlay file in one call and does not restart VIS. Only a Manager admin gets the controls; everyone else sees the section read-only, with the tuning arguments hidden.
+  1. **Active models.** The models that serve at once, each with its model, **GPU** (from `GET /vlm/gpus`), a **Default** radio (an enabled adapter of an active model has its own radio under the model, so an adapter can be the Default), its VRAM **minimum** and the **recommendation** (read-only, from VIS; a model not yet added shows the catalog's estimate), an optional **value** (a fraction from 0 to 1 of the GPU's memory vLLM may take; empty uses the recommendation), and its status. **+ Add model** adds a row (the first model whose minimum fits the emptiest GPU) and × removes one. A budget bar per GPU shows the minimums and what is chosen against the card, goes red when the set does not fit, and **Apply** stays disabled until it does; a share typed on one model counts the others on that card at their minimum until VIS plans the set, and where the page cannot know it leaves the verdict to VIS. Changing a member's GPU or share restarts that model.
+  2. **Configs using a model that is not active.** The VLM configs that pin a model outside the active set, with a link to each. They keep running as before and their streams degrade until the model is added or the config names another one.
+  3. **All models.** For every model of the catalog, active or not: tier (Auto, Hot or Cold), an **Enabled** toggle, **Tuning** (GPU memory utilization, max model length, max concurrent sequences, max batched tokens, image processor options, images per request and each tier's extra vLLM arguments; the shipped value is the placeholder and **Reset** returns to it), and **Enable LoRA** with its module prefixes prefilled from the catalog (an FP8 base also shows a **verified on FP8** checkbox and its warning). **Reload now** cold-starts a model whose running engine keeps its old settings (one to two minutes, its streams degrade meanwhile). **Keep every model cold (saves host RAM)** turns `force_all_cold` on or off.
+  4. **Add custom model.** A form with the overlay entry's fields. Saving a custom model needs a manual restart of VIS: until then it is listed as pending restart, with **Edit** and **Remove**, and a banner says `Restart VIS to add <model>` with the slots used. When every slot is used the form is disabled.
+  5. **LoRA adapters.** Add one on a base with LoRA enabled by **Upload files** (a zip or tar with `adapter_config.json` and `adapter_model.safetensors`, with upload progress; the rank is read from the uploaded config) or by a directory already under the weights volume. Disable or remove one; removing an uploaded adapter offers to delete its files.
+  6. **Apply.** One `PUT /vlm/overlay` with `If-Match`. It lists what applied, what is reload pending, what was deferred, and what waits for a restart. Members added to the active set load in the background and the result follows them until they serve or fail. If the file changed on disk meanwhile, nothing is written and **Reload settings** reads it again; a rejected value is shown beside its field with the service's reason.
+- **Verify.** The button beside the address lists the models the endpoint serves. On the managed endpoint that is every model that is awake, and the result is reported against your selection without changing it; on your own endpoint a single served model that differs from your selection is adopted.
+
+The routes behind these controls, all under `/v2/vif` on the Engine's REST port: `GET /vlm/models` (the catalog, states, tiers, the active set and its Default), `POST /vlm/activate` (the model id in the body), `GET /vlm/status` (engine states and log tails), `POST`/`DELETE /vlm/hf-token`, and for the models' settings `GET`/`PUT /vlm/overlay`, `POST /vlm/overlay/reload`, `POST /vlm/reload` (the model id in the body), `GET /vlm/gpus`, `POST /vlm/adapters` (the adapter archive as the raw body, `?id=&base=&label=`) and `DELETE /vlm/adapters/{id}` (the reads are open to every Manager user; the writes are for Manager admins: activate, the model reload, the HuggingFace token, the overlay writes and reload, and the adapter upload and delete). `POST /vlm/activate` makes an already active model the Default. The reads each answer 200 with `engine_capability: false` when VIS manages no engines. See the framework's VLM guide for deployment, tiers and troubleshooting.
+
+#### Upgrading to the managed VLM engines, and back
+
+From this release the global `vlm_analysis` block defaults to the Video Intelligence Service's managed endpoint with `"model_name": ""`: an empty model follows the Default of the active set, wherever it moves. A new stream config names no model of its own and inherits the global block's.
+
+On the first load after the Video Intelligence Service has reported managed engines (the Engine asks it when a VLM stream starts, and the Manager reads it on the stream pages), VIC migrates the configs in `conf.modules/vif/` once. A service that predates the managed engines refuses an empty model, so until one reports them the configs stay as they are:
+
+- **Configs on the old sidecar move.** Every VLM block whose `endpoint_url` is exactly the old bundled sidecar (`http://vlm.docker:8000/v1` or `http://vlm:8000/v1`) moves to the managed endpoint, `http://video-intelligence-service.docker:5001/v1`, with `"model_name": ""`, whatever model it named. The old sidecar served a single model, so following the active one is the equivalent. This covers the global block and every per-stream config. Only `vlm_analysis` blocks move: a `vlm_verification` block, a chain stage's `vlm_analysis` and a Verify review's model keep the sidecar address, which the service serves as its managed endpoint.
+- **The shipped global follows too.** A global block with no endpoint that still names the shipped `Qwen/Qwen3-VL-4B-Instruct-FP8` also moves to `"model_name": ""`.
+- **Everything else stays as it is.** That includes any other endpoint, and a stream config that names no endpoint and inherits the global.
+
+Each migrated file gets one INFO line in the log, and a file that was pinned to a model other than the shipped one gets a WARN line too: it follows the active model now, and naming the model again pins it back.
+
+Beside the configs, in `conf.modules/vif/`:
+
+- `.vlm-follow-active-migrated` marks that the migration has run, whatever it found. Later loads skip it, so a config set back to the old values afterwards keeps them. Do not delete it: without it, the next load would check every config again.
+- `<file>.pre-follow-active` (for example `Default.json.pre-follow-active` or `live_cam1.json.pre-follow-active`) is each file exactly as it was before the migration rewrote it. It is written only for files that changed, and never overwritten.
+
+**Downgrading.** Earlier releases do not accept an empty `model_name`, so a VLM stream following the active model fails after a rollback. Stop the Engine and restore every backup in `conf.modules/vif/` before starting the older release:
+
+```shell
+for f in *.pre-follow-active; do [ -e "$f" ] && cp "$f" "${f%.pre-follow-active}"; done
+rm -f .vlm-follow-active-migrated
+```
+
+Deleting the marker along with the restore lets a later upgrade migrate the restored files again; with it in place they would keep the sidecar address.
+
+Configs you saved after the upgrade that follow the active model, on their own or through the "Default" model choice, also end up with an empty model. Name a model in them, and in the global block, before rolling back.
+
 #### VLM Analysis Modes (Detect / Describe / Custom)
 
-The standalone `detector_type="vlm"` analyzer issues **exactly one VLM request per analysis window**. The bundled vLLM sidecar runs without prefix caching, so each request re-runs the full vision-token prefill over the window's frames — adding classes to one shared prompt is cheap; fanning out per-class requests is not. The Stream Manager UI (behind `?vlm=true`) exposes three modes. The mode is a UI construct: the VI service infers behavior from *which fields the config sets*, so no mode discriminator is sent on the wire.
+The standalone `detector_type="vlm"` analyzer issues **exactly one VLM request per analysis window**. The bundled vLLM engines run without prefix caching, so each request re-runs the full vision-token prefill over the window's frames — adding classes to one shared prompt is cheap; fanning out per-class requests is not. The Stream Manager UI (behind `?vlm=true`) exposes three modes. The mode is a UI construct: the VI service infers behavior from *which fields the config sets*, so no mode discriminator is sent on the wire.
 
 - **Detect** (default) — set `class_names` (short words/phrases, open vocabulary) and the analyzer returns a per-class verdict, surfacing only the classes actually visible as `{class_name, reasoning}` detections. Optionally attach **`class_hints`** — a map of *class name → hint* that disambiguates a class (e.g. `{"fire": "visible open flame, not red lighting"}`). Hints are **optional** and **render-only**: each is inlined next to its class in the prompt at a cost of only a few prompt tokens, and they never change the result shape. In the UI, Detect is a per-class repeater — one row per class, each with an optional hint field.
 - **Describe** — set no `class_names` and no prompts. The analyzer returns a free-form written description of each window (see the fallback note below).
@@ -326,7 +374,7 @@ Every failure records an `error_cause` alongside its `error`, on the job view an
 | --- | --- | --- |
 | transient, short | `response_timeout`, `disconnected`, `detector_restarted`, `send_failed` | 5s, 15s, 30s |
 | transient, slow | `endpoint_degraded`, `not_connected`, `connect_failed`, `detector_error` | 15s, 1m, 5m |
-| never retried | `config_drift`, `coverage_shortfall`, `source_error`, `store_error`, `engine_restart` | — |
+| never retried | `endpoint_rejected`, `config_drift`, `coverage_shortfall`, `source_error`, `store_error`, `engine_restart` | — |
 
 Three attempts, and each failure picks its own backoff — a dropped connection waits 5s, and if the retry finds the service still down (`connect_failed`) the next wait is a minute, then five. An attempt that got *further* than the one before it starts the count again, so a long file with the occasional blip is never starved out. After the third the job stays `failed` with everything it had analysed, and a manual resume picks it up from there.
 
@@ -424,7 +472,7 @@ with an appender that creates a rolling log file named `vif4j_access.log`:
 - {_appName_}: name of the app the stream is running on
 - {_streamName_}: name of the stream or stream pattern for the configuration
 
-On-demand analysis is served by the v2 API alone — `/v2/vif/vod/files`, `/v2/vif/vod/jobs[/{jobId}[/cancel|/resume|/results|/results/file|/thumbnail]]`, and the two settings documents `/v2/vif/persist/vod-settings` and `/v2/vif/persist/secrets`. See [`api/README.md`](api/README.md) for the orientation and copy-paste examples, [`docs/VOD_GUIDE.md`](docs/VOD_GUIDE.md) for the walkthrough, and [`api/openapi.yaml`](api/openapi.yaml) for the reference.
+On-demand analysis is served by the v2 API alone — `/v2/vif/vod/files`, `/v2/vif/vod/jobs[/{jobId}[/cancel|/resume|/results|/results/file|/thumbnail]]`, and the two settings documents `/v2/vif/persist/vod-settings` and `/v2/vif/persist/secrets`. See the [VOD guide](VOD_GUIDE.md) for the walkthrough.
 
 ### API supports methods/verbs
 `GET | POST | PUT | DELETE`
