@@ -54,6 +54,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
 - [Synthetic Video Detection (Optional)](#synthetic-video-detection-optional)
+- [Chain analysis through the v2 API](docs/MODEL_CHAINING.md)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
