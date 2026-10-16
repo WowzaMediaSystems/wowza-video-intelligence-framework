@@ -1,14 +1,67 @@
-# Chains through the v2 API
+# Model chaining
 
-A chain runs named detector stages over the same captured media. Use it wherever
-v2 accepts a `config.detector`: inline VOD jobs, saved stream group configs,
-per-stream overrides, or a running stream's detector.
+A chain is a detector built out of other detectors. Instead of running one
+model on a stream, a chain runs named **stages** — each an ordinary `scene`,
+`object`, `vlm`, `motion` or `synthetic` detector — over the same captured
+media, and decides for every window which stages actually run. The usual reason
+is cost: run a cheap stage on everything and wake an expensive one only when
+the cheap one saw something. Ask a VLM about a frame only when motion was
+detected, review a clip only when it scored as synthetic, read a license plate
+only when a car is in view.
 
-Stages can use `scene`, `object`, `vlm`, or `synthetic`. A frame-only chain
-works on VOD and live streams. Including synthetic video detection makes the
-chain VOD-only. Chains and Verify cannot be nested inside a stage.
+Use a chain wherever the v2 API accepts a `config.detector`: inline VOD jobs,
+saved stream group configs, per-stream overrides, or a running stream's
+detector. A frame-only chain works on VOD and live streams; a chain containing
+a synthetic stage is VOD-only. Chains and Verify cannot be nested inside a
+stage.
 
-## Configure endpoints once
+## Table of contents
+
+- [How a chain runs](#how-a-chain-runs)
+- [Before you start: detector baselines and endpoints](#before-you-start-detector-baselines-and-endpoints)
+- [Run a first chain](#run-a-first-chain)
+- [Choose an execution mode](#choose-an-execution-mode)
+- [Conditional mode: route on what a stage found](#conditional-mode-route-on-what-a-stage-found)
+- [Wake expensive stages on motion](#wake-expensive-stages-on-motion)
+- [Crop detected regions](#crop-detected-regions)
+- [Dynamic mode: let an installed Java listener choose the next stage](#dynamic-mode-let-an-installed-java-listener-choose-the-next-stage)
+- [Service compatibility](#service-compatibility)
+- [Save and reuse the definition](#save-and-reuse-the-definition)
+- [Read results and resume](#read-results-and-resume)
+- [Latency](#latency)
+- [Live streams](#live-streams)
+
+## How a chain runs
+
+Everything a detector does happens inside an **analysis window**: the unit of
+media the Engine captures and sends for analysis. Depending on the detector, a
+window is a single frame, a batch of frames covering a few seconds, or an
+encoded clip. A chain adds one idea on top: within each window, several stages
+can take their turn on that same captured media.
+
+Every window starts at the chain's **entry stage**, `stages[0]`. Each time a
+stage runs is one **execution** — called a **ring** in stored results. After an
+execution, the chain picks what happens next: the next stage in order (linear
+mode), a routing rule's target (conditional mode), or whatever your Java code
+returns (dynamic mode) — until a stage ends the window or nothing is left to
+run. The sequence actually taken is the window's **path**. It can differ from
+window to window, skip stages, and revisit a stage; `max_rings` bounds the
+executions per window.
+
+The entry stage fixes the **capture cadence** for the whole chain:
+
+| Entry stage | Cadence | A window is |
+|---|---|---|
+| `object` or `motion` | frame | one frame per request |
+| `scene` or `vlm` | window | the frames captured over `window_seconds` |
+| any `synthetic` stage in the chain | clip | an encoded clip of the window (VOD only) |
+
+When a window ends, its results flow where a detector's results always flow:
+each VOD window is stored as one result row, and event listeners — webhooks,
+ID3 tags, log files, overlays — receive the final stage's result, or every
+execution when `result_mode` is `combined`.
+
+## Before you start: detector baselines and endpoints
 
 Use matching Engine plugin and Video Intelligence Service versions that support
 the chains API. Configure the ordinary detector baselines first; each stage
@@ -49,7 +102,7 @@ A stage may override any ordinary detector setting, including endpoints,
 thresholds, object tracking and VLM generation settings. The API never echoes
 stage credentials.
 
-## Run a simple chain
+## Run a first chain
 
 List the files available under the Engine's content directory:
 
@@ -91,10 +144,9 @@ The response includes `job_id`, `state` and `detector_type: chain`.
 Without a mode, stages run in their listed order. The second stage sees the same
 captured media; it does not automatically receive crops of the detected people.
 
-The entry stage fixes capture cadence: an object-first chain uses frame cadence;
-scene- or VLM-first chains use window cadence. A synthetic stage anywhere makes
-the chain use clip windows. Put capture settings such as `window_seconds` and
-`inference_fps` in the parent's `config.processing`, never inside a stage.
+Put capture settings such as `window_seconds` and `inference_fps` in the
+parent's `config.processing`, never inside a stage — the chain's cadence comes
+from its entry stage (see [How a chain runs](#how-a-chain-runs)).
 
 For a stage that needs fewer frames, add
 `"frame_selection": {"mode": "middle"}` to its stage wrapper. Modes are `all`,
@@ -113,7 +165,7 @@ Start with `conditional` when its rules can express the decision; move to
 `dynamic` when they cannot. Dynamic mode supports frame detectors only (no
 synthetic stages).
 
-## Review only synthetic windows
+## Conditional mode: route on what a stage found
 
 This conditional chain scores each video window and asks the VLM to review only
 windows classified as synthetic:
@@ -164,6 +216,41 @@ conditional stage without routing falls through to the next stage. Omitting
 `max_rings` limits executions per window to 8 by default, with a range of
 1–64. It is a loop bound, not the number of configured stages.
 
+## Wake expensive stages on motion
+
+A motion entry stage is a cheap gate: it compares consecutive frames on the CPU and
+reports each moving region as a detection with class `motion`. A quiet frame yields no
+detections, no rule matches, and the chain ends before any downstream stage runs:
+
+```json
+{ "type": "chain", "mode": "conditional", "stages": [
+    { "name": "watch", "detector": { "type": "motion" },
+      "routing": { "rules": [{ "classes": ["motion"] }],
+                   "on_match": { "stage": "describe" },
+                   "on_no_match": { "end": true } } },
+    { "name": "describe", "detector": { "type": "vlm", "mode": "describe" },
+      "frame_selection": { "mode": "middle" } } ] }
+```
+
+`motion → object` and `motion → scene` compose the same way. A motion-first chain
+runs at frame cadence, so `describe` above is asked once per moving frame. Motion is
+only supported as the entry stage (`stages[0]`) and cannot be cropped onto. Object
+tracking still requires an object-first chain: an object stage after a motion entry
+must set `"tracking": {"method": "none"}`.
+
+No route may target the motion entry stage, including its own `routing`: a revisited
+motion stage re-differences the same window and can never fire.
+
+A motion-entry chain cannot contain a synthetic stage: a synthetic stage switches the
+chain to clip-window transport, which the motion entry does not support yet.
+
+Motion `confidence` is the region's net track displacement as a fraction of the frame
+diagonal, typically 0.02–0.3. It is **not** a quality score. Tune the gate with the
+motion detector's `sensitivity` (1–10, default 5), `min_displacement` (default 0.02)
+and `merge_distance` (default 0.08), not with a routing `min_confidence`; use
+`min_count` to require several moving regions. The motion detector itself is covered
+in the [Motion Detection guide](MOTION_DETECTION.md).
+
 ## Crop detected regions
 
 To run a stage on the preceding execution's boxes, add this to its stage wrapper:
@@ -183,8 +270,10 @@ Crop defaults are all classes, confidence 0, padding 0 and at most 16 crops per
 source frame. When there are more boxes, the highest-confidence boxes are kept.
 No matching boxes produces an empty stage result.
 
-The first stage and synthetic stages cannot crop. In linear mode, the preceding
-stage must be an object detector. A cropped object stage must disable tracking
+The first stage, motion stages and synthetic stages cannot crop. In linear mode, the preceding
+stage must be an object or motion detector, the two types whose detections carry boxes.
+A stage after a motion entry crops to the moving regions, with `min_confidence`
+gating parents by their net displacement. A cropped object stage must disable tracking
 and tiling. Object tracking also requires an object-first chain with no synthetic
 stage; set `"tracking": {"method": "none"}` when a stage's inherited tracking
 would otherwise violate that requirement.
@@ -193,7 +282,7 @@ Crop child coordinates refer to the original full frame. The result's
 `source_ring_index` and `source_detection_index` identify the parent execution
 and detection.
 
-## Let an installed Java listener choose the next stage
+## Dynamic mode: let an installed Java listener choose the next stage
 
 In dynamic mode, Engine calls your Java class after every stage execution, and
 the class returns the next stage to run, optionally on crops, or ends the window.
@@ -280,23 +369,33 @@ its decisions; the class is checked before analysis starts.
 | Member | Contents |
 |---|---|
 | `stageName()` | Configured name of the stage that just ran. |
-| `current()` | That execution's result, a `StageResult`. |
+| `current()` | That execution's result, a `StageResult`. Never null. |
 | `history()` | The earlier executions in this window as `StageResult`s, oldest first, excluding the current one. |
 | `path()` | The stage name of every execution so far, oldest first, ending with the current stage. |
 | `executionIndex()` | Zero-based count of executions in this window, including revisits. |
-| `sawClass(name)`, `count(name)` | Whether, and how many, detections of the current execution have that class name — ignoring case, like routing rules. |
+| `sawClass(name)`, `count(name)` | Whether, and how many, detections of the current execution have that class name — ignoring case, like routing rules and crop classes. |
 | `streamName()` | The stream name. For a VOD job, the job's stream name. |
 | `properties()` | The configured `properties`, plus `stream_name` and `detector_type`. VOD jobs add `job_id` and `source_file`. This is the same map `onInit` received. |
 
 A `StageResult` carries `stageName()`, `detections()` (never null), the same
 `count`/`has` class queries, and `window()` with the covered media range
-(`fromMs()`/`toMs()`, and frame ids where the source has them). Each
-`Detection` carries `className()`, `confidence()` and `reasoning()`; detections
-from an object stage also carry `box()` (full-frame pixel coordinates) and
-`trackId()` when tracking. A VLM in describe mode yields one detection whose
-class is `description` and whose `reasoning()` holds the text.
+(`fromMs()`/`toMs()`, and frame ids where the source has them).
 
-Because the context is built from these two small interfaces, your listener is
+Every `Detection` carries `kind()` — `"object"`, `"scene"`, `"vlm"`,
+`"synthetic"` or `"motion"`, with constants on `Detection` — next to
+`className()` and `confidence()`. What a detector adds beyond those lives on
+its typed view: `object()` exposes `box()` (full-frame pixel coordinates),
+`trackId()` and the crop-source anchors for object stages, and `vlm()` exposes
+`reasoning()` and `data()` for VLM stages; each view is null for detections of
+any other kind. A VLM in describe mode yields one detection whose class is
+`description` and whose `vlm().reasoning()` holds the text; a VLM stage with a
+custom `response_schema` yields one detection whose `vlm().data()` carries the
+whole schema output. A motion entry stage's detections are always class
+`motion`, and their `confidence` is the track's net displacement as a fraction
+of the frame diagonal, not a quality score. Future releases may add kinds, so
+treat an unrecognized `kind()` as a detection with only the common members.
+
+Because the context is built from these small interfaces, your listener is
 unit-testable without Engine: construct a `ChainDecisionContext` from your own
 fake `StageResult`s and assert on the returned `ChainDecision`.
 
@@ -315,7 +414,8 @@ public ChainDecision decide(ChainDecisionContext context) {
 ```
 
 `CropSpec.all()` crops every class. Unset crop fields use the same defaults as
-a configured `crop`. Crops come from object detections. A cropped object stage
+a configured `crop`. Crops come from detections that carry boxes — object
+stages, and a motion entry stage's moving regions. A cropped object stage
 must have tracking and tiling disabled.
 
 ### Instance lifecycle and threading
@@ -563,6 +663,33 @@ intermediate events to ordinary event listeners. They do not count as completed
 VOD windows or create resume checkpoints. Synthetic stages and conditional
 routing are unavailable in dynamic mode.
 
+## Service compatibility
+
+Chains created or changed through v2 require the service to support their selected
+options. Crop, including an empty object, requires chain.crop; a frame selection
+other than all requires chain.frame_selection. Missing support fails the handshake
+before config or media is sent. The UNSUPPORTED_CHAIN_CAPABILITY error identifies
+the setting, such as config.detector.stages[1].crop, and the missing capability.
+
+A dynamic listener can first request a crop after the entry stage runs. Missing
+support fails the VOD job without storing the incomplete window as a successful
+result. Live analysis pauses with the same error and can resume after a successful
+handshake with a compatible service. Upgrade the service or change the selected
+options; the chain does not silently advance on full frames instead.
+
+An existing native chain retains its warning-and-omission behavior when viewed or
+saved through v2 without changing the chain itself. Editing unrelated listeners
+or match rules does not change that compatibility policy.
+
+A native chain whose stage routing or crop holds settings the v2 contract cannot
+express (an unknown member, a value of the wrong type, or a routing without
+modellable rules) reads through v2 without them, and a v2 write to that config is
+refused with 409 Conflict rather than dropping them, whichever member it changes.
+The detail names the first such setting, for example
+`config.detector.stages[0].routing.rules[0].priority: this config holds stage
+settings the v2 contract cannot express; edit it natively.` Edit the file natively
+to remove or convert that setting; the config is then editable through v2 again.
+
 ## Save and reuse the definition
 
 Create a named config using `POST /persist/stream-group-configs`:
@@ -589,13 +716,17 @@ You can add `config.processing` to vary capture settings per job. Supplying a
 new `config.detector` replaces the selected detector atomically.
 
 Manager's **New Analysis → Stored config** picker shows the chain's stages and
-any VOD-only restriction. Its **View** link opens a read-only definition.
-Use the API to edit chains until the visual chain editor is available.
+any VOD-only restriction. Its **Edit** link opens the chain in Manager's
+**Stream Configs** page, where chains are edited visually; the API remains
+available for scripted edits.
 
 Read a saved config to obtain its ETag before PATCHing. The `stages` array is
-replaced as a whole: send every stage that should remain. Stage names must be
-unique and nonblank, without surrounding whitespace or control characters.
-`__terminal__` and `__done__` are reserved internal names.
+replaced as a whole: send every stage that should remain, and send each stage
+complete — the merge-patch rule that an omitted member keeps its stored value
+stops at the array boundary, so a member left off a stage is removed, not kept.
+Edit the document you read rather than rebuilding stages from scratch. Stage
+names must be unique and nonblank, without surrounding whitespace or control
+characters. `__terminal__` and `__done__` are reserved internal names.
 
 Reordering stages preserves credentials by stage name and detector type.
 Renaming a stage or changing its detector type creates a new identity. Omitted
@@ -639,7 +770,7 @@ two-execution result:
 ```
 
 `rings` is execution order, not configured stage order; a stage may be skipped
-or appear more than once. Object and scene stages carry `detections`, VLM
+or appear more than once. Object, scene and motion stages carry `detections`, VLM
 stages carry `vlm`, and synthetic stages carry `synthetic`.
 
 `result_mode: final` (the default) sends only the last stage's result to event
@@ -667,6 +798,19 @@ resubmit the same inline config with those credentials in the resume body.
 history or durable resume point. Job listing, cancellation, deletion and
 lifecycle notifications use the same resources for chains and ordinary
 detectors.
+
+## Latency
+
+Event listeners receive a window's results only after every executed stage
+finishes. Conditional chains run their stages serially, so a window costs the
+sum of its stages; crop-free linear chains run them concurrently, so a window
+costs its slowest stage; dynamic chains emit each ring as it completes while
+the window stays open. Overlay boxes are composited onto the live frame at the
+moment results arrive, with no frame matching, so boxes computed from a window
+trail the live video by roughly the chain's processing time plus the window's
+age in the buffer. Put the object stage first when box timeliness matters, the
+same ordering tracking requires. `auto_frame_throttle` lowers the inference FPS
+when the stages cannot keep up.
 
 ## Live streams
 
