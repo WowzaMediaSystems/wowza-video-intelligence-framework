@@ -64,6 +64,10 @@ services:
             - REST_API_DOCUMENTATION=disabled #enabled | disabled | remove to not change <http://localhost:8088/RESTAPIDocumentation/>
             - ADMIN_USER=${WSE_ADMIN_USER}
             - ADMIN_PASSWORD=${WSE_ADMIN_PASSWORD}
+            # Manager over HTTPS. The VIF pages then call the Engine REST API over HTTPS too,
+            # so the wse container's RESTInterface (port 8087) needs its own SSLConfig with a
+            # keystore, or the VIF tab shows "lost connection to the Engine". See "Manager over
+            # HTTPS" in docs/README.wse-plugin.md.
             # - JKS_FILE=/usr/local/tomcat/conf/tls.jks
             # - JKS_PASSWORD=tbd
             # - WSE_PLAYBACK_HOST=tbd
@@ -119,7 +123,12 @@ services:
         # - TRT_MODELS=object-detection-nano,my-custom-model.pth
         # License key string required to run VIS
           - VIS_LICENSE=${VIS_LICENSE}
-        # Optional: Enable SSL/TLS for HTTPS and WSS
+        # Optional: Enable SSL/TLS for HTTPS and WSS. Pick ONE source; setting
+        # variables from both is a startup error. See docs/VIS_DEPLOYMENT.md.
+        # A) The keystore Engine already uses (JKS or PKCS12, one key entry):
+        # - SSL_KEYSTORE_PATH=/certs/example.streamlock.net.jks
+        # - SSL_KEYSTORE_PASSWORD=your-keystore-password
+        # B) A PEM key and certificate:
         # - SSL_KEYFILE=/certs/server-key.pem
         # - SSL_CERTFILE=/certs/server-cert.pem
         # - SSL_KEYFILE_PASSWORD=optional-key-password
@@ -146,8 +155,10 @@ services:
         # engines, or write the cache at runtime. Swap the line below for:
         #   - ./vis/models:/build/models:ro
           - ./vis/models:/build/models
-        # Optional: Mount SSL certificates for HTTPS/WSS
+        # Optional: Mount the PEM certificates, or the keystore Engine already
+        # has, for HTTPS/WSS (must be readable by uid 1001)
         # - ./certs:/certs:ro
+        # - ./wse/conf/example.streamlock.net.jks:/certs/example.streamlock.net.jks:ro
         # Optional: Mount for RT-DETR v2 model cache (for offline usage).
         # HOME=/build for the vis user, so HF caches under /build/.cache.
         # - ~/.cache/huggingface:/build/.cache/huggingface:ro
