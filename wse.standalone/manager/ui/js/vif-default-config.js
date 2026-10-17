@@ -4,11 +4,6 @@
     VIF.defaultConfig = VIF.defaultConfig || {};
 
     VIF.defaultConfig.init = function () {
-        var resolvedServer = VIF.core.resolveServer();
-
-        var API_URL = resolvedServer.serverUrl + '/v1/server/plugin/vif/config';
-        var HEADERS = { 'Authorization': 'Basic ' + resolvedServer.encodedCredentials, 'Content-Type': 'application/json' };
-
         // ── status ───────────────────────────────────────────────────────────
         var statusTimer = null;
         function showStatus(msg, isError) {
@@ -131,14 +126,14 @@
         }
 
         // ── load ──────────────────────────────────────────────────────────────
+        // The revision the write quotes; the attempt's own re-read refreshes it first.
+
         async function loadDefaultConfig() {
             document.getElementById('def-save-btn').disabled = true;
             document.getElementById('default-fieldset').disabled = true;
             try {
-                var resp = await fetch(API_URL, { method: 'GET', headers: HEADERS });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
-                var config = await resp.json();
-                populateForm(config);
+                var current = await VIF.core.client().persist.streamGroupConfigs.default().get();
+                populateForm(VIF.v2map.flatDefaultFromV2(current));
                 document.getElementById('def-save-btn').disabled = false;
                 document.getElementById('default-fieldset').disabled = false;
                 // Re-enabling the fieldset above also re-enables the toggle button; re-assert
@@ -185,6 +180,9 @@
                 return;
             }
 
+            // The API key is a secret the wire never echoes back, so the input's own
+            // value is the whole signal: a typed key sets it, a blank field keeps the
+            // stored one — which is what omitting it from the flat body means.
             var body = {};
             if (urlVal !== '')      body.vi_service_url       = urlVal;
             if (keyVal !== '')      body.vi_service_api_key   = keyVal;
@@ -200,16 +198,17 @@
 
             document.getElementById('def-save-btn').disabled = true;
             try {
-                var resp = await fetch(API_URL, {
-                    method: 'PUT',
-                    headers: HEADERS,
-                    body: JSON.stringify(body)
+                // The re-read inside the attempt is what carries a fresh revision,
+                // so a lost race retries once.
+                var result = await VIF.core.withConflictRetry(async function () {
+                    var defaults = VIF.core.client().persist.streamGroupConfigs.default();
+                    await defaults.get();
+                    return defaults.update(VIF.v2map.defaultPatchFromV1(body));
                 });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
-                var result = await resp.json();
                 // Refresh form with the merged values the server echoes back
-                if (result && (result.vi_service_url !== undefined || result.inference_fps !== undefined)) {
-                    populateForm(result);
+                var merged = VIF.v2map.flatDefaultFromV2(result);
+                if (merged.vi_service_url !== undefined || merged.inference_fps !== undefined) {
+                    populateForm(merged);
                 }
                 showStatus('Saved successfully', false);
             } catch (err) {

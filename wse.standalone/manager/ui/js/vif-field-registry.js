@@ -24,6 +24,20 @@
     // HTML attribute, never bound via applyNumericRuleToInput().
     var FIELDS = [
         {
+            // Not detector-gated: every detector reaches VIS through this URL. It is
+            // here for `inheritMode` alone — collectUnsetFields() asks the registry
+            // whether a blanked field may be unset, and without an entry a cleared
+            // VIS URL never reaches the wire as the null that clears it.
+            //
+            // Its credential is deliberately absent: a read never echoes the key, so
+            // its input is blank on every load and "blank means unset" would clear a
+            // stored key on any save that did not retype it.
+            id: 'cfg-vi-service-url',
+            path: 'vi_service_url',
+            detectors: DETECTOR_TYPES.slice(),
+            inheritMode: 'blank-inherits'
+        },
+        {
             id: 'cfg-inference-fps',
             path: 'inference_fps',
             // Group is shown only when "useTranscoder && detectorType !== 'synthetic'" -
@@ -307,11 +321,23 @@
 
     var VLM_TYPICAL_ENDPOINT_IMAGE_CAP = 8;
 
+    // Models offered as explicit options wherever a VLM model name is picked (the live
+    // stream-config editor and the VOD inline editor); a stored model_name outside this
+    // set is shown through each editor's "Other" affordance.
+    var VLM_MODEL_OPTIONS = [
+        { value: 'Qwen/Qwen3-VL-4B-Instruct-FP8', label: 'Qwen3-VL-4B (Qwen)' },
+        { value: 'nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8', label: 'Nemotron Nano 12B VL (NVIDIA)' },
+        { value: 'google/gemma-3-4b-it', label: 'Gemma 3 4B (Google)' },
+        { value: 'nvidia/Cosmos3-Edge', label: 'Cosmos3 Edge (NVIDIA)' },
+        { value: 'nvidia/Cosmos3-Nano', label: 'Cosmos3 Nano (NVIDIA)' }
+    ];
+
     VIF.fieldRegistry = {
         detectorTypes: DETECTOR_TYPES,
         sections: SECTIONS,
         fields: FIELDS,
         VLM_TYPICAL_ENDPOINT_IMAGE_CAP: VLM_TYPICAL_ENDPOINT_IMAGE_CAP,
+        VLM_MODEL_OPTIONS: VLM_MODEL_OPTIONS,
         getField: getField,
         getFieldByPath: getFieldByPath,
         effectiveRule: effectiveRule,

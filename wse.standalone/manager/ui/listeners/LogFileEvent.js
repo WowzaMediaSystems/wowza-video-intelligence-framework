@@ -4,6 +4,6 @@ window.VIF_LISTENER_PROPERTIES['LogFileEvent'] = [
     { scene_methods: ['immediate'] },
     { vlm_methods: ['immediate'] },
     { synthetic_methods: ['immediate'] },
-    { key: 'log_file_name', label: 'Log File Name', type: 'text', default: 'wowzastreamingengine_vi.log' , tooltip: 'Name of the logfile' },
-    { key: 'log_file_path', label: 'Log File Path', type: 'text', default: '{{com.wowza.wms.ConfigHome}}/logs' , tooltip: 'Path to the logfile' }
+    { requires: [] },
+    { key: 'log_file_name', label: 'Log File Name', type: 'text', default: 'wowzastreamingengine_vi.log' , tooltip: 'Name of the logfile, relative to the server\'s VideoIntelligenceLogRootDir. May include subdirectories, e.g. {{stream_name}}/vi.log' }
 ];

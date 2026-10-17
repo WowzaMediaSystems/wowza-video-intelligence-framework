@@ -1,6 +1,6 @@
-  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.0.3"></script>
+  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.1.0"></script>
 
-  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.3">
+  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
   <style>
     @media (max-width: 767px) {
       .vif-plugin .hidden-xs { display: none !important; }
@@ -8,9 +8,9 @@
     }
 
     .vif-plugin .controls-section {
-      background: #f5f5f5;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+      background: #f5f6f7;
+      border: 1px solid #e3e6ea;
+      border-radius: 3px;
       padding: 10px 15px;
       margin-top: 10px;
       margin-bottom: 10px;
@@ -18,9 +18,9 @@
     }
 
     .vif-plugin .error-message {
-      background: #f2dede;
-      border: 1px solid #ebccd1;
-      border-radius: 4px;
+      background: #fdecea;
+      border: 1px solid #f2c7c4;
+      border-radius: 3px;
       padding: 10px 15px;
       margin-top: 10px;
       color: #a94442;
@@ -45,16 +45,32 @@
       padding: 6px 12px;
       /*font-size: 14px;*/
       line-height: 1.42857143;
-      color: #555;
+      color: #2b3440;
       background-color: #fff;
-      border: 1px solid #ccc;
-      border-radius: 4px;
+      border: 1px solid #cfd4da;
+      border-radius: 3px;
     }
 
     .vif-plugin .url-input-group input:focus {
-      border-color: #66afe9;
+      border-color: #f08a00;
       outline: 0;
-      box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(102,175,233,.6);
+      box-shadow: 0 0 0 3px rgba(240, 138, 0, 0.18);
+    }
+
+    /* The Load action is the page's one primary button — orange, like the
+       dashboard's New Analysis. Out-specifies the Manager chrome's .btn family. */
+    .vif-plugin .url-input-group .btn {
+      padding: 8px 14px;
+      font-weight: 600;
+      border-radius: 3px;
+      background: #f08a00;
+      border: 1px solid #f08a00;
+      color: #fff;
+    }
+    .vif-plugin .url-input-group .btn:hover {
+      background: #d97c00;
+      border-color: #d97c00;
+      color: #fff;
     }
 
     .vif-plugin .url-input-group .switch {
@@ -68,27 +84,27 @@
       align-items: center;
       gap: 8px;
       flex: 0 0 auto;
-      background: rgba(255,255,255,0.65);
-      border: 1px solid #e4e4e4;
-      border-radius: 8px;
+      background: #fff;
+      border: 1px solid #e3e6ea;
+      border-radius: 3px;
       padding: 6px 10px;
     }
 
     .vif-plugin .control-group input[type="range"] {
       width: 170px;
-      accent-color: #ff8400;
+      accent-color: #f08a00;
     }
 
     .vif-plugin .control-value {
       display: inline-block;
       min-width: 4.5ch;
       text-align: right;
-      font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
+      font-family: ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
       font-weight: 700;
-      color: #222;
+      color: #1b2430;
       background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 6px;
+      border: 1px solid #cfd4da;
+      border-radius: 3px;
       padding: 2px 8px;
     }
 
@@ -121,9 +137,9 @@
     }
 
     .vif-plugin .card {
-      background: #f5f5f5;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+      background: #fff;
+      border: 1px solid #cfd5db;
+      border-radius: 3px;
       padding: 10px;
       display: flex;
       flex-direction: column;
@@ -132,9 +148,9 @@
     }
 
     .vif-plugin .card-player {
-      background: #f5f5f5;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+      background: #fff;
+      border: 1px solid #cfd5db;
+      border-radius: 3px;
       padding: 10px;
       display: flex;
       flex-direction: column;
@@ -142,22 +158,18 @@
       min-height: 0;
     }
 
-    .vif-plugin .card h2 {
-      /*font-size: 18px;*/
-      margin-bottom: 10px;
-      color: #333;
-      font-weight: 500;
-    }
-
-    .vif-plugin .card-player h2 {
-      /*font-size: 18px;*/
-      margin-bottom: 10px;
-      color: #333;
-      font-weight: 500;
+    /* Card titles (the markup uses h3): same section-heading scale as the
+       dashboard's "Active Streams". */
+    .vif-plugin .card h3,
+    .vif-plugin .card-player h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1b2430;
+      margin: 0 0 10px;
     }
 
     .vif-plugin .badge {
-      background: #ff8400;
+      background: #f08a00;
       color: #fff;
       /*font-size: 12px;*/
       padding: 4px 8px;
@@ -185,14 +197,15 @@
 
     .vif-plugin .tab-controls {
       display: flex;
-      gap: 3px;
+      gap: 8px;
       margin-bottom: 10px;
       flex-shrink: 0;
     }
 
     .vif-plugin .tab-controls input[type="radio"] { display: none; }
 
-    /* Each tab label is a bar with right-justified actions inside */
+    /* Each tab label is a bar with right-justified actions inside — same
+       visual family as the dashboard's Live Streams / On-Demand tabs. */
     .vif-plugin .tab-controls label {
       flex: 1;
       display: flex;
@@ -201,12 +214,13 @@
       gap: 10px;
 
       padding: 6px 10px;
-      background: #222;
-      border: none;
+      background: #fff;
+      border: 1px solid #d9dee3;
+      border-radius: 3px;
       cursor: pointer;
-      font-weight: normal;
+      font-weight: 600;
       /*font-size: 14px;*/
-      color: #999;
+      color: #6a7480;
       user-select: none;
       overflow: visible;
     }
@@ -240,44 +254,55 @@
       justify-content: center;
       width: 30px;
       height: 26px;
-      border-radius: 6px;
-      border: 1px solid rgba(255,255,255,0.25);
-      background: rgba(255,255,255,0.08);
-      color: #eaeaea;
+      border-radius: 3px;
+      border: 1px solid #cfd4da;
+      background: #fff;
+      color: #6a7480;
       cursor: pointer;
       user-select: none;
       pointer-events: auto;
     }
 
     .vif-plugin .tab-copy-btn:hover {
-      background: rgba(255,255,255,0.16);
-      border-color: rgba(255,132,0,0.7);
-      color: #fff;
+      background: #f5f6f7;
+      border-color: #b9c0c8;
+      color: #1b2430;
     }
 
     .vif-plugin .tab-copy-status {
       font-size: 12px;
       font-weight: 700;
-      color: rgba(255,255,255,0.85);
+      color: #1e9e5a;
       min-width: 64px;
       text-align: right;
       line-height: 1;
     }
 
     .vif-plugin .tab-controls input[type="radio"]:checked + label {
-      background: #ff8400;
+      background: #f08a00;
+      border-color: #f08a00;
       color: #fff;
     }
 
+    /* The action buttons and "Copied" flash inside the ACTIVE tab sit on
+       orange — translucent white chrome instead of the outline family. */
     .vif-plugin .tab-controls input[type="radio"]:checked + label .tab-copy-btn {
-      border-color: rgba(0,0,0,0.18);
-      background: rgba(0,0,0,0.15);
+      border-color: rgba(255, 255, 255, 0.45);
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .vif-plugin .tab-controls input[type="radio"]:checked + label .tab-copy-btn:hover {
+      background: rgba(255, 255, 255, 0.24);
+      border-color: #fff;
+      color: #fff;
+    }
+    .vif-plugin .tab-controls input[type="radio"]:checked + label .tab-copy-status {
       color: #fff;
     }
 
     .vif-plugin .tab-controls label:hover {
-      background: #333;
-      color: #fff;
+      background: #f5f6f7;
+      color: #1b2430;
     }
 
     /* --- Copy UX behavior requested ---
@@ -301,10 +326,10 @@
     .vif-plugin .event-display,
 .vif-plugin .log-display {
       background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+      border: 1px solid #e3e6ea;
+      border-radius: 3px;
       padding: 8px;
-      font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
+      font-family: ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
       /*font-size: 12px;*/
       font-weight: 600;
       color: #222;
@@ -317,13 +342,13 @@
     .vif-plugin .log-entry {
       margin-bottom: 8px;
       padding-bottom: 8px;
-      border-bottom: 1px solid rgba(255,132,0,0.2);
+      border-bottom: 1px solid rgba(240, 138, 0, 0.25);
     }
 
     .vif-plugin .log-entry:last-child { border-bottom: none; }
 
     .vif-plugin .log-timestamp {
-      color: #ff8400;
+      color: #f08a00;
       font-weight: bold;
       margin-bottom: 4px;
       /*font-size: 13px;*/
@@ -340,8 +365,8 @@
       margin-bottom: 6px;
       padding: 6px 8px;
       background: #fff;
-      border: 1px solid #e0e0e0;
-      border-left: 3px solid #ff8400;
+      border: 1px solid #e3e6ea;
+      border-left: 3px solid #f08a00;
       border-radius: 3px;
     }
 
@@ -350,6 +375,22 @@
       /*font-size: 12px;*/
       font-weight: bold;
       margin-bottom: 3px;
+    }
+
+    /* Detection-silence marker (vif-playback.js watchdog): visually the
+       opposite of a detection — muted gray left edge, italic gray text — so a
+       quiet stream cannot be mistaken for its last active detection. */
+    .vif-plugin .event-item.event-item-silence {
+      border-left-color: #b9c0c8;
+      background: #fafbfc;
+    }
+    .vif-plugin .event-item-silence .silence-text {
+      color: #6b7480;
+      font-style: italic;
+      font-weight: 600;
+    }
+    .vif-plugin .event-item-silence.is-live .silence-text::after {
+      content: ' …';
     }
 
     .vif-plugin .event-data {
@@ -388,6 +429,24 @@
       border: 1px solid rgba(217,83,79,0.4);
     }
 
+    /* Synthetic verdict chips: colored by what the verdict MEANS, not by the
+       score — a detected deepfake must read as the alert. */
+    .vif-plugin .detection-label.verdict-real {
+      background: rgba(92,184,92,0.2);
+      color: #3c763d;
+      border: 1px solid rgba(92,184,92,0.4);
+    }
+    .vif-plugin .detection-label.verdict-synthetic {
+      background: rgba(217,83,79,0.2);
+      color: #a94442;
+      border: 1px solid rgba(217,83,79,0.4);
+    }
+    .vif-plugin .detection-label.verdict-unknown {
+      background: rgba(108,117,125,0.15);
+      color: #5d6771;
+      border: 1px solid rgba(108,117,125,0.35);
+    }
+
     .vif-plugin .detection-reasoning {
       font-size: 0.85em;
       color: #555;
@@ -420,7 +479,7 @@
     @media (min-width: 769px) {
 
       .vif-plugin .controls-section {
-        border-radius: 12px;
+        border-radius: 3px;
         padding: 20px;
         margin-bottom: 20px;
       }
@@ -442,26 +501,21 @@
       }
 
       .vif-plugin .card {
-        border-radius: 12px;
+        border-radius: 3px;
         padding: 20px;
         min-height: 0;
         overflow: hidden;
       }
 
       .vif-plugin .card-player {
-        border-radius: 12px;
+        border-radius: 3px;
         padding: 20px;
         min-height: 0;
         overflow: hidden;
       }
 
-      .vif-plugin .card h2 {
-        /*font-size: 1.25rem;*/
-        margin-bottom: 15px;
-      }
-
-      .vif-plugin .card-player h2 {
-        /*font-size: 1.25rem;*/
+      .vif-plugin .card h3,
+      .vif-plugin .card-player h3 {
         margin-bottom: 15px;
       }
       .vif-plugin .badge {
@@ -470,8 +524,8 @@
         border-radius: 12px;
       }
 
-      .vif-plugin .event-display { border-radius: 8px; padding: 16px; /*font-size: 0.9rem;*/ }
-      .vif-plugin .log-display { border-radius: 8px; padding: 16px; /*font-size: 0.85rem;*/ }
+      .vif-plugin .event-display { border-radius: 3px; padding: 16px; /*font-size: 0.9rem;*/ }
+      .vif-plugin .log-display { border-radius: 3px; padding: 16px; /*font-size: 0.85rem;*/ }
 
       .vif-plugin .log-entry { margin-bottom: 20px; padding-bottom: 20px; }
       /*.log-timestamp { font-size: 0.85rem; }*/
@@ -479,32 +533,33 @@
       .vif-plugin .event-item {
         margin-bottom: 8px;
         padding: 8px 10px;
-        border-left: 3px solid #ff8400;
-        border-radius: 4px;
+        border-left: 3px solid #f08a00;
+        border-radius: 3px;
       }
 
       /*.event-time { font-size: 0.85rem; }*/
     }
 
-    /* Match stream-config.html's plain "Back to Dashboard" button. That page styles bare <button>
-       elements, but playback's other buttons are .btn/.btn-primary, so this is a dedicated class
-       (see vif.css note on why the bare-button style isn't shared). */
+    /* Header button: the shared quiet white/outline family, sized in px like
+       vif.css's shared header rule (playback's other buttons are .btn/.btn-primary,
+       so this stays a dedicated class). */
     .vif-plugin .back-to-dashboard {
-      padding: 0.4em 0.7em;
-      font-family: monospace;
-      font-size: 0.85em;
+      padding: 8px 14px;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.5;
+      font-weight: 600;
       cursor: pointer;
-      background: #2a71ab;
-      border: 1px solid #ccc;
-      color: #ffffff;
-      border-radius: 4px;
-      margin-bottom: 4px;
+      background: #fff;
+      border: 1px solid #cfd4da;
+      color: #1b2430;
+      border-radius: 3px;
+      margin-bottom: 0;
     }
-    .vif-plugin .back-to-dashboard:hover { background: #225783; }
-    .vif-plugin .back-to-dashboard:disabled { background-color: #cccccc; color: #666666; cursor: not-allowed; }
+    .vif-plugin .back-to-dashboard:hover { background: #f5f6f7; border-color: #b9c0c8; }
 
-    /* Sticky page header with the "VIF Playback" title, matching stream-config.html.
-       (.streams-header / .item-right / h2 come from vif.css.) */
+    /* Sticky page header with the "VIF Playback" title (title style shared via
+       vif.css .vif-header-title). */
     .vif-plugin .sticky-page-header {
       position: sticky;
       top: 0;
@@ -512,18 +567,23 @@
       background: #fff;
     }
     .vif-plugin .streams-header {
-      align-items: flex-end;
+      align-items: center;
       margin-bottom: 10px;
+      border-bottom-color: #e3e6ea;
     }
   </style>
 
 
   <div class="container-full vif-plugin">
+    <!-- Deliberately OFF the global tab row: playback is a per-stream tool you
+         reach from a dashboard row, not a destination. It names itself and
+         offers the one way back — which must tear the player session down
+         first, or the hls instance keeps streaming under the next page. -->
     <div class="sticky-page-header">
       <div class="streams-header">
-        <h2>VIF Playback</h2>
+        <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Playback</h2>
         <div class="item-right">
-          <button class="back-to-dashboard" onclick="mainPage()">Back to Dashboard</button>
+          <button class="back-to-dashboard" onclick="window.__vifPlaybackDestroy && window.__vifPlaybackDestroy(); loadAjaxPluginContent('server','vif','shm.html','')">Back to Dashboard</button>
         </div>
       </div>
     </div>
@@ -615,8 +675,13 @@
     </div>
   </div>
 
-  <script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.3"></script>
-  <script src="wse-plugins/server/vif/js/vif-playback.js?v=1.0.3"></script>
+  <script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
+  <script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
+  <script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
+  <script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.1.0"></script>
+  <script src="wse-plugins/server/vif/js/vif-playback.js?v=1.1.0"></script>
   <script>
     VIF.playback.init();
+    // Same click-popover help tips as the dashboard (the Overlay "?").
+    VIF.core.initClickTips(document.querySelector('.container-full.vif-plugin'));
   </script>

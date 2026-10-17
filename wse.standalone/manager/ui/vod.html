@@ -1,0 +1,155 @@
+<!-- On-Demand (VOD) analysis fragment. To remove the feature entirely: delete this
+     file, css/vod.css and js/vod/, then drop the On-Demand tab + tab scripts in
+     shm.html and the btn-vod-analysis id from setConfigButtonsEnabled in
+     js/vif-dashboard.js. -->
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vod.css?v=1.1.0">
+<style>
+    .vif-vod .sticky-page-header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: #fff;
+    }
+    .vif-vod .streams-header {
+        align-items: center;
+        margin-bottom: 0;
+        border-bottom-color: #e3e6ea;
+    }
+
+    /* Header buttons: same quiet white/outline + orange-primary family as the
+       dashboard (shm.html), scoped to the header so the app's own .btn family
+       below stays untouched. Also covers the contextual "Back to Jobs" button
+       vod-main.js swaps into #vod-head-actions. */
+    .vif-vod .streams-header button {
+        padding: 8px 14px;
+        font-family: inherit;
+        font-size: 12px; /* px, matching vif.css's shared header rule — .vif-vod's 13.5px base would shrink an em */
+        font-weight: 600;
+        cursor: pointer;
+        background: #fff;
+        border: 1px solid #cfd4da;
+        color: #1b2430;
+        border-radius: 3px;
+        margin-bottom: 0;
+    }
+    .vif-vod .streams-header button:hover {
+        background: #f5f6f7;
+        border-color: #b9c0c8;
+    }
+    .vif-vod .streams-header button.vif-btn-primary {
+        background: #f08a00;
+        border-color: #f08a00;
+        color: #fff;
+    }
+    .vif-vod .streams-header button.vif-btn-primary:hover {
+        background: #d97c00;
+        border-color: #d97c00;
+    }
+</style>
+
+<div class="content-wrapper vif-plugin vif-vod" id="vod-root">
+    <div class="sticky-page-header">
+    <div class="streams-header">
+        <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
+    </div>
+    <!-- Global VIF nav (same tabs on every VIF page — the row IS the
+         navigation): this page is the On-Demand tab. -->
+    <div class="vif-tabs-row" id="vod-tabs-ondemand">
+        <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams <span class="vif-tab-count" id="vif-tab-live-count">&ndash;</span></button>
+        <span class="vif-tab is-active">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count">&ndash;</span></span>
+        <button class="vif-tab" onclick="VIF.core.gotoConfigs()">Configs</button>
+    </div>
+    <!-- Chrome for the settings sub-view only: On-Demand Configs presents as the
+         Configs area's surface, so the Configs pill stays lit and the sub-tabs
+         mark the spot (a sub-tab must never change the primary pill).
+         vod-main.js flips these rows on every V.nav(). -->
+    <div class="vif-tabs-row" id="vod-tabs-configs" style="display:none">
+        <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams</button>
+        <button class="vif-tab" onclick="VIF.vod && VIF.vod.nav && VIF.vod.nav('jobs')">On-Demand</button>
+        <span class="vif-tab is-active">Configs</span>
+    </div>
+    <div class="vif-subtabs" id="vod-subtabs-configs" style="display:none">
+        <button class="vif-subtab" title="Per-stream detector configs.&#10;Streams match by name pattern." onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
+        <button class="vif-subtab" title="Defaults every stream config inherits.&#10;A config that sets its own value pins it." onclick="loadAjaxPluginContent('server','vif','default.html','')">Stream Config Defaults</button>
+        <span class="vif-subtab is-active">On-Demand Configs</span>
+    </div>
+    </div>
+
+    <div id="vod-view"></div>
+    <div id="vod-toasts"></div>
+    <div id="vod-modal-root"></div>
+</div>
+
+<script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-util.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-jobs.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-new-analysis.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-report.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-settings.js?v=1.1.0"></script>
+<script>
+    VIF.vod.init();
+
+    // Click-popover info tips (the circled-? pattern shared with shm.html):
+    // upgrades every .vif-help-tip this fragment renders, including the ones
+    // the report page re-renders on its poll.
+    VIF.core.initClickTips(document.getElementById('vod-root'));
+
+    // Deep link from the dashboard header's "On-Demand Settings" button: the
+    // fragment always initializes to the jobs view, so the requested sub-view
+    // rides over in sessionStorage.
+    (function () {
+        // Record this page as the last-used tab: a fresh entry into the
+        // plugin (shm.html's sticky-tab script) returns here.
+        try { sessionStorage.setItem('vifLastTab', 'ondemand'); } catch (e) { /* non-sticky */ }
+        var pendingView = null;
+        try {
+            pendingView = sessionStorage.getItem('vifVodView');
+            sessionStorage.removeItem('vifVodView');
+        } catch (e) { /* storage unavailable — land on jobs as usual */ }
+        if (pendingView === 'settings' && VIF.vod && VIF.vod.nav) VIF.vod.nav('settings');
+    })();
+
+    // Header tab counts — same contract as shm.html's tab script: the On-Demand
+    // count from the VOD jobs API, the Live Streams count from the VIF status
+    // wire. Purely additive; failures leave the placeholders.
+    (function () {
+        var tabOndemand = document.getElementById('vif-tab-ondemand-count');
+        function refreshOnDemand() {
+            if (!window.VIF || !VIF.vod || !VIF.vod.api) return;
+            // A limit-1 call totals the whole listing (VI-875), so the count is
+            // exact however long the job history grows.
+            VIF.vod.api.listJobs({ limit: 1 }).then(function (page) {
+                if (tabOndemand) tabOndemand.textContent = String((page && page.total) || 0);
+            }).catch(function () { /* Engine unreachable — leave the placeholder */ });
+        }
+
+        var tabLive = document.getElementById('vif-tab-live-count');
+        function refreshLive() {
+            if (!tabLive || !window.VIF || !VIF.core || !VIF.core.client) return;
+            try {
+                VIF.core.client().status().then(function (status) {
+                    var streams = (status && status.streams) || [];
+                    var active = 0;
+                    streams.forEach(function (s) { if (s.config && s.config.active) active++; });
+                    tabLive.textContent = String(active);
+                }).catch(function () {});
+            } catch (e) { /* placeholders stay */ }
+        }
+
+        refreshOnDemand();
+        refreshLive();
+        // The fragment has no unload hook, so re-injections would leak these
+        // pollers — clear the previous instance's before arming ours.
+        if (window.__vifVodTabTimers) window.__vifVodTabTimers.forEach(clearInterval);
+        window.__vifVodTabTimers = [
+            setInterval(refreshOnDemand, 15000),
+            setInterval(refreshLive, 15000)
+        ];
+    })();
+</script>

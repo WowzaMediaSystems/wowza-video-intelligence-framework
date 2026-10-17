@@ -2,7 +2,7 @@
 services:
     wse:
         hostname: wse.docker
-        image: wowza/wowza-streaming-engine:vif-1.0.3
+        image: wowza/wowza-streaming-engine:vif-1.1.0
         pull_policy: always
         #platform: linux/arm64
         profiles: ["", "wse", "wse-only", "default"]
@@ -36,6 +36,7 @@ services:
              - ./wse/content:/usr/local/WowzaStreamingEngine/content
              - ./wse/transcoder:/usr/local/WowzaStreamingEngine/transcoder
              - ./wse/logs:/usr/local/WowzaStreamingEngine/logs
+             - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs   # VOD job records, results, thumbnails
 
         ports:
             - 80:80                     #HLS
@@ -53,7 +54,7 @@ services:
 
     manager:
         hostname: wsem.docker
-        image: wowza/wowza-streaming-engine-manager:vif-1.0.3
+        image: wowza/wowza-streaming-engine-manager:vif-1.1.0
         pull_policy: always
         #platform: linux/arm64
         profiles: ["", "wse", "wsem", "default"]
@@ -79,7 +80,7 @@ services:
     # (uid/gid 1001) so VIS can write models/logs, then exits (VIS waits via
     # depends_on). Reuses the VIS image -- no extra pull, no GPU needed.
     vis-init:
-        image: wowza/wowza-video-intelligence-service:1.0.0-gpu
+        image: wowza/wowza-video-intelligence-service:1.1.0-gpu
         pull_policy: always
         profiles: ["", "vi-service", "default", "vlm"]
         user: "0:0"
@@ -91,7 +92,7 @@ services:
 
     video-intelligence-service-gpu:
         hostname: video-intelligence-service.docker
-        image: wowza/wowza-video-intelligence-service:1.0.0-gpu
+        image: wowza/wowza-video-intelligence-service:1.1.0-gpu
         pull_policy: always
         #platform: linux/arm64
         profiles: ["", "vi-service", "default"]
@@ -255,7 +256,7 @@ services:
                   count: all
 
     # ── Synthetic Video Detector NIM sidecar (opt-in) ──────────────────────
-    # NVIDIA Maxine Synthetic Video Detector (SVD) NIM backing the
+    # NVIDIA Synthetic Video Detector (SVD) NIM backing the
     # `detector_type=synthetic` analyzer. Bidirectional-streaming gRPC: VIS
     # relays each VIC-remuxed H.264 window (no re-encode) and returns a
     # per-window Real/Fake verdict.

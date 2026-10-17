@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.3">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
     <style>
         .vif-plugin {
             --form-label-width: 200px;
@@ -17,26 +17,48 @@
         }
         .vif-plugin .streams-header {
             align-items: flex-end;
-            margin-bottom: 10px;
+            /* No gap under the title: the tabs row below carries its own 12px
+               padding — matching shm.html so the row never shifts between tabs. */
+            margin-bottom: 0;
         }
 
         .vif-plugin button {
-            padding: 0.4em 0.7em;
-            font-family: monospace;
+            padding: 7px 12px;
+            font-family: inherit;
             font-size: 0.85em;
+            font-weight: 600;
             cursor: pointer;
-            background: #2a71ab;
-            border: 1px solid #ccc;
-            color: #ffffff;
-            border-radius: 4px;
+            background: #fff;
+            border: 1px solid #cfd4da;
+            color: #1b2430;
+            border-radius: 3px;
             margin-bottom: 4px;
         }
-        .vif-plugin button:hover { background: #225783; }
+        .vif-plugin button:hover {
+            background: #f5f6f7;
+            border-color: #b9c0c8;
+        }
         .vif-plugin button:disabled {
-            background-color: #cccccc;
-            color: #666666;
+            background-color: #f5f6f7;
+            border-color: #e3e6ea;
+            color: #98a1ab;
             cursor: not-allowed;
             pointer-events: none;
+        }
+
+        .vif-plugin #def-save-btn {
+            background: #f08a00;
+            border-color: #f08a00;
+            color: #fff;
+        }
+        .vif-plugin #def-save-btn:hover {
+            background: #d97c00;
+            border-color: #d97c00;
+        }
+        .vif-plugin #def-save-btn:disabled {
+            background: #f5f6f7;
+            border-color: #e3e6ea;
+            color: #98a1ab;
         }
 
         .vif-plugin .form-wrapper {
@@ -50,7 +72,7 @@
 
         .vif-plugin .section-help {
             font-size: 0.82em;
-            color: #666;
+            color: #6b7480;
             margin-bottom: 14px;
         }
 
@@ -60,8 +82,8 @@
             flex: 1 1 200px;
             max-width: 320px;
             padding: 5px 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
             font-family: monospace;
             font-size: 0.9em;
         }
@@ -108,7 +130,7 @@
         .vif-plugin .field-help {
             flex: 1 1 100%;
             font-size: 0.78em;
-            color: #888;
+            color: #6b7480;
             padding-left: calc(var(--form-label-width) + 10px);
             margin-top: -6px;
         }
@@ -130,7 +152,7 @@
             gap: 12px;
             margin-top: 18px;
             padding-top: 14px;
-            border-top: 1px solid #ddd;
+            border-top: 1px solid #e3e6ea;
         }
 
         .vif-plugin #status-message {
@@ -139,8 +161,8 @@
             transition: opacity 0.2s;
         }
         .vif-plugin #status-message.visible { opacity: 1; }
-        .vif-plugin #status-message.success { color: #2a7a2a; }
-        .vif-plugin #status-message.error   { color: #c0392b; }
+        .vif-plugin #status-message.success { color: #1e9e5a; }
+        .vif-plugin #status-message.error   { color: #d64541; }
 
         .vif-plugin fieldset {
             border: none;
@@ -153,10 +175,28 @@
     <div class="content-wrapper vif-plugin">
         <div class="sticky-page-header">
         <div class="streams-header">
-            <h2>VIF Default Config</h2>
-            <div class="item-right">
-                <button onclick="loadAjaxPluginContent('server','vif','shm.html','')">Back to Dashboard</button>
-            </div>
+            <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
+        </div>
+        <!-- Global VIF nav (same four tabs on every VIF page): this page is the
+             Configs area; the secondary row says which config surface. -->
+        <div class="vif-tabs-row">
+            <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams</button>
+            <button class="vif-tab" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand</button>
+            <span class="vif-tab is-active">Configs</span>
+        </div>
+        <script>
+            // Record this page as the last-used tab (down to the config surface):
+            // a fresh entry into the plugin returns here via shm.html's sticky-tab
+            // script, same as the Live/On-Demand tabs.
+            try {
+                sessionStorage.setItem('vifLastTab', 'configs');
+                sessionStorage.setItem('vifConfigsPage', 'default.html');
+            } catch (e) { /* non-sticky */ }
+        </script>
+        <div class="vif-subtabs">
+            <button class="vif-subtab" title="Per-stream detector configs.&#10;Streams match by name pattern." onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
+            <span class="vif-subtab is-active">Stream Config Defaults</span>
+            <button class="vif-subtab" title="On-Demand job settings:&#10;caps, retention, lifecycle webhooks, secrets." onclick="try { sessionStorage.setItem('vifVodView','settings'); } catch (e) {} loadAjaxPluginContent('server','vif','vod.html','')">On-Demand Configs</button>
         </div>
         </div>
 
@@ -265,8 +305,11 @@
         </fieldset>
     </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.3"></script>
-<script src="wse-plugins/server/vif/js/vif-default-config.js?v=1.0.3"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-default-config.js?v=1.1.0"></script>
 <script>
     VIF.defaultConfig.init();
 </script>

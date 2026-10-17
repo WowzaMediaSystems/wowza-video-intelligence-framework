@@ -4,6 +4,7 @@ window.VIF_LISTENER_PROPERTIES['ObjectTracking'] = [
     { scene_methods: [] },
     { vlm_methods: [] },
     { synthetic_methods: [] },
+    { requires: ['LIVE_STREAM'] },
     { key: 'id3', label: 'ID3 Tags', type: 'boolean', default: false, tooltip: 'Inject detection results as ID3 timed metadata tags' },
     { key: 'webhooks', label: 'Webhooks', type: 'boolean', default: false, tooltip: 'Send detection results via webhook HTTP POST' },
     { key: 'logfile', label: 'Log File', type: 'boolean', default: false, tooltip: 'Write detection results to log files' },

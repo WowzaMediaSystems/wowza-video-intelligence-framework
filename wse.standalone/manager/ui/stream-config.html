@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.3">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
     <style>
         .vif-plugin {
             --form-label-width: 240px;
@@ -20,28 +20,33 @@
         }
         .vif-plugin .streams-header {
             align-items: flex-end;
-            margin-bottom: 10px;
+            /* No gap under the title: the tabs row below carries its own 12px
+               padding — matching shm.html so the row never shifts between tabs. */
+            margin-bottom: 0;
         }
 
         .vif-plugin button {
-            padding: 0.4em 0.7em;
-            font-family: monospace;
+            padding: 7px 12px;
+            font-family: inherit;
             font-size: 0.85em;
+            font-weight: 600;
             cursor: pointer;
-            background: #2a71ab;
-            border: 1px solid #ccc;
-            color: #ffffff;
-            border-radius: 4px;
+            background: #fff;
+            border: 1px solid #cfd4da;
+            color: #1b2430;
+            border-radius: 3px;
             margin-bottom: 4px;
         }
 
         .vif-plugin button:hover {
-            background: #225783;
+            background: #f5f6f7;
+            border-color: #b9c0c8;
         }
 
         .vif-plugin button:disabled {
-          background-color: #cccccc;
-          color: #666666;
+          background-color: #f5f6f7;
+          border-color: #e3e6ea;
+          color: #98a1ab;
           cursor: not-allowed;
           pointer-events: none;
         }
@@ -64,9 +69,9 @@
         }
 
         .vif-plugin .top-config-panel {
-            background: #e8e8e8;
-            border-color: #d0d0d0;
-            color: #111;
+            background: #f5f6f7;
+            border-color: #e3e6ea;
+            color: #2b3440;
             width: 100%;
             max-width: 100%;
             transition: padding 0.2s ease, background 0.2s ease, border-color 0.2s ease;
@@ -121,20 +126,20 @@
 .vif-plugin .top-config-panel .save-meta strong,
 .vif-plugin .top-config-panel .form-group label:not(.switch),
 .vif-plugin .top-config-panel .field-help {
-            color: #111;
+            color: #2b3440;
         }
 
         .vif-plugin .top-config-panel .section-help,
 .vif-plugin .top-config-panel .save-meta,
 .vif-plugin .top-config-panel .field-help {
-            color: #2b2b2b;
+            color: #5d6771;
         }
 
         .vif-plugin .top-config-panel code {
-            color: #111;
-            background: rgba(255, 255, 255, 0.65);
+            color: #2b3440;
+            background: #fff;
             padding: 1px 4px;
-            border-radius: 4px;
+            border-radius: 3px;
         }
 
         .vif-plugin .top-config-panel.is-compact {
@@ -185,8 +190,8 @@
             font-family: monospace;
             font-size: 0.95em;
             padding: 6px 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
             background: #fff;
             flex: 1;
             min-width: 0;
@@ -277,7 +282,7 @@
             line-height: 1.4;
             overflow-wrap: anywhere;
         }
-        .vif-plugin .endpoint-test-result.ok    { color: #2e7d32; }
+        .vif-plugin .endpoint-test-result.ok    { color: #1e9e5a; }
         .vif-plugin .endpoint-test-result.warn  { color: var(--warn-color); }
         .vif-plugin .endpoint-test-result.error { color: var(--alert-color); }
 
@@ -321,7 +326,7 @@
             font-size: 0.7em;
             font-weight: 600;
             letter-spacing: 0.05em;
-            color: #999;
+            color: #6b7480;
         }
         .vif-plugin .vlm-class-hint {
             flex: 1 1 0;
@@ -356,14 +361,14 @@
 .vif-plugin .top-config-panel .form-group input[type="number"],
 .vif-plugin .top-config-panel .form-group select {
             background: #fff;
-            border-color: #b6b6b6;
-            color: #111;
+            border-color: #cfd4da;
+            color: #1b2430;
         }
 
         .vif-plugin .top-config-panel #cfg-stream-select {
             background: #fff;
-            border-color: #cfcfcf;
-            color: #111;
+            border-color: #cfd4da;
+            color: #1b2430;
         }
 
         .vif-plugin .top-config-panel input[type="text"]::placeholder,
@@ -380,18 +385,18 @@
 .vif-plugin .top-config-panel .form-group input[type="text"]:focus,
 .vif-plugin .top-config-panel .form-group input[type="number"]:focus,
 .vif-plugin .top-config-panel .form-group select:focus {
-            border-color: #8ab4f8;
+            border-color: #f08a00;
         }
 
         .vif-plugin .form-group input[type="text"]:focus,
 .vif-plugin .form-group input[type="number"]:focus,
 .vif-plugin .form-group select:focus {
             outline: none;
-            border-color: #2a71ab;
+            border-color: #f08a00;
         }
 
         .vif-plugin .form-section {
-            border-top: 1px solid #ddd;
+            border-top: 1px solid #e3e6ea;
             margin-top: 16px;
             padding-top: 12px;
         }
@@ -407,12 +412,12 @@
             gap: 8px;
             margin-top: 16px;
             padding-top: 12px;
-            border-top: 1px solid #ddd;
+            border-top: 1px solid #e3e6ea;
         }
 
         .vif-plugin .section-help {
             font-size: 0.85em;
-            color: #666;
+            color: #6b7480;
             margin-bottom: 12px;
             line-height: 1.45;
         }
@@ -422,7 +427,7 @@
             margin-left: calc(var(--form-label-width) + 10px);
             margin-top: -4px;
             font-size: 0.8em;
-            color: #666;
+            color: #6b7480;
             line-height: 1.4;
         }
 
@@ -431,7 +436,7 @@
             color: var(--warn-color);
             background: var(--warn-bg);
             border: 1px solid var(--warn-color);
-            border-radius: 4px;
+            border-radius: 3px;
             padding: 8px 10px;
             margin-bottom: 10px;
             line-height: 1.4;
@@ -465,7 +470,7 @@
         .vif-plugin .overlay-card {
             width: min(640px, 100%);
             background: #fff;
-            border-radius: 12px;
+            border-radius: 6px;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
             padding: 20px 22px;
             position: relative;
@@ -485,28 +490,33 @@
         .vif-plugin .overlay-list {
             margin: 10px 0 0;
             padding-left: 20px;
-            color: #444;
+            color: #2b3440;
             line-height: 1.6;
         }
 
+        /* Destructive actions: quiet red at rest, red tint on hover — never a
+           solid red block competing with the orange primary. */
         .vif-plugin .btn-danger {
-            background: #ff5252;
-            border-color: #ff5252;
+            background: #fff;
+            border-color: #e7b6b4;
+            color: #d64541;
         }
         .vif-plugin .btn-danger:hover {
-            background: #d32f2f;
+            background: #fdecea;
+            border-color: #d64541;
         }
 
+        /* Tertiary (Cancel etc.): ghost — no chrome until hovered. */
         .vif-plugin .btn-secondary {
-            background: #eceff1;
-            border-color: #c5ccd3;
-            color: #2f3b47;
+            background: transparent;
+            border-color: transparent;
+            color: #5d6771;
         }
 
         .vif-plugin .btn-secondary:hover {
-            background: #d9dee3;
-            border-color: #b2bac2;
-            color: #2f3b47;
+            background: #f5f6f7;
+            border-color: transparent;
+            color: #1b2430;
         }
 
         .vif-plugin #status-message {
@@ -516,7 +526,7 @@
             box-sizing: border-box;
             margin-right: auto;
             padding: 6px 12px;
-            border-radius: 4px;
+            border-radius: 3px;
             font-size: 0.85em;
             line-height: 1.35;
             overflow: hidden;
@@ -535,9 +545,9 @@
         }
 
         .vif-plugin #status-message.success {
-            background: #e8f5e9;
+            background: #e7f6ee;
             border-color: var(--good-color);
-            color: #2e7d32;
+            color: #1e9e5a;
         }
 
         .vif-plugin #status-message.error {
@@ -554,7 +564,7 @@
             gap: 12px;
             flex-wrap: wrap;
             font-size: 0.8em;
-            color: #666;
+            color: #6b7480;
         }
 
         .vif-plugin #dirty-indicator {
@@ -572,43 +582,50 @@
         }
 
         .vif-plugin #dirty-indicator.state-saved {
-            background: #e8f3ea;
-            border-color: #8fc79c;
-            color: #216c38;
+            background: #e7f6ee;
+            border-color: #a8d8bd;
+            color: #1e9e5a;
         }
 
         .vif-plugin #dirty-indicator.state-unsaved {
-            background: #fff3cd;
-            border-color: #e2b84b;
-            color: #7a5400;
+            background: #fff8e5;
+            border-color: #e2c96b;
+            color: #8a6d00;
         }
 
         .vif-plugin #dirty-indicator.state-saving {
-            background: #e7f0ff;
-            border-color: #86aee8;
-            color: #1f4d9b;
+            background: #fdf1e0;
+            border-color: #f4c988;
+            color: #9a5b00;
         }
 
 
         .vif-plugin .top-config-panel #btn-save-top {
-            background: #2a71ab;
-            border-color: #225783;
+            background: #f08a00;
+            border-color: #f08a00;
             color: #fff;
         }
 
         .vif-plugin .top-config-panel #btn-save-top:hover {
-            background: #225783;
-            border-color: #225783;
+            background: #d97c00;
+            border-color: #d97c00;
+        }
+
+        /* The ID selector above outranks button:disabled, so restate it. */
+        .vif-plugin .top-config-panel #btn-save-top:disabled {
+            background: #f5f6f7;
+            border-color: #e3e6ea;
+            color: #98a1ab;
         }
 
         .vif-plugin .listener-name-preview {
             min-width: 220px;
             max-width: 300px;
             padding: 6px 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background: #f3f4f6;
-            color: #555;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
+            background: #f5f6f7;
+            color: #5d6771;
             font-family: monospace;
             font-size: 0.95em;
             line-height: 1.4;
@@ -642,12 +659,12 @@
         }
 
         .vif-plugin .listener-list option.listener-disabled {
-            color: #8a8a8a;
+            color: #98a1ab;
         }
 
         /* Inert placeholder shown when no listeners are configured. */
         .vif-plugin .listener-list option.listener-empty {
-            color: #8a8a8a;
+            color: #98a1ab;
             font-style: italic;
         }
 
@@ -711,7 +728,7 @@
 
 .vif-plugin .byte-track-fields {
             padding-left: 20px;
-            border-left: 3px solid #2a71ab;
+            border-left: 3px solid #f08a00;
             margin-left: 10px;
         }
 
@@ -861,9 +878,9 @@
         .vif-plugin .event-listeners-panel {
             flex: 1;
             min-width: 0;
-            background: #fafafa;
-            border-radius: 12px;
-            border: 1px solid #ccc;
+            background: #fff;
+            border-radius: 3px;
+            border: 1px solid #cfd5db;
             padding: 20px;
             position: sticky;
             top: 16px;
@@ -887,8 +904,8 @@
 
         .vif-plugin .array-item {
             background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 8px;
+            border: 1px solid #e3e6ea;
+            border-radius: 3px;
             margin-bottom: 8px;
             overflow: hidden;
         }
@@ -898,22 +915,22 @@
             align-items: center;
             justify-content: space-between;
             padding: 8px 12px;
-            background: #f0f0f0;
+            background: #f5f6f7;
             cursor: pointer;
             font-size: 0.85em;
             font-weight: bold;
-            color: #333;
+            color: #2b3440;
             user-select: none;
         }
 
         .vif-plugin .array-item-header:hover {
-            background: #e8e8e8;
+            background: #eef0f2;
         }
 
         .vif-plugin .array-item-chevron {
             font-size: 0.7em;
             margin-right: 6px;
-            color: #666;
+            color: #6b7480;
         }
 
         .vif-plugin .array-item-header .array-item-actions {
@@ -960,7 +977,7 @@
 
         .vif-plugin .string-list-field .string-list-hint {
             font-size: 0.75em;
-            color: #888;
+            color: #6b7480;
         }
 
         .vif-plugin .collapsible-header {
@@ -972,7 +989,7 @@
         }
         .vif-plugin .collapsible-header .collapse-chevron {
             font-size: 0.7em;
-            color: #666;
+            color: #6b7480;
             transition: transform 0.2s ease;
             display: inline-block;
         }
@@ -988,15 +1005,15 @@
         }
 
         .vif-plugin .form-panel-header {
-            background: #e8e8e8;
-            border-bottom: 1px solid #d0d0d0;
-            color: #111;
+            background: #f5f6f7;
+            border-bottom: 1px solid #e3e6ea;
+            color: #5d6771;
             margin: -20px -20px 16px -20px;
             padding: 12px 20px;
             font-size: 0.85em;
             font-weight: bold;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 1.2px;
         }
         .vif-plugin .form-wrapper.has-header {
             overflow: hidden;
@@ -1028,10 +1045,28 @@
 
         <div class="sticky-page-header">
         <div class="streams-header">
-            <h2>VIF Stream Configuration</h2>
-            <div class="item-right">
-                <button onclick="loadAjaxPluginContent('server','vif','shm.html','')">Back to Dashboard</button>
-            </div>
+            <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
+        </div>
+        <!-- Global VIF nav (same four tabs on every VIF page): this page is the
+             Configs area; the secondary row says which config surface. -->
+        <div class="vif-tabs-row">
+            <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams</button>
+            <button class="vif-tab" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand</button>
+            <span class="vif-tab is-active">Configs</span>
+        </div>
+        <script>
+            // Record this page as the last-used tab (down to the config surface):
+            // a fresh entry into the plugin returns here via shm.html's sticky-tab
+            // script, same as the Live/On-Demand tabs.
+            try {
+                sessionStorage.setItem('vifLastTab', 'configs');
+                sessionStorage.setItem('vifConfigsPage', 'stream-config.html');
+            } catch (e) { /* non-sticky */ }
+        </script>
+        <div class="vif-subtabs" style="margin-bottom: 12px;">
+            <span class="vif-subtab is-active">Stream Configs</span>
+            <button class="vif-subtab" title="Defaults every stream config inherits.&#10;A config that sets its own value pins it." onclick="loadAjaxPluginContent('server','vif','default.html','')">Stream Config Defaults</button>
+            <button class="vif-subtab" title="On-Demand job settings:&#10;caps, retention, lifecycle webhooks, secrets." onclick="try { sessionStorage.setItem('vifVodView','settings'); } catch (e) {} loadAjaxPluginContent('server','vif','vod.html','')">On-Demand Configs</button>
         </div>
 
         <!-- Stream Selector -->
@@ -1042,7 +1077,7 @@
                     <div class="top-config-toolbar-heading">
                         <div class="form-section-title" style="margin-bottom:0;">Incoming Stream</div>
                     </div>
-                    <select id="cfg-stream-select" onchange="onStreamSelected()" style="font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+                    <select id="cfg-stream-select" onchange="onStreamSelected()" style="font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #cfd4da; border-radius:3px;">
                         <option value="">Loading streams...</option>
                     </select>
                 </div>
@@ -1053,6 +1088,7 @@
                 </div>
                 <div class="section-help" style="margin-top:6px; margin-bottom:0;">
                     Choose which incoming streams VIF should analyze. <strong>Application</strong> must match exactly. <strong>Stream Name</strong> can be an exact name or a regex pattern — e.g. application <code>live</code> and stream name <code>traffic.*</code> matches <code>rtmp://…/live/traffic_cam1</code>.
+                    Fields you leave unset inherit from the <a href="#" onclick="loadAjaxPluginContent('server','vif','default.html',''); return false;">Stream Config Defaults</a>.
                 </div>
 
             </div>
@@ -1064,13 +1100,14 @@
             <div id="new-stream-fields" style="display:none;">
                 <div class="form-group">
                     <label>Application</label>
-                    <input type="text" id="cfg-new-app-name" value="" placeholder="live" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <input type="text" id="cfg-new-app-name" value="" placeholder="live" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="updateMatchOverlapNote()">
                     <div class="field-help">Exact application match, such as <code>live</code>.</div>
                 </div>
                 <div class="form-group">
                     <label>Stream Name (exact or regex)</label>
-                    <input type="text" id="cfg-new-stream-name" value="" placeholder="e.g. traffic.*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <input type="text" id="cfg-new-stream-name" value="" placeholder="e.g. traffic.*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="updateMatchOverlapNote()">
                     <div class="field-help">Use an exact name like <code>traffic_cam1</code> or a regex pattern like <code>traffic.*</code>.</div>
+                    <div id="match-overlap-note" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:#9a5b00; margin:6px 0 0;"></div>
                 </div>
             </div>
         </div>
@@ -1129,7 +1166,7 @@
                 </label>
                 <div class="field-help">When enabled, frames are pulled from the transcoder output instead of the incoming stream.</div>
             </div>
-            <div id="cfg-use-transcoder-warning" style="display:none; color:#b8860b; background:#fffbe6; border:1px solid #ffe58f; border-radius:4px; padding:6px 10px; margin-bottom:8px;">
+            <div id="cfg-use-transcoder-warning" style="display:none; color:#8a6d00; background:#fff8e5; border:1px solid #e2c96b; border-radius:3px; padding:6px 10px; margin-bottom:8px;">
                 The encoder/stream must be restarted for this change to take effect.
             </div>
             <div class="form-group" id="cfg-frame-grab-group">
@@ -1466,9 +1503,9 @@
                     <div class="form-group">
                         <label>Reasoning Level</label>
                         <div id="cfg-vlm-reasoning-level" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="low" onchange="markDirty()"> Low</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="low" checked onchange="markDirty()"> Low</label>
                             <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="medium" onchange="markDirty()"> Medium</label>
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="high" checked onchange="markDirty()"> High</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="high" onchange="markDirty()"> High</label>
                         </div>
                         <div class="field-help">How much the model deliberates before answering. <strong>Low</strong> is fastest; <strong>High</strong> is most robust against false positives. Applies to Detect only.</div>
                     </div>
@@ -1498,7 +1535,7 @@
                         <div class="field-help">Optional. Overrides the built-in system prompt. Supports the placeholders listed under the user prompt.</div>
                     </div>
                     <div class="form-group">
-                        <label>User Prompt <span style="color:#c0392b;">*</span></label>
+                        <label>User Prompt <span style="color:#d64541;">*</span></label>
                         <textarea id="cfg-vlm-user-prompt" rows="4" placeholder="Required in Custom mode &mdash; your instruction to the model." oninput="updateVlmCustomLint()"></textarea>
                         <div class="field-help">Required in Custom mode. Placeholders (substituted in both prompts): <code>{class_list}</code> (the classes below, when set), <code>{frame_count}</code> (images in the window), <code>{duration_seconds}</code> (window length in seconds).</div>
                     </div>
@@ -1513,7 +1550,7 @@
                             <button type="button" class="btn-secondary" onclick="addVlmClassRow('cfg-vlm-custom-classes')" style="margin-top:6px;">+ Add class</button>
                         </div>
                         <div class="field-help">Optional. One row per class, each with an optional hint. Injected wherever <code>{class_list}</code> appears in your prompts (a class with a hint renders as <code>- class: hint</code>). Leave empty for prompts that don't reference a class list.</div>
-                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#c0392b;">Classes are set but neither prompt contains <code>{class_list}</code>, so the classes won't be injected into the prompt.</div>
+                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#d64541;">Classes are set but neither prompt contains <code>{class_list}</code>, so the classes won't be injected into the prompt.</div>
                     </div>
                     <!-- align-items:flex-start so the label pins to the top of the
                          kind selector / sub-editor stack. -->
@@ -1548,7 +1585,7 @@
                                     <div class="field-help" style="margin-left:0;">A JSON Schema, passed to the model verbatim. Validated as JSON here; the endpoint may still reject schemas its guided decoding can't honor.</div>
                                 </div>
                             </div>
-                            <div id="vlm-schema-error" class="field-help" style="margin-left:0; display:none; color:#c0392b;"></div>
+                            <div id="vlm-schema-error" class="field-help" style="margin-left:0; display:none; color:#d64541;"></div>
                         </div>
                     </div>
                 </div>
@@ -1692,8 +1729,10 @@
                         <input type="password" id="cfg-vi-service-api-key" value="" placeholder="inherited from default config"
                                autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
                         <button type="button" id="cfg-vi-service-api-key-toggle" onclick="toggleVisServiceApiKeyVisibility()" title="Show/hide API key">Show</button>
+                        <button type="button" id="cfg-vi-service-api-key-clear" onclick="clearVisServiceApiKey()" title="Stop overriding the API key for this stream">Disable</button>
                     </div>
-                    <div class="field-help">Override the <code>X-API-KEY</code> header sent to the Video Intelligence Service (VIS) for this stream only.</div>
+                    <div class="field-help">Override the <code>X-API-KEY</code> header sent to the Video Intelligence Service (VIS) for this stream only.
+                        A stored key is never shown, so this field is blank even when one is set &mdash; <strong>Disable</strong> is how you drop it and go back to the default config's key.</div>
                 </div>
                 <hr>
                 <div class="form-section-title" style="margin-top:12px;">Debug Options</div>
@@ -1816,10 +1855,13 @@
 
     </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.3"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.0.3"></script>
-<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.0.3"></script>
-<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.0.3"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.1.0"></script>
 <script>
     VIF.streamConfig.init();
 </script>

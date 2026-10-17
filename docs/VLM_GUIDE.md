@@ -41,7 +41,7 @@ tail -f wse/logs/wowzastreamingengine_vi.log
 
 You'll see one entry per analysis window with each detected class and the model's reasoning. The same results are embedded as ID3 tags in the stream, and an overlay rendition named `vlm-demo-vi` shows detected classes burned into the video (play it from the Engine Manager test player at `http://localhost:8088`, or directly at `http://localhost/live/vlm-demo-vi/playlist.m3u8`).
 
-**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing `wse/conf/video-intelligence.json` and restarting the stream to apply - either by toggling its active state or by restarting the encoder.
+**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing `wse/conf.modules/vif/live_vlmDotStar.json` and restarting the stream to apply - either by toggling its active state or by restarting the encoder.
 
 ---
 
@@ -111,7 +111,7 @@ Spin up everything on one machine and the pieces are pre-wired end to end:
 | What | Default | Why it works |
 |---|---|---|
 | Model | `Qwen/Qwen3-VL-4B-Instruct-FP8` | Bundled, commercial-use friendly, fits a 24 GB GPU |
-| Endpoint | `http://vlm.docker:8000/v1` | Pre-set in the shipped `video-intelligence.json`; resolves on the compose network |
+| Endpoint | `http://vlm.docker:8000/v1` | Pre-set in the shipped `Default.json`; resolves on the compose network |
 | Demo stream | `vlm.*` on app `live` | Publish `live/vlm-anything` and analysis starts |
 | Weights | cached in `./vis/vlm-models` | One ~5 GB download, ever; pre-seedable for air-gapped hosts |
 | Compile cache | `./vis/vlm-cache` | vLLM's ~40 s startup compile happens once, not on every container recreation |
@@ -225,7 +225,7 @@ Sizing tip: at startup vLLM logs `Maximum concurrency for <N> tokens per request
 
 **Air-gapped hosts:** pre-seed the weights on a connected machine — `pip install -U huggingface_hub && HF_HOME=./vis/vlm-models hf download Qwen/Qwen3-VL-4B-Instruct-FP8` — copy `./vis/vlm-models` to the target, and set `HF_HUB_OFFLINE=1` in `.env` so boots skip HuggingFace Hub probes. (Running the stack once on a connected machine and copying the populated directory works too.)
 
-### Stream configuration (`wse/conf/video-intelligence.json`)
+### Stream configuration (`wse/conf.modules/vif/Default.json` and per-stream configs)
 
 Settings live in the `vlm_analysis` block — globally for defaults, per-stream to override. Two stream-level settings control the request rate: `inference_fps × duration` ≈ frames per request, one request per `duration` window (e.g. `inference_fps: 2`, `duration: 2` → 4 frames every 2 seconds).
 

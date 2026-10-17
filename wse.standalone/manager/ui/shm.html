@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.0.3">
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
 <style>
 
     .vif-dashboard .plugin-scroll {
@@ -21,20 +21,28 @@
         z-index: 20;
         background: #fff;
     }
-    /* Pin the "VIF Dashboard" page title to the same style as the other pages' h2
-       (vif.css .vif-plugin h2 sets only these two), with enough specificity to beat any
-       Manager-global h2 rule in the dashboard's injection context. Weight/family are left
-       to inherit so they match the other pages. Child combinator so it doesn't touch the
-       "Active Streams" h2 (which lives inside .streams-header-title). */
-    .vif-dashboard .streams-header > h2 {
-        font-size: 18px;
-        margin: 0;
-    }
+    /* Page title styling lives in vif.css (.vif-header-title — shared with
+       vod.html), as does the tabs row. */
     .vif-dashboard .streams-header {
         align-items: center;
         margin-bottom: 10px;
         min-width: 0;
+        border-bottom-color: #e3e6ea;
     }
+    /* The title header butts against the tabs row below it (which carries its
+       own vertical padding); only the sticky page header loses the gap. */
+    .vif-dashboard .sticky-page-header .streams-header {
+        margin-bottom: 0;
+    }
+    /* The second .streams-header (the "Active Streams" section row) keeps a
+       smaller section-heading scale. */
+    .vif-dashboard .streams-header-title h2 {
+        font-size: 15px;
+        font-weight: 700;
+        color: #1b2430;
+    }
+
+    /* Tabs row styles are shared with vod.html — see vif.css. */
 
     .vif-dashboard .streams-header-title {
         display: flex;
@@ -67,9 +75,11 @@
         overflow-x: hidden;
     }
 
+    /* Row-internal blocks all left-align (mock-faithful): headers and cell
+       content share the column's left edge at any viewport width. */
     .vif-dashboard .vif-row {
         display: flex;
-        justify-content: flex-end;
+        justify-content: flex-start;
     }
 
     /* --- Host Info Grid --- */
@@ -84,21 +94,130 @@
         min-width: min(240px, 100%);
         flex: 1 1 240px;
         max-width: 100%;
-        background: #fafafa;
+        background: #f5f6f7;
         padding: 12px;
-        border-radius: 12px;
-        border: 1px solid #ccc;
+        border-radius: 3px;
+        border: 1px solid #e3e6ea;
         transition: all 0.3s ease;
     }
 
-    /* --- Streams Table --- */
+    /* --- Palette overrides (flat stat band, orange accent) ---
+       These out-cascade the equal-specificity vif.css rules because this
+       page <style> loads after the vif.css <link>. */
+    .vif-dashboard .metric-card {
+        background: #f5f6f7;
+        border: 1px solid #e3e6ea;
+        border-radius: 3px;
+    }
+    .vif-dashboard .metric-label {
+        color: #5d6771;
+        font-size: 0.72em;
+        letter-spacing: 1.2px;
+    }
+    .vif-dashboard .metric-value {
+        color: #1b2430;
+    }
+    .vif-dashboard .metric-group-title {
+        color: #5d6771;
+        letter-spacing: 1.2px;
+    }
+    .vif-dashboard .metric-card-muted {
+        background: #f0f1f3;
+    }
+    .vif-dashboard input:checked + .slider-switch {
+        background-color: #f08a00;
+    }
+    .vif-dashboard .slider {
+        accent-color: #f08a00;
+    }
+
+    /* --- Top stat band: one flat row of labeled cells, hairline-separated.
+       The 1px grid gap over a hairline-colored background draws the separators
+       correctly however the cells wrap, so the band stays responsive. --- */
+    .vif-dashboard .vif-stat-band {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+        gap: 1px;
+        /* Band background matches the cells so a partially-filled wrap row
+           reads as a continuation of the band; the hairlines come from each
+           cell's outline filling the 1px grid gap. */
+        background: #f5f6f7;
+        border: 1px solid #e3e6ea;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 16px;
+    }
+    .vif-dashboard .vif-stat-band:empty {
+        display: none;
+    }
+    .vif-dashboard .vif-stat-cell {
+        background: #f5f6f7;
+        outline: 1px solid #e3e6ea;
+        padding: 12px 16px;
+        min-width: 0;
+    }
+    .vif-dashboard .vif-stat-label {
+        font-size: 0.72em;
+        color: #5d6771;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        margin-bottom: 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .vif-dashboard .vif-stat-value {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1.05em;
+        font-weight: 700;
+        color: #1b2430;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .vif-dashboard .vif-stat-sub {
+        font-size: 0.78em;
+        color: #6b7480;
+        margin-top: 4px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .vif-dashboard .vif-stat-bar {
+        flex: 1 1 60px;
+        max-width: 120px;
+        height: 6px;
+        border-radius: 3px;
+        background: #e0e3e7;
+        overflow: hidden;
+    }
+    .vif-dashboard .vif-stat-bar > span {
+        display: block;
+        height: 100%;
+        background: #f08a00;
+    }
+    .vif-dashboard .vif-stat-cell-muted .vif-stat-value {
+        color: #6b7480;
+        font-weight: 600;
+    }
+
+    /* Metric detail groups: hidden unless renderStatBand() decides the
+       aggregate band cannot represent the host (multi-GPU / multi-instance). */
+    .vif-dashboard .vif-metric-details {
+        display: none;
+    }
+    .vif-dashboard .vif-metric-details.is-visible {
+        display: block;
+    }
+
+    /* --- Streams Table (flat, hairline-separated) --- */
     .vif-dashboard .table-wrapper {
         overflow-x: auto;
         overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
-        background: #fafafa;
-        border-radius: 12px;
-        border: 1px solid #ccc;
+        background: #fff;
+        border-radius: 3px;
+        border: 1px solid #cfd5db;
         width: 100%;
         max-width: 100%;
         min-width: 0;
@@ -115,21 +234,35 @@
     /* Scoped to the streams table: the dashboard also renders small per-GPU
        .gpu-table tables (vif.css) that must not inherit this chrome. */
     .vif-dashboard #streams-table thead {
-        background-color: #000;
+        background-color: #fff;
     }
 
     .vif-dashboard #streams-table th,
     .vif-dashboard #streams-table td {
         padding: 12px 15px;
-        border-bottom: 1px solid #ccc;
+        border-bottom: 1px solid #dfe3e8;
         vertical-align: middle;
     }
 
     .vif-dashboard #streams-table th {
-        color: #fff;
-        text-align: center;
-        font-weight: normal;
+        color: #5d6771;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.72em;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        border-bottom: 1px solid #cfd5db;
         white-space: nowrap;
+    }
+
+    /* Size the info icon down to the smaller header type. */
+    .vif-dashboard #streams-table th .vif-help-tip {
+        width: 13px;
+        height: 13px;
+    }
+
+    .vif-dashboard #streams-table td {
+        color: #2b3440;
     }
 
     .vif-dashboard #streams-table th:nth-child(7),
@@ -138,11 +271,53 @@
         white-space: nowrap;
     }
 
+    /* Proportional column widths (hints under table-layout:auto) so extra
+       viewport width distributes evenly instead of ballooning the columns
+       with the most content; min-width 1200px above stays the floor. */
+    .vif-dashboard #streams-table th:nth-child(1) { width: 9%; }
+    .vif-dashboard #streams-table th:nth-child(2) { width: 13%; }
+    .vif-dashboard #streams-table th:nth-child(3) { width: 24%; }
+    .vif-dashboard #streams-table th:nth-child(4) { width: 8%; }
+    .vif-dashboard #streams-table th:nth-child(5) { width: 11%; }
+    .vif-dashboard #streams-table th:nth-child(6) { width: 11%; }
+    .vif-dashboard #streams-table th:nth-child(8) { width: 12%; }
+
     .vif-dashboard .empty-streams-row td {
         text-align: center;
-        color: #666;
-        font-style: italic;
-        padding: 18px 15px;
+        color: #6b7480;
+        font-size: 13px;
+        line-height: 1.6;
+        padding: 64px 24px 68px;
+    }
+    .vif-dashboard .empty-streams-row .empty-icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: #f0f1f3;
+        color: #5d6771;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 14px;
+    }
+    .vif-dashboard .empty-streams-row .empty-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #2b3440;
+        margin-bottom: 6px;
+    }
+    .vif-dashboard .empty-streams-row .empty-hint {
+        max-width: 560px;
+        margin: 0 auto;
+    }
+    .vif-dashboard .empty-streams-row a {
+        color: #f08a00;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .vif-dashboard .empty-streams-row a:hover {
+        color: #d97c00;
+        text-decoration: underline;
     }
 
     .vif-dashboard .align-left {
@@ -152,21 +327,66 @@
         text-align: right;
     }
 
-    /* Button styling to match reference */
+    /* vod design language: identifiers and measurements take the vod pages'
+       mono stack (vod.css --mono); big stat values stay proportional bold
+       with tabular digits, matching the report band's .rcv. */
+    .vif-dashboard {
+        --mono: ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
+    }
+    .vif-dashboard .vif-stat-value,
+    .vif-dashboard .metric-value {
+        font-variant-numeric: tabular-nums;
+    }
+    .vif-dashboard #streams-table td:nth-child(2) > strong {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        word-break: break-all;
+    }
+    .vif-dashboard #streams-table .vif-row,
+    .vif-dashboard #streams-table .vif-skip-value,
+    .vif-dashboard #streams-table [id$="-vihost"],
+    .vif-dashboard #streams-table [id$="-sts"],
+    .vif-dashboard #streams-table td:nth-child(4) > div,
+    .vif-dashboard #streams-table td:nth-child(5) > div,
+    .vif-dashboard #streams-table td:nth-child(6) > div,
+    .vif-dashboard #streams-table td:nth-child(7) > div {
+        font-family: var(--mono);
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+    }
+    .vif-dashboard .gpu-table td:not(.gpu-device) {
+        font-family: var(--mono);
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Buttons: quiet white/outline by default, solid orange for the one
+       primary action (New Analysis) — dashboard redesign palette. */
     .vif-dashboard button {
-        padding: 0.4em 0.7em;
-        font-family: monospace;
+        padding: 8px 14px;
+        font-family: inherit;
         font-size: 0.85em;
+        font-weight: 600;
         cursor: pointer;
-        background: #2a71ab;
-        border: 1px solid #ccc;
-        color: #ffffff;
-        border-radius: 4px;
+        background: #fff;
+        border: 1px solid #cfd4da;
+        color: #1b2430;
+        border-radius: 3px;
         margin-bottom: 4px;
     }
 
     .vif-dashboard button:hover {
-        background: #225783;
+        background: #f5f6f7;
+        border-color: #b9c0c8;
+    }
+
+    .vif-dashboard button.vif-btn-primary {
+        background: #f08a00;
+        border-color: #f08a00;
+        color: #fff;
+    }
+    .vif-dashboard button.vif-btn-primary:hover {
+        background: #d97c00;
+        border-color: #d97c00;
     }
 
     .vif-dashboard button:disabled {
@@ -186,7 +406,7 @@
     .vif-dashboard .vif-controls {
         display: flex;
         align-items: center;
-        justify-content: flex-end;
+        justify-content: flex-start;
         padding: 2px;
         min-width: 0;
     }
@@ -217,7 +437,7 @@
 
     .vif-dashboard .vif-skip-controls {
         flex-direction: column;
-        align-items: flex-end;
+        align-items: flex-start;
         gap: 0;
     }
 
@@ -228,7 +448,7 @@
     .vif-dashboard .vif-skip-note-line {
         display: flex;
         align-items: center;
-        justify-content: flex-end;
+        justify-content: flex-start;
         gap: 6px;
     }
 
@@ -259,7 +479,7 @@
 
     .vif-dashboard .stream-type-cell {
         min-width: 150px;
-        text-align: center;
+        text-align: left;
     }
 
     .vif-dashboard .stream-type-icon {
@@ -270,7 +490,7 @@
     }
 
     .vif-dashboard .stream-type-meta-line {
-        text-align: center;
+        text-align: left;
         line-height: 1.35;
     }
 
@@ -298,8 +518,8 @@
     /* The reason line's own row is a single colspan=8 cell spanning the whole
        table. max-width:0 stops a long (server-provided) reason from widening
        the table under table-layout:auto - the data rows above fix the column
-       widths and the reason div truncates within them. Replaces the legacy
-       height=14 attribute: height is now the constant .row-status-line slot. */
+       widths and the reason div truncates within them. Row height comes from
+       the constant .row-status-line slot. */
     .vif-dashboard #streams-table td.row-status-cell {
         max-width: 0;
     }
@@ -307,6 +527,31 @@
     .vif-dashboard .frames-window-note {
         color: #555;
         white-space: nowrap;
+    }
+
+    /* Stream notice/error chip: a calm dot + short label in the row's status
+       line; the full server text opens in the click popover. Declared after
+       .row-status-line so the inline-flex display wins on the shared element. */
+    .vif-dashboard .vif-alert-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 0.8em;
+        color: #6b7480;
+        cursor: pointer;
+    }
+    .vif-dashboard .vif-alert-chip:hover {
+        color: #5d6771;
+    }
+    .vif-dashboard .vif-alert-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #f08a00;
+        flex: 0 0 auto;
+    }
+    .vif-dashboard .vif-alert-chip-error .vif-alert-dot {
+        background: #d64541;
     }
 
     @media (max-width: 1024px) {
@@ -330,16 +575,33 @@
              divider below). The config buttons stand in for the other pages' Back button. -->
         <div class="sticky-page-header">
         <div class="streams-header">
-            <h2>VIF Dashboard</h2>
-            <div id="config-streams" class="item-right" style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
-                <button id="btn-default-config" disabled title="Waiting for Engine connection" onclick="loadAjaxPluginContent('server','vif','default.html','')">Default Config</button>
-                <button id="btn-stream-configs" disabled title="Waiting for Engine connection" onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
-            </div>
+            <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
+        </div>
+        <!-- Global VIF nav: the same four tabs on every VIF page — the row IS the
+             navigation, so there are no per-page config/back buttons. This page is
+             the Live Streams tab (inert active pill). Counts are kept current by
+             the tab script at the bottom of this fragment. -->
+        <div class="vif-tabs-row">
+            <span class="vif-tab is-active">Live Streams <span class="vif-tab-count" id="vif-tab-live-count">0</span></span>
+            <button class="vif-tab" id="vif-tab-ondemand" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count">&ndash;</span></button>
+            <button class="vif-tab" onclick="VIF.core.gotoConfigs()">Configs</button>
+            <span class="vif-tabs-meta item-right">Auto-refresh 1s</span>
         </div>
         </div>
 
         <div id="dashboard-banner" class="dashboard-banner" style="display:none;"></div>
 
+        <!-- Primary metrics: one flat stat band. Rendered by
+             renderStatBand() in vif-dashboard.js. -->
+        <div id="vif-stat-band" class="vif-stat-band"></div>
+
+        <!-- Detail groups (per-GPU tables, per-instance streams lines).
+             Hidden by default; renderStatBand() reveals this section whenever a
+             single aggregate row cannot carry the data honestly (several GPUs or
+             several inference instances). The containers stay in the DOM
+             unconditionally: renderDashboard() keys its "page still loaded" check
+             on #host-display. -->
+        <div id="vif-metric-details" class="vif-metric-details">
         <div class="metric-group" id="wse-host-group">
             <div class="metric-group-title">WSE Host</div>
             <div id="host-display" class="host-container metric-grid">
@@ -351,12 +613,13 @@
         </div>
 
         <div id="vis-instances-container"></div>
+        </div>
 
         <div class="streams-header">
             <div class="streams-header-title">
-                <h2>Active Streams: <span id="active-streams">0</span></h2>
+                <h2>Active Live Streams: <span id="active-streams">0</span></h2>
                 <div id="header-values"></div>
-                <span class="vif-help-tip" title="Processing avg = mean Video Intelligence Service (VIS) processing time across active streams. Detect avg = mean WSE object-processing (frame detect) time across active streams.">?</span>
+                <span class="vif-help-tip" title="Processing avg = mean Video Intelligence Service (VIS) processing time across active streams. Detect avg = mean Wowza Streaming Engine (WSE) object-processing (frame detect) time across active streams.">?</span>
             </div>
             <div class="vif-controls item-right">
                 Thumbnails&nbsp;
@@ -375,13 +638,13 @@
             <table id="streams-table">
                 <thead>
                     <tr>
-                        <th>Type</th>
+                        <th>Model Type</th>
                         <th>Stream Name</th>
                         <th>Stream Info</th>
-                        <th>Ping (RTT)<span class="vif-help-tip" title="Round-trip time to the Video Intelligence Service (VIS)">?</span></th>
-                        <th>Ttl Processing Avg<span class="vif-help-tip" title="Video Intelligence Service (VIS) processing time per analysis request">?</span></th>
-                        <th>Frame Detect Avg<span class="vif-help-tip" title="WSE Object Processing Time">?</span></th>
-                        <th>Frames Analyzed<span class="vif-help-tip" title="Share of the frames WSE captured from the stream that were analyzed by the Video Intelligence Service (VIS), over the last 10 seconds. Hover a value for the frame counts">?</span></th>
+                        <th>Ping (RTT)<span class="vif-help-tip" title="Round-trip time between Wowza Streaming Engine (WSE) and the Video Intelligence Service (VIS)">?</span></th>
+                        <th>Processing Avg<span class="vif-help-tip" title="Video Intelligence Service (VIS) processing time per analysis request">?</span></th>
+                        <th>Frame Detect Avg<span class="vif-help-tip" title="Time from Wowza Streaming Engine (WSE) sending the frames to receiving the detections back. Includes network time and Video Intelligence Service (VIS) processing.">?</span></th>
+                        <th>Frames Analyzed<span class="vif-help-tip" title="Share of the frames Wowza Streaming Engine (WSE) captured from the stream that were analyzed by the Video Intelligence Service (VIS), over the last 10 seconds">?</span></th>
                         <th>Thumbnail</th>
                     </tr>
                 </thead>
@@ -394,8 +657,83 @@
 </div>
 </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.0.3"></script>
-<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=1.0.3"></script>
+<script>
+    // Tab stickiness: the dashboard is the tabbed home, so any route into it
+    // (the Manager's VIF nav tab, Back to Dashboard buttons) lands on whichever
+    // tab was last in use — On-Demand, or the Configs area (down to which config
+    // surface). Only an explicit tab choice (another page's Live Streams tab)
+    // sets the one-shot flag that pins Live. The redirect target is whitelisted,
+    // never taken raw from storage, and deferred so injection completes first.
+    (function () {
+        try {
+            var explicit = sessionStorage.getItem('vifNavExplicit');
+            sessionStorage.removeItem('vifNavExplicit');
+            if (!explicit) {
+                var last = sessionStorage.getItem('vifLastTab');
+                if (last === 'ondemand') {
+                    setTimeout(function () { loadAjaxPluginContent('server', 'vif', 'vod.html', ''); }, 0);
+                    return;
+                }
+                if (last === 'configs') {
+                    // Same whitelist as VIF.core.gotoConfigs (this script runs
+                    // before the core script loads, so it cannot call it).
+                    var page = sessionStorage.getItem('vifConfigsPage');
+                    if (page === 'settings') {
+                        sessionStorage.setItem('vifVodView', 'settings');
+                        setTimeout(function () { loadAjaxPluginContent('server', 'vif', 'vod.html', ''); }, 0);
+                        return;
+                    }
+                    page = page === 'default.html' ? 'default.html' : 'stream-config.html';
+                    setTimeout(function () { loadAjaxPluginContent('server', 'vif', page, ''); }, 0);
+                    return;
+                }
+            }
+            sessionStorage.setItem('vifLastTab', 'live');
+        } catch (e) { /* storage unavailable — stay on Live */ }
+    })();
+</script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=1.1.0"></script>
+<!-- vod-main.js only for its VIF.vod.api facade (the On-Demand tab count);
+     V.init is not called here. Needs vif-api/vif-sdk, loaded above. -->
+<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.1.0"></script>
 <script>
     VIF.dashboard.init();
+    // Click-popover tips: upgrades every "?" help-tip (native title -> a modern
+    // card that opens on click, closes on the next click / Escape / scroll) and
+    // serves the rows' notice chips via the same data-vif-tip contract.
+    VIF.core.initClickTips(document.querySelector('.vif-dashboard'));
+
+    // Header tabs: mirror the live-stream count the dashboard already maintains
+    // into the Live Streams tab, and poll the VOD jobs API for the On-Demand
+    // count + state summary. Purely additive — any failure leaves the tabs
+    // rendered with their placeholder values.
+    (function () {
+        var live = document.getElementById('active-streams');
+        var tabLive = document.getElementById('vif-tab-live-count');
+        if (live && tabLive) {
+            var syncLive = function () { tabLive.textContent = live.textContent || '0'; };
+            new MutationObserver(syncLive)
+                .observe(live, { childList: true, characterData: true, subtree: true });
+            syncLive();
+        }
+
+        var tabCount = document.getElementById('vif-tab-ondemand-count');
+        function refreshOnDemand() {
+            if (!window.VIF || !VIF.vod || !VIF.vod.api) return;
+            // The v2 listing reports the total for limit-1 (VI-875 style) —
+            // no need to fetch a page just to count it.
+            VIF.vod.api.listJobs({ limit: 1 }).then(function (page) {
+                if (tabCount && page && typeof page.total === 'number') tabCount.textContent = String(page.total);
+            }).catch(function () { /* Engine unreachable — leave the placeholder */ });
+        }
+        refreshOnDemand();
+        // No unload hook on fragments — clear the previous instance's poller
+        // so re-injections don't accumulate timers.
+        if (window.__vifShmTabTimer) clearInterval(window.__vifShmTabTimer);
+        window.__vifShmTabTimer = setInterval(refreshOnDemand, 15000);
+    })();
 </script>

@@ -4,6 +4,7 @@ window.VIF_LISTENER_PROPERTIES['OverlayEvent'] = [
     { scene_methods: ['immediate'] },
     { vlm_methods: ['immediate'] },
     { synthetic_methods: ['immediate'] },
+    { requires: ['RENDER_TARGET'] },
     { key: 'fade_step', label: 'Fade Step', type: 'number', default: 20, tooltip: 'Number of frames over which overlays fade out' },
     { key: 'jitter', label: 'Jitter', type: 'number', default: 0, tooltip: 'Don\'t draw if the pixel change is less than this' },
     { key: 'show_stats', label: 'Show Stats', type: 'boolean', default: true, tooltip: 'Overlay system stats on page' },

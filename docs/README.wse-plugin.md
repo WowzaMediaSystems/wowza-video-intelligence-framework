@@ -39,9 +39,16 @@ Add  `--help` to the above commands to see all the options available.
 	* jetty-websocket-core-client-12.1.9.jar
 	* jetty-websocket-core-common-12.1.9.jar
 
-* copy the lib-native `.so` files to the WSE lib-native folder, depending on your architecture
-    * libturbojpeg.aarch64/libturbojpeg.so.0.2.0
-    * libturbojpeg.amd64/libturbojpeg.so.0.2.0
+* copy the lib-native `.so` or `.dll` files to the WSE lib-native folder, depending on your architecture
+    * x86_64
+        * linux64/amd64/libturbojpeg.so.0.2.0
+        * linux64/amd64/libvif-mcframes.so
+    * arm64
+        * linux64/aarch64/libturbojpeg.so.0.2.0
+        * linux64/aarch64/libvif-mcframes.so
+    * windows
+        * win64/turbojpeg.dll
+        * win64/vif-mcframes.dll
 
 * copy the conf.modules files to the WSE conf.modules folder
 
@@ -74,9 +81,15 @@ Add  `--help` to the above commands to see all the options available.
 			<Value>authorized</Value>
 			<Type>String</Type>
 		</Property>
+
+		<Property>
+			<Name>VideoIntelligenceLogRootDir</Name>
+			<Value>/usr/local/WowzaStreamingEngine/logs</Value>
+			<Type>String</Type>
+		</Property>
 	```
 
-* add the REST API CORS policy to the `<Properties>` block inside `<RESTInterface>` in Server.xml
+* set the REST API CORS policy in the `<Properties>` block inside `<RESTInterface>` in Server.xml. The installer sets it to exactly this value, replacing any existing one.
 	```xml
 	<RESTInterface>
 		...
@@ -90,16 +103,14 @@ Add  `--help` to the above commands to see all the options available.
 	</RESTInterface>
 	```
 
-	The Manager UI calls the Engine REST API cross-origin (Manager on 8088, Engine REST on 8087), and the v2 API's concurrency handshake needs `If-Match` allowed on requests and `ETag` exposed on responses. Without this property reads still work but every save from the Manager fails, which is easy to mistake for a Manager bug. The compose stack's `Server.xml` already carries it; an existing Engine's stock `Server.xml` does not.
+	The `restUserHTTPHeaders` property is the CORS policy for the Engine REST API. The Manager
+	UI calls the API cross-origin (Manager on 8088, Engine REST on 8087), and the v2 API's
+	concurrency handshake needs `If-Match` allowed on requests and `ETag` exposed on responses —
+	without them every save from the browser fails its CORS preflight or loses its revision,
+	which reads like the Engine being down. `V2CorsPolicyTest` pins the shipped policy to what
+	the browser SDK actually sends, and pins the installer's value to the shipped policy.
 
 ### Application.xml
-
-Both `live` and `vod` need these changes, and the installer applies them to both by
-default. `live` is where a stream is analysed; `vod` is the application that serves
-the files under the content directory, which is where a VOD job's source lives. An
-install that configures `live` alone analyses those files correctly and then has
-nothing to serve them back.
-
 * add application Modules to each Application.xml that VIF will run under.
 	```xml
 	<Modules>
@@ -137,6 +148,17 @@ nothing to serve them back.
 		</Property>
 	```
 
+* add the `waitForCodecs` stream Property (under `<Streams><Properties>`) to each Application.xml that VIF will run under.
+	```xml
+	<Streams>
+		<Properties>
+			<Property>
+				<Name>waitForCodecs</Name>
+				<!-- waitForCodecs valid values are: none, audio, video, all -->
+				<Value>video</Value>
+			</Property>
+	```
+
 * add HTTPStreamer Properties to each Application.xml that VIF will run under.
 	```xml
 	<HTTPStreamer>
@@ -165,19 +187,13 @@ nothing to serve them back.
 ### WSEM
 * To enable VIF in WSEM/UI, need to copy to
 	```shell
-	mkdir -p /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
-	cp -r docker/manager/ui /usr/local/WowzaStreamingEngine/manager/temp/webapps/enginemanager/wse-plugins/server/vif
+	mkdir -p /usr/local/WowzaStreamingEngine/manager/wse-plugins/server/vif
+	cp -r docker/manager/ui /usr/local/WowzaStreamingEngine/manager/wse-plugins/server/vif
 	```
-  or build a new `.war` file with wsem-war/build-war.sh and move it
-	```shell
-	rm -r /usr/local/WowzaStreamingEngine/manager/temp
-	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager
-	cp WMSManager.war /usr/local/WowzaStreamingEngine/manager/lib
-	```
-* If connecting to a remote instance (not localhost), update the `IPWhiteList` in `RESTInterface` in Server.xml so you can access the VIF REST API
+* If connecting to a remote instance (not localhost), add the specific client IP(s) to the IPWhiteList in RESTInterface in Server.xml so you can access the VIF REST API. Use a comma-separated list of exact IPs (per-octet wildcards like 192.168.1.* are supported); avoid *, which allows every source IP.
 	```xml
 	<RESTInterface>
-		<IPWhiteList>*</IPWhiteList>
+		<IPWhiteList>127.0.0.1,172.*.*.*,192.168.*.*,10.*.*.*</IPWhiteList>
 	```
 * If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
 * The VIF dashboard (`docker/manager/ui`, entry page `shm.html` per `config.json`) is reachable only through the WSE Manager — there is no standalone entry page; for standalone dev/preview use the `qa_automation` harness's static-server mode (VIS repo).
@@ -230,6 +246,91 @@ The standalone `detector_type="vlm"` analyzer issues **exactly one VLM request p
 **Custom-schema output.** When a custom `response_schema` produces JSON that is not the default `{"results":[{class_name, reasoning}]}` shape, the whole structure is attached to the detection's `data` field and flows — structured — through the webhook, ID3 and log sinks (no per-schema configuration). The on-screen overlay can't pick a field from an arbitrary schema, so it renders a generic `vlm` label for custom-schema windows. ID3 timed-metadata has practical size limits, so consume large custom schemas via the webhook or log sinks. Detect/Describe output is unchanged.
 
 **Free-form / fallback detection.** In Describe mode — or when the VI service returns output that can't be parsed as structured results (e.g. truncated) — event listeners receive a single detection with `class_name` set to `description` and the full analysis text in `reasoning`, instead of an empty detections list. Avoid configuring a real VLM class named `description`, as it would be indistinguishable from this synthetic class.
+
+### VOD Jobs
+VOD job settings live in a file of their own, `conf.modules/vif/vod/settings.json` — a persist document of the v2 API (`GET/PATCH /v2/vif/persist/vod-settings`), beside the stream configuration and never part of it; a `vod` block left in `Default.json` by an earlier build is ignored. Every key is optional — leave one out and it falls through to the built-in default rather than being pinned to it. Values may be `${ENV_VAR}` placeholders, resolved when the file is read.
+
+```json
+{
+    "max_concurrent_jobs": 1,
+    "max_jobs": 25,
+    "job_ttl_seconds": 0,
+    "content_dir": "/usr/local/WowzaStreamingEngine/content",
+    "jobs_dir": "/usr/local/WowzaStreamingEngine/vif-vod-jobs",
+    "auto_resume": true,
+    "lifecycle_webhook": "https://example.com/vif/vod-jobs",
+    "lifecycle_webhook_secret": "my-consumer",
+    "max_upload_bytes": 10737418240
+}
+```
+
+| Key                  | Default                                           | Purpose                                                                      |
+| -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| max_concurrent_jobs | 1 | how many VOD jobs are analysed at once. One job saturates a VIS model slot, so raise it only with the capacity to match |
+| max_jobs | 25 | how many job records are kept. Past this the oldest *finished* jobs are forgotten, and their stored results and thumbnails go with them; a queued or running job is never evicted |
+| job_ttl_seconds | 0 | how long a finished job is kept after it ends, in seconds. `0` keeps it until `max_jobs` forgets it |
+| content_dir | `<ConfigHome>/content` | where a job's `file` is resolved from. A request that resolves outside this directory is refused |
+| jobs_dir | `<ConfigHome>/vif-vod-jobs` | where job records, results and thumbnails are kept |
+| auto_resume | true | whether a job that stopped for a transient reason is resumed automatically. Unset means on; `false` turns it off for every job that did not decide for itself |
+| lifecycle_webhook | *(none)* | where every job's state changes are POSTed, for jobs that did not name a destination of their own. Unset or empty sends nothing |
+| lifecycle_webhook_secret | *(none)* | name of an entry in the secrets document whose value is sent as the `Authorization` header on every lifecycle POST to `lifecycle_webhook`; a job-supplied destination never receives it. A save that names no configured secret is refused |
+| max_upload_bytes | 10737418240 | the largest upload `POST /v2/vif/vod/files` accepts (10 GiB); a larger one is refused with `413` before a byte is written |
+
+The document is edited over REST with `PATCH /v2/vif/persist/vod-settings` (a JSON merge patch guarded by `If-Match`, like every persist document; a `null` value restores a key's default). The two caps apply to the running Engine as soon as the patch is applied — the worker pool is resized without interrupting a job in flight, and a lowered `max_jobs` evicts immediately. The two directories take effect on the next Engine restart: moving them under jobs that are already running would strand them, so a change is logged and left for the restart.
+
+The secrets document, `conf.modules/vif/vod/secrets.json`, is a flat map of named `Authorization` values referenced from `lifecycle_webhook_secret` here or from a submit's own `lifecycle_webhook_secret`; see the VOD guide's "Named webhook secrets". `GET /v2/vif/persist/secrets` answers the names only, and `PATCH` sets, rotates (a string) or removes (`null`) a name — a value never travels back out.
+
+**Retention.** The two retention keys compose rather than override: `max_jobs` bounds how many jobs are kept, `job_ttl_seconds` bounds how long, and either one on its own can forget a job — taking its stored results and thumbnail with it. Once a TTL is configured it is swept every 60 seconds, and again whenever a job is submitted or the Engine restarts; a saved TTL also applies at once to the jobs already held. A queued or running job is never touched however old it is. The clock is the moment the job last ended, so a job that was resumed is measured from the run that continued it rather than from the run that stopped. `0` — the default — means no TTL: it has to be a value rather than a missing key, because a config save merges and cannot un-set one.
+
+#### VOD Job Lifecycle Webhooks
+
+A job POSTs its state changes to a URL of its own if the submit named one, and to the settings document's `lifecycle_webhook` otherwise. The submit body's `lifecycle_webhook` field decides which:
+
+| `lifecycle_webhook` on the submit | What the job does |
+| --- | --- |
+| omitted (`null`) | uses the settings document's `lifecycle_webhook` as it is configured at each transition, so a later save applies to jobs already running |
+| `""` | sends nothing, whatever the global says |
+| a URL | posts there instead of the global |
+
+One POST goes out per *persisted* transition — `running`, then whichever of `completed` / `failed` / `cancelled` the job reaches. A graceful Engine stop cancels a running job, which persists — and posts — `cancelled`; a job the Engine never got to finalise (a hard kill while it ran, or one still queued when the Engine went) is finalised as `failed` on the next startup and posts then, which is the one transition a consumer that polls can never observe. There is no event for `pending`: the submit's own 201 already carries that.
+
+```json
+{
+  "event": "status_changed",
+  "job_id": "8b1f…", "state": "completed",
+  "file": "clips/one.mp4", "tag": "nightly",
+  "requests_sent": 40, "requests_total": 40, "media_time_ms": 24000,
+  "queued_at": "2026-08-09T11:02:13.004Z",
+  "started_at": "2026-08-09T11:02:13.221Z",
+  "ended_at": "2026-08-09T11:04:51.118Z",
+  "resumes": 1,
+  "results": "/v2/vif/vod/jobs/8b1f…/results"
+}
+```
+
+`event` is always `status_changed` — a discriminator for consumers that route several kinds of hook to one URL; which transition this is, is `state`. The body is otherwise the same shape `GET /v2/vif/vod/jobs/{jobId}` serves, plus `results`, a server-relative path (the Engine does not know the host name you reach it by). `error` and `error_cause` are present on a failure; the destination URL is never echoed back.
+
+Delivery is asynchronous and never affects the job: one POST at a time, in transition order per job, `Content-Type: application/json`, 5s to connect and 10s for the response, up to 3 attempts with 2s and 10s between them. Anything but a 2xx is a failed attempt; after the third the notification is dropped with a WARN naming the job and the state, and the job is unaffected either way. Terminal events are additionally at-least-once across restarts: a successful delivery is recorded in the job's manifest, and a startup that hydrates a terminal job whose notification was never recorded — the Engine can stop with deliveries still queued or failing — pushes that event again. A consumer may therefore see a terminal event twice (route on `job_id` and `state`), and configuring a webhook after jobs have finished means their terminal events arrive on the next restart.
+
+**Carrying a secret.** Every webhook credential is a name in the secrets document — `conf.modules/vif/vod/secrets.json`, edited through `PATCH /v2/vif/persist/secrets` (a string sets or rotates a name, `null` removes it; a read answers names only, never a value) — referenced by name and resolved at delivery time, never recorded against a job. The settings document's `lifecycle_webhook_secret` authorizes only deliveries to its own `lifecycle_webhook` (matched by exact string equality) — a destination named on a submit never receives it, so one submit cannot exfiltrate the operator's credential to a collector of its own. A per-job destination that needs authentication names its own entry at submit (`lifecycle_webhook_secret` in the body; an unknown name is refused, and a job-named secret wins over the global one). Don't put tokens in webhook URLs: a per-job URL is written verbatim into the job's manifest — it has to be, or the job could not be reported after a restart — so a `?token=` in one is on disk for as long as the job record is. A submit whose `lifecycle_webhook` is not an absolute http(s) URL is refused outright. See the VOD guide's "Named webhook secrets" for the full semantics, including the trust boundary of the secrets document.
+
+#### Automatic Resume
+
+A job that stops for a *transient* reason is put back on the queue by itself, after a wait. It is on by default: set `auto_resume: false` in the VOD settings document to turn it off for the Engine, or `auto_resume` on the submit body to decide for one job (`true` or `false`; the per-job value wins over the global either way).
+
+**No window is ever lost or skipped.** A retry is the same resume a `POST .../resume` makes: the new run continues from the window after the last one the stored results answered, and appends to the same results file under the same job id. The combined output is identical to what an uninterrupted run would have produced, and `resumes` counts every run — automatic or manual.
+
+Every failure records an `error_cause` alongside its `error`, on the job view and in the lifecycle webhook payload. The cause is what decides whether a retry happens at all:
+
+| Class | Causes | Backoff |
+| --- | --- | --- |
+| transient, short | `response_timeout`, `disconnected`, `detector_restarted`, `send_failed` | 5s, 15s, 30s |
+| transient, slow | `endpoint_degraded`, `not_connected`, `connect_failed`, `detector_error` | 15s, 1m, 5m |
+| never retried | `config_drift`, `coverage_shortfall`, `source_error`, `store_error`, `engine_restart` | — |
+
+Three attempts, and each failure picks its own backoff — a dropped connection waits 5s, and if the retry finds the service still down (`connect_failed`) the next wait is a minute, then five. An attempt that got *further* than the one before it starts the count again, so a long file with the occasional blip is never starved out. After the third the job stays `failed` with everything it had analysed, and a manual resume picks it up from there.
+
+Some jobs are never retried whatever the cause: one submitted with `store_results: false` (it has no resume point), and an inline job whose credentials were redacted out of its manifest (a resume needs a body only the caller can supply). Each stand-down is logged with its reason. A job interrupted by an Engine restart is not retried at startup either — `ENGINE_RESTART` is deliberately in the never-retried class. And a retry waiting on its backoff never pins the job: `max_jobs` can still evict it, which cancels the retry with it.
 
 ### Misc Debugging Options
 | Key                  | Default                                           | Purpose                                                                      |
@@ -319,10 +420,11 @@ with an appender that creates a rolling log file named `vif4j_access.log`:
   *   query param: overlay=true|false
   *   query param: frameId=### (0 is latest)
 
-
 - {_serverName_}: anything
 - {_appName_}: name of the app the stream is running on
 - {_streamName_}: name of the stream or stream pattern for the configuration
+
+On-demand analysis is served by the v2 API alone — `/v2/vif/vod/files`, `/v2/vif/vod/jobs[/{jobId}[/cancel|/resume|/results|/results/file|/thumbnail]]`, and the two settings documents `/v2/vif/persist/vod-settings` and `/v2/vif/persist/secrets`. See [`api/README.md`](api/README.md) for the orientation and copy-paste examples, [`docs/VOD_GUIDE.md`](docs/VOD_GUIDE.md) for the walkthrough, and [`api/openapi.yaml`](api/openapi.yaml) for the reference.
 
 ### API supports methods/verbs
 `GET | POST | PUT | DELETE`

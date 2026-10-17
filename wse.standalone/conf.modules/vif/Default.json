@@ -38,6 +38,27 @@
             "default": 10
         }
     },
+    // VOD job settings. Global only: a "vod" block in a per-stream file is read but never used.
+    // The first six values shown are the built-in defaults, so uncomment only what you want to
+    // change; the two webhook keys are examples of a setting that has no default (unset sends
+    // nothing). The caps and the TTL apply as soon as the config is saved; the directories on restart.
+    //"vod": {
+    //    "max_concurrent_jobs": 1, //how many VOD jobs are analysed at once
+    //    "max_jobs": 25, //how many job records are kept; the oldest finished ones are forgotten past this
+    //    "job_ttl_seconds": 0, //how long a finished job is kept after it ends; 0 keeps it until the max_jobs cap forgets it
+    //    "content_dir": "/usr/local/WowzaStreamingEngine/content", //where a job's file is resolved from
+    //    "jobs_dir": "/usr/local/WowzaStreamingEngine/vif-vod-jobs", //where job records, results and thumbnails are kept
+    //    "auto_resume": true, //resume a job that stopped for a transient reason (dropped connection, service restart, unreachable endpoint); set false to leave every such job FAILED for a manual resume
+    //    "lifecycle_webhook": "https://example.com/vif/vod-jobs", //where every job's state changes are POSTed, unless the job named its own
+    //    "lifecycle_webhook_secret": "my-consumer" //name of a top-level "secrets" entry sent as the Authorization header on those POSTs; goes only to the URL above, never to a job-supplied one
+    //},
+    // Named Authorization values for webhook deliveries, referenced by name: from
+    // vod.lifecycle_webhook_secret above, or from a job submit's own lifecycle_webhook_secret.
+    // Values may be "${ENV_VAR}" placeholders, resolved when the Engine loads this file.
+    //"secrets": {
+    //    "my-consumer": "Bearer your-token"
+    //},
+
     //debugging options
     "save_images": false,   //save images from transcoder to /tmp/vi/<stream_name>
     "log_timing": 0,        //how long to write logging details to /tmp/vi/<stream_name>
