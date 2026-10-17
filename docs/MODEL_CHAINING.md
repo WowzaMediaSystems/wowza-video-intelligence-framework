@@ -225,6 +225,16 @@ conditional stage without routing falls through to the next stage. Omitting
 `max_rings` limits executions per window to 8 by default, with a range of
 1–64. It is a loop bound, not the number of configured stages.
 
+A window that ends on a miss was **filtered out**, and under the default
+`result_mode: final` its event listeners receive the gate stage's response type
+with no detections — not the detections the routing judged uninteresting. The
+window, timing and `end_reason: "no_match"` still arrive, so a listener with
+`suppress_empty_detections: true` skips filtered windows entirely while one
+without it can tell "filtered by the gate" from "analyzed, nothing found".
+Ending through `on_match` (`end_reason: "match_end"`) is an affirmative answer
+and delivers the stage's detections. Use `result_mode: combined` when listeners
+should see every executed stage, filtered windows included.
+
 ## Wake expensive stages on motion
 
 A motion entry stage is a cheap gate: it compares consecutive frames on the CPU and
@@ -781,6 +791,7 @@ two-execution result:
   "detection_window": { "from_time_code": 0, "to_time_code": 5000 },
   "path_taken": ["score", "describe"],
   "is_terminal": true,
+  "end_reason": "completed",
   "rings": [
     {
       "ring_index": 0,
@@ -803,10 +814,28 @@ or appear more than once. Object, scene and motion stages carry `detections`, VL
 stages carry `vlm`, and synthetic stages carry `synthetic`.
 
 `result_mode: final` (the default) sends only the last stage's result to event
-listeners. `combined` sends all stages. Stored VOD results retain the complete
-terminal history with either setting. Older records that stored only the final
-result remain readable; unavailable earlier history is not reconstructed.
-Manager shows these records as having incomplete historical detail.
+listeners; a window whose routing missed (`end_reason: "no_match"`) sends the
+gate type empty instead, as above. `combined` sends all stages. Stored VOD
+results retain the complete terminal history with either setting. Older records
+that stored only the final result remain readable; unavailable earlier history
+is not reconstructed. Manager shows these records as having incomplete
+historical detail.
+
+Terminal results carry `end_reason` — on the stored rows and on every listener
+response built from them — answering one question per window: did the chain
+produce an answer, or stop short, and why?
+
+| `end_reason` | The chain stopped because | `final` mode delivers |
+|---|---|---|
+| `completed` | it ran past the last stage | the last stage's detections |
+| `match_end` | a rule **fired** into `{"end": true}` — stopping is the answer | that stage's detections |
+| `no_match` | a rule **missed** — the window was filtered out | the gate's type, no detections |
+| `max_rings` | the execution cap cut it off — the result is truncated | the last ring's detections |
+| *(absent)* | nothing routing-related ended it: a dynamic chain your decision listener ends, or an older service | the last ring's detections, as before the field existed |
+
+`match_end` and `no_match` come from which routing branch fired, not from the
+target — `on_match` and `on_no_match` may both end the chain, but only one of
+them is an answer.
 
 Cancel and resume use the usual endpoints:
 
