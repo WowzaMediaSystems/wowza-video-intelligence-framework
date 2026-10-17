@@ -48,13 +48,17 @@ run. The sequence actually taken is the window's **path**. It can differ from
 window to window, skip stages, and revisit a stage; `max_rings` bounds the
 executions per window.
 
-The entry stage fixes the **capture cadence** for the whole chain:
+A chain captures the **largest unit any of its stages consumes**:
 
-| Entry stage | Cadence | A window is |
+| Stages | Cadence | A window is |
 |---|---|---|
-| `object` or `motion` | frame | one frame per request |
-| `scene` or `vlm` | window | the frames captured over `window_seconds` |
 | any `synthetic` stage in the chain | clip | an encoded clip of the window (VOD only) |
+| else any `scene` or `vlm` stage | window | the frames captured over `window_seconds` |
+| only `object` and `motion` stages | frame | one frame per request |
+
+A chain whose object or motion entry is followed by a scene or VLM stage
+therefore runs at window cadence and requires a service that advertises
+`chain.window_entry` (see [Service compatibility](#service-compatibility)).
 
 When a window ends, its results flow where a detector's results always flow:
 each VOD window is stored as one result row, and event listeners — webhooks,
@@ -146,12 +150,17 @@ captured media; it does not automatically receive crops of the detected people.
 
 Put capture settings such as `window_seconds` and `inference_fps` in the
 parent's `config.processing`, never inside a stage — the chain's cadence comes
-from its entry stage (see [How a chain runs](#how-a-chain-runs)).
+from the largest unit its stages consume (see
+[How a chain runs](#how-a-chain-runs)).
 
-For a stage that needs fewer frames, add
+Sharing a window does not mean sharing a rate: the chain captures once, and each
+stage chooses how much of that capture it analyzes. A stage without
+`frame_selection` reads every captured frame; a stage that needs fewer adds
 `"frame_selection": {"mode": "middle"}` to its stage wrapper. Modes are `all`,
 `first`, `middle`, `last` and `every_nth`; the last requires `stride >= 2`
-and always includes the first and last captured frames.
+and always includes the first and last captured frames. A frame-cadence chain
+has only one frame per request, so it refuses any `frame_selection` other than
+`all`.
 
 ## Choose an execution mode
 
@@ -219,7 +228,7 @@ conditional stage without routing falls through to the next stage. Omitting
 ## Wake expensive stages on motion
 
 A motion entry stage is a cheap gate: it compares consecutive frames on the CPU and
-reports each moving region as a detection with class `motion`. A quiet frame yields no
+reports each moving region as a detection with class `motion`. A quiet request yields no
 detections, no rule matches, and the chain ends before any downstream stage runs:
 
 ```json
@@ -232,14 +241,33 @@ detections, no rule matches, and the chain ends before any downstream stage runs
       "frame_selection": { "mode": "middle" } } ] }
 ```
 
-`motion → object` and `motion → scene` compose the same way. A motion-first chain
-runs at frame cadence, so `describe` above is asked once per moving frame. Motion is
-only supported as the entry stage (`stages[0]`) and cannot be cropped onto. Object
-tracking still requires an object-first chain: an object stage after a motion entry
-must set `"tracking": {"method": "none"}`.
+`motion → object` and `motion → scene` compose the same way. The VLM stage gives the
+chain above window cadence: motion compares each consecutive pair of frames within the
+window, carrying its state across windows, and `describe` is asked once per window
+that moved — here with the window's middle frame, per its `frame_selection`; omit
+that to send every captured frame. Motion is only supported as the entry stage
+(`stages[0]`) and cannot be cropped onto. Object tracking requires an object entry:
+an object stage after a motion entry must set `"tracking": {"method": "none"}`.
+
+The gate and the expensive stage need not analyze at the same rate. The capture
+rate is set once, in `config.processing`; each stage's `frame_selection` then
+narrows that stage alone. `inference_fps: -1` captures at the source frame rate,
+so on a 30 fps stream with `window_seconds: 2` every window carries 60 frames:
+the motion entry differences all 60 — a movement between any two captured frames
+cannot slip past it — while giving the VLM stage
+`"frame_selection": {"mode": "every_nth", "stride": 15}` sends it five of them
+(the first, every fifteenth, and the last).
+
+Ask the VLM what the scene shows, not whether it moved. Sampled frames reach a
+vision-language model as separate stills, and a modest position change between
+them — even one the motion gate flags loudly — reads as near-identical images;
+small models confidently describe a moving object as static. The motion
+detections already carry each moving region and its displacement; use the VLM
+for what is visible within a frame.
 
 No route may target the motion entry stage, including its own `routing`: a revisited
-motion stage re-differences the same window and can never fire.
+motion stage re-differences the same window — at frame cadence it can never fire, and
+at window cadence it would re-report the window's own motion.
 
 A motion-entry chain cannot contain a synthetic stage: a synthetic stage switches the
 chain to clip-window transport, which the motion entry does not support yet.
@@ -667,7 +695,8 @@ routing are unavailable in dynamic mode.
 
 Chains created or changed through v2 require the service to support their selected
 options. Crop, including an empty object, requires chain.crop; a frame selection
-other than all requires chain.frame_selection. Missing support fails the handshake
+other than all requires chain.frame_selection; an object or motion entry followed by
+a scene or VLM stage requires chain.window_entry. Missing support fails the handshake
 before config or media is sent. The UNSUPPORTED_CHAIN_CAPABILITY error identifies
 the setting, such as config.detector.stages[1].crop, and the missing capability.
 

@@ -13,9 +13,9 @@ nothing extra to deploy. That makes it practical in two roles:
 - **Standalone alerting** — "tell me when something moves on this camera",
   delivered through the same event listeners every detector uses: webhooks,
   ID3 timed metadata, log files, and a video overlay.
-- **The entry gate of a chain** — run motion on every frame and wake an
-  expensive stage (object detection, a VLM question) only on the frames where
-  something moved. See [Motion as a chain's entry stage](#motion-as-a-chains-entry-stage).
+- **The entry gate of a chain** — run motion on every captured frame and wake
+  an expensive stage (object detection, a VLM question) only where something
+  moved. See [Motion as a chain's entry stage](#motion-as-a-chains-entry-stage).
 
 ## Table of contents
 
@@ -226,9 +226,9 @@ for the endpoints.
 
 ## Motion as a chain's entry stage
 
-Motion's second role is waking expensive stages only when something moves: a
-chain whose entry stage is motion runs per frame, ends quiet windows at the
-gate, and routes moving frames onward — to object detection, a VLM, or crops of
+Motion's second role is waking expensive stages only when something moves: the
+motion entry differences every captured frame, ends quiet windows at the gate,
+and routes windows that moved onward — to object detection, a VLM, or crops of
 exactly the regions that moved. The
 [Wake expensive stages on motion](MODEL_CHAINING.md#wake-expensive-stages-on-motion)
 section of the chaining guide has the worked example and the composition rules
