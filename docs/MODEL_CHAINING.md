@@ -256,8 +256,9 @@ chain above window cadence: motion compares each consecutive pair of frames with
 window, carrying its state across windows, and `describe` is asked once per window
 that moved — here with the window's middle frame, per its `frame_selection`; omit
 that to send every captured frame. Motion is only supported as the entry stage
-(`stages[0]`) and cannot be cropped onto. Object tracking requires an object entry:
-an object stage after a motion entry must set `"tracking": {"method": "none"}`.
+(`stages[0]`) and cannot be cropped onto. Object tracking requires a chain of only
+object stages: the motion entry filters which frames reach later stages, so track IDs
+would be unreliable. An object stage behind it must set `"tracking": {"method": "none"}`.
 
 The gate and the expensive stage need not analyze at the same rate. The capture
 rate is set once, in `config.processing`; each stage's `frame_selection` then
@@ -312,9 +313,10 @@ The first stage, motion stages and synthetic stages cannot crop. In linear mode,
 stage must be an object or motion detector, the two types whose detections carry boxes.
 A stage after a motion entry crops to the moving regions, with `min_confidence`
 gating parents by their net displacement. A cropped object stage must disable tracking
-and tiling. Object tracking also requires an object-first chain with no synthetic
-stage; set `"tracking": {"method": "none"}` when a stage's inherited tracking
-would otherwise violate that requirement.
+and tiling. Object tracking also requires every captured frame to reach its object
+stage, which only a chain of object stages can provide; set
+`"tracking": {"method": "none"}` when a stage's inherited tracking would otherwise
+violate that requirement.
 
 Crop child coordinates refer to the original full frame. The result's
 `source_ring_index` and `source_detection_index` identify the parent execution
