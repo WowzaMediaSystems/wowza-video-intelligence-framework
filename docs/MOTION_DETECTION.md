@@ -77,6 +77,15 @@ travelled far enough to matter". Each reported region carries:
 - `confidence` — **how far the region has travelled**, not how certain the
   detector is. See the next section.
 
+**A box is the span of movement, not the subject's outline.** The detector
+compares each analyzed frame with the previous one, so a region covers where
+the subject was *and* where it is now. At keyframe rates (about one frame a
+second) that is roughly the subject plus one step; at native frame rate a slow
+subject shows only its moving edges, and a subject that stops disappears. Read
+a box as "something moved here". When you need the subject's own extent, or a
+subject that is present but still, use object detection — the `person` class
+for people — on its own or as the stage a motion gate wakes.
+
 ### Confidence is distance travelled, not certainty
 
 A motion detection's `confidence` is the track's **net displacement**: the
@@ -118,10 +127,11 @@ relying on the detector:
   `merge_distance` bridges that gap; raise it if a single subject is reported
   as a pair of thin boxes, and lower it if genuinely separate subjects merge
   into one box.
-- **Global changes are capped, not understood.** A lighting change or camera
-  pan changes most of the frame; built-in area and count caps keep such events
-  from flooding the output, but a moving camera is not a supported input —
-  the detector assumes a fixed view.
+- **Global changes are suppressed by extent, not understood.** A cut, a
+  lighting change or a camera move alters nearly the whole picture; such a
+  frame yields no regions and the next frame starts over. A large close-up
+  subject is reported like any other region. A moving camera at native frame
+  rate is *not* suppressed: it reads as many small movers.
 
 ### Cost and latency
 
@@ -188,7 +198,7 @@ Each analyzed frame with reportable movement produces detections with
 | Field | Meaning |
 | --- | --- |
 | `class_name` | Always `"motion"`. |
-| `bbox` | The moving region's bounding box. |
+| `bbox` | The span of the movement between the two compared frames (where the subject was and where it is now), not the subject's outline. |
 | `track_id` | The region's identity across frames; changes when a subject stops, or when regions merge or split. |
 | `confidence` | Net displacement of this track so far, `0.0`–`1.0` of the frame diagonal. |
 
@@ -201,8 +211,8 @@ value drawn on the `-vi` overlay rendition.
 Listeners using the `rollup` method receive aggregated intervals with
 `detections_type: "motion-rollup"`. Because a motion detection's confidence is
 its travel, a rollup bucket's confidence spread (`max − min`) is **the distance
-that subject travelled during the interval**. One real subject can span several
-buckets when its track id changes mid-interval.
+that tracked region travelled during the interval**. One real subject can span
+several buckets when its track id changes mid-interval.
 
 ---
 
