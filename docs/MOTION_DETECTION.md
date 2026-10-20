@@ -127,11 +127,108 @@ relying on the detector:
   `merge_distance` bridges that gap; raise it if a single subject is reported
   as a pair of thin boxes, and lower it if genuinely separate subjects merge
   into one box.
-- **Global changes are suppressed by extent, not understood.** A cut, a
-  lighting change or a camera move alters nearly the whole picture; such a
-  frame yields no regions and the next frame starts over. A large close-up
-  subject is reported like any other region. A moving camera at native frame
-  rate is *not* suppressed: it reads as many small movers.
+- **Whole-picture changes are filtered, not understood.** A cut, a lighting
+  change or a camera move alters nearly the whole picture; the detector judges
+  such a frame by the extent of the change alone and reports nothing for it.
+  That rule has edges in both directions — see
+  [Whole-picture changes](#whole-picture-changes), which also explains how to
+  switch the filter off.
+
+### Whole-picture changes
+
+A cut to another camera, a light switched on or a camera pan changes nearly
+every pixel between two analyzed frames. Frame differencing alone would report
+that as one huge moving region, so the detector filters it first: when the
+change between two analyzed frames **spans at least 95% of the picture in both
+height and width and covers at least 60% of its area**, the frame counts as a
+change of the whole picture, not movement within it. It yields no regions, and
+the next frame starts over.
+
+"The picture" is the area inside any letterbox or pillarbox bars: rows and
+columns that stay nearly black are left out. A cut or a lighting change inside
+a letterboxed film is therefore still caught.
+
+What the filter catches:
+
+- **Cuts and dissolves** — a sports feed switching cameras, a newscast cutting
+  to a report.
+- **Lighting changes** — a lamp switched on or off in a corridor, a cloud
+  passing over a car park, the camera's auto-exposure jumping.
+- **Camera moves at keyframe rates** — pans, handheld shots, drone footage.
+
+What it deliberately lets through:
+
+- **A large close-up subject.** Someone walking right past the lens changes a
+  big area, but not the picture edge to edge, so they are reported like any
+  other region.
+- **Two far-apart movers.** Two people entering a lobby from opposite ends span
+  the picture between them but fill little of it; each is reported.
+- **A change confined to part of the picture.** A signage screen in that lobby
+  cutting between slides is, to the detector, movement within the picture,
+  however abrupt the change on the screen.
+
+Measured on several hundred real clips, the filter misjudges three situations:
+
+- **A camera moving at native frame rate is not filtered.** Between two
+  consecutive frames a pan shifts the picture only slightly, so it reads as
+  many small movers rather than one change of the picture.
+- **A cut with a static band is reported as one large region.** A station logo
+  or a banner, an unchanged sky, or bars that are not black stay still across
+  the cut; the change then spans less than 95% of the picture and is reported
+  as one large region instead of being filtered.
+- **At low analysis rates, a close subject or a crowd can be filtered too.** At
+  one or two analyzed frames a second, a subject close to the camera or a
+  crowd can change more than 60% of the picture between two samples. Raising
+  `inference_fps` makes that rare.
+
+#### Turning the filter off
+
+Sometimes the whole-picture change is the event you want:
+
+- **Tamper detection** — someone covers the lens of a corridor camera or turns
+  it to face the wall.
+- **A blackout** — the scene goes dark, or the feed goes black.
+- **Lights in a secured room** — the lights come on in a room that should be
+  dark and empty.
+- **A scene change as a trigger** — a cut that should start other analysis,
+  through a chain stage or a webhook.
+
+For these, set `suppress_global_changes` to `false`. In the Manager UI it is
+the **Global Changes** field of the **Motion Analysis** section, with the
+choices **Suppress** (the default) and **Report**; left blank, a stream
+inherits the value of the default configuration. On the v2 API it is
+`"detector": {"type": "motion", "suppress_global_changes": false}`, and in the
+stream configuration JSON `motion_analysis.suppress_global_changes`.
+
+`false` switches the filter off entirely: a frame whose change covers the
+whole picture is reported as the moving regions it produces, at most 20 per
+frame as always. The cost is that every cut, every light switch and every
+camera move at keyframe rates becomes a motion event — on a sports feed with
+frequent cuts or a handheld camera, leave the filter on.
+
+**To hear about a change on the frame it happens, also set `min_displacement`
+to `0`.** A region is reported once its track has travelled
+`min_displacement`. A one-frame event — a cut, a light switched on — produces
+a region whose track starts on that very frame, so it has travelled nothing
+yet and is not reported at the default `0.02`. With only the filter off, you
+hear about a whole-picture change when it persists and moves (a slow fade, a
+pan), not about a single abrupt switch. With `min_displacement` at `0` the
+region is reported on the frame of the change with `confidence` `0`, so the
+listener that should receive it must keep its confidence threshold at `0.0` —
+the Manager UI's default for a motion listener (see
+[A listener's confidence threshold is a travel gate](#a-listeners-confidence-threshold-is-a-travel-gate)).
+`min_displacement` at `0` also reports every other tracked region, flutter
+included, so give that camera its own stream configuration:
+
+```json
+{
+  "detector_type": "motion",
+  "motion_analysis": {
+    "suppress_global_changes": false,
+    "min_displacement": 0
+  }
+}
+```
 
 ### Cost and latency
 
@@ -156,6 +253,7 @@ JSON (`motion_analysis`):
 | `sensitivity` | `5` | How faint a pixel change still counts as movement, `1`–`10`. `1` reports only large, high-contrast movement; `10` picks up the smallest and faintest. |
 | `min_displacement` | `0.02` | How far a tracked region must travel from where its track started before it is reported, as a fraction of the frame diagonal. `0` reports every tracked region. |
 | `merge_distance` | `0.08` | Gap, as a fraction of the frame width, within which neighbouring moving regions merge into one subject. |
+| `suppress_global_changes` | `true` | Whether a change of the whole picture — a cut, a lighting change, a camera move at keyframe rates — is filtered out before regions are extracted. `false` reports it as moving regions. See [Whole-picture changes](#whole-picture-changes). |
 
 In the stream configuration JSON:
 
@@ -165,14 +263,17 @@ In the stream configuration JSON:
   "motion_analysis": {
     "sensitivity": 5,
     "min_displacement": 0.02,
-    "merge_distance": 0.08
+    "merge_distance": 0.08,
+    "suppress_global_changes": true
   }
 }
 ```
 
 Tuning order: `sensitivity` decides what counts as movement at all;
 `min_displacement` decides how far it must travel to be worth reporting;
-`merge_distance` decides when neighbouring regions are one subject.
+`merge_distance` decides when neighbouring regions are one subject; and
+`suppress_global_changes` decides whether a change of the whole picture
+counts as movement in the first place.
 
 ### A listener's confidence threshold is a travel gate
 
@@ -244,6 +345,9 @@ exactly the regions that moved. The
 section of the chaining guide has the worked example and the composition rules
 (motion must be the entry stage, no synthetic stage in a motion-entry chain,
 object stages after motion run untracked).
+
+The entry stage takes the same members as a motion stream — `sensitivity`,
+`min_displacement`, `merge_distance` and `suppress_global_changes`.
 
 ---
 

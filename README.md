@@ -297,7 +297,7 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 VIF can detect **movement** on a live stream or a VOD file via `detector_type: "motion"`: consecutive frames are differenced and every moving region is reported as a tracked bounding box whose confidence carries the distance it has travelled. It runs on the CPU inside the Video Intelligence Service — no model, no GPU, no extra services — which makes it cheap enough to run on every stream, or to use as a chain's entry stage that wakes object detection or a VLM only when something moves.
 
-See [`docs/MOTION_DETECTION.md`](docs/MOTION_DETECTION.md) for the quick start, tuning (`sensitivity`, `min_displacement`, `merge_distance`), result semantics, and the chain gate pattern.
+See [`docs/MOTION_DETECTION.md`](docs/MOTION_DETECTION.md) for the quick start, tuning (`sensitivity`, `min_displacement`, `merge_distance`, `suppress_global_changes`), result semantics, the whole-picture filter and how to switch it off, and the chain gate pattern.
 
 ## Synthetic Video Detection (Optional)
 
