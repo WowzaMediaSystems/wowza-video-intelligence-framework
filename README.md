@@ -1,6 +1,6 @@
 # Wowza Streaming Engine · Video Intelligence Framework
 
-**Real-time computer vision for Wowza Streaming Engine — object detection, scene understanding, vision-language analysis, and synthetic video detection. Runs on your own servers, so your video never leaves your network.**
+**Real-time computer vision for Wowza Streaming Engine — object detection, motion detection, scene understanding, vision-language analysis, and synthetic video detection. Runs on your own servers, so your video never leaves your network.**
 
 Using VIF, incoming streams in Wowza Streaming Engine can be matched for real-time AI analysis across edge and cloud environments. The stream name determines which type of AI analysis is performed. This repository contains the Docker Compose setup files, working default configuration, and sample videos. VIF can also be installed directly on an existing Wowza Streaming Engine server using [platform installers](https://www.wowza.com/docs/install-wse-video-intelligence-module) available from the [Wowza portal](https://portal.wowza.com/account/downloads#vif).
 
@@ -27,8 +27,8 @@ For a first test, one server with a supported GPU is simplest. For production, w
 | | |
 |---|---|
 | **What it is** | Ready-to-run WSE configuration with prebuilt plugin JARs for video intelligence workflows |
-| **Primary workflows** | Object detection and scene understanding |
-| **Optional workflows** | VLM analysis and Synthetic Video Detection |
+| **Primary workflows** | Object detection, motion detection, and VLM analysis (including scene understanding) |
+| **Optional workflow** | Synthetic Video Detection |
 | **How it runs** | `docker compose up` starts `wse` (Wowza Streaming Engine), `manager` (Engine Manager UI), and `video-intelligence-service-gpu` (Video Intelligence Service, or VIS, running on GPU). A one-shot `vis-init` helper runs first to prepare VIS mounts. |
 | **Alternative workflow (optional)** | `docker compose --profile wse up` starts only `wse` and `manager` when connecting to a remote VIS endpoint. |
 | **VI Service deployment** | Connect to a remote VI Service instance (`wss://`) or run VIF locally via Docker |
@@ -53,7 +53,9 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Default Model Coverage and Configuration](#default-model-coverage-and-configuration)
 - [Updating VIF Configuration](#updating-vif-configuration)
 - [Plugin Configuration Reference](#plugin-configuration-reference)
+- [Motion Detection](#motion-detection)
 - [Synthetic Video Detection (Optional)](#synthetic-video-detection-optional)
+- [Model chaining through the v2 API](docs/MODEL_CHAINING.md)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
@@ -271,7 +273,7 @@ To test a custom model, copy your model weights/checkpoint file (`.pth`) into `.
 
 You can update VIF defaults and per-stream settings in two ways:
 
-- **WSE Manager UI:** Open the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page to add or update stream rules (for example `object.*`, `scene.*`, `vlm.*`, and `synthetic.*`), including event listeners, class names, thresholds, and service connection settings.
+- **WSE Manager UI:** Open the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page to add or update stream rules (for example `object.*`, `scene.*`, `motion.*`, `vlm.*`, and `synthetic.*`), including event listeners, class names, thresholds, and service connection settings.
 - **REST API:** Use the WSE REST API for scripted updates to defaults and per-stream overrides.
 
 > [!NOTE]
@@ -290,6 +292,12 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 - Includes field-level options and behavior for VIF settings exposed through the Manager UI, REST API, and the underlying `conf.modules/vif` configuration files.
 - Useful when tuning object detection settings (for example `model_name`, `checkpoint_path`, thresholds, and per-stream overrides).
+
+## Motion Detection
+
+VIF can detect **movement** on a live stream or a VOD file via `detector_type: "motion"`: consecutive frames are differenced and every moving region is reported as a tracked bounding box whose confidence carries the distance it has travelled. It runs on the CPU inside the Video Intelligence Service — no model, no GPU, no extra services — which makes it cheap enough to run on every stream, or to use as a chain's entry stage that wakes object detection or a VLM only when something moves.
+
+See [`docs/MOTION_DETECTION.md`](docs/MOTION_DETECTION.md) for the quick start, tuning (`sensitivity`, `min_displacement`, `merge_distance`, `suppress_global_changes`), result semantics, the whole-picture filter and how to switch it off, and the chain gate pattern.
 
 ## Synthetic Video Detection (Optional)
 
