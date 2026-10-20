@@ -40,8 +40,8 @@ AUTO-DETECTED at startup (legacy path only; the spec carries it resolved):
                                VLM_KV_CACHE_DTYPE to override.
 
 TUNABLE (defaults fit Qwen3-VL-4B-Instruct-FP8 on a DEDICATED 24 GB-class
-GPU). All of these live in the model's env file, except VLM_GPU_IDS which is
-deployment placement and lives in .env:
+GPU). All of these are read from the engine's environment, except VLM_GPU_IDS
+which is deployment placement and lives in .env:
   VLM_GPU_IDS                  (.env) Pin the engine to specific GPU(s), e.g.
                                "1" or "2,3". Indices match `nvidia-smi` order.
                                Unset = first visible GPU (GPU 0), which WSE and
@@ -96,11 +96,13 @@ script execs `vllm serve` directly, exactly as the bash entrypoint did.
                                once. Unset = no locking.
   VLM_HEALTH_TIMEOUT_SECONDS   How long to wait for this engine's own /health
                                while holding the lock (default 1800). On
-                               timeout the lock is released, the engine is
-                               stopped (SIGTERM, then SIGKILL 10s later) and
-                               the container exits 75 so the restart policy
-                               retries -- one wedged engine must not block the
-                               pool.
+                               timeout a crash note is written, the engine is
+                               stopped (SIGTERM, then SIGKILL 30s later), the
+                               lock is released and the container exits
+                               75; the restarted launcher rests parked on the
+                               note until the spec changes -- one wedged
+                               engine must not block the pool, nor take the
+                               lock again and again.
   VLM_HEALTH_POLL_SECONDS      Interval between /health polls (default 2).
   VLM_STATE_FILE               Path on the shared volume naming the model that
                                should be serving (first non-empty line = a
@@ -163,8 +165,9 @@ SLOTS (the generic `vif-model-slot-N` services):
                                the model its deployment assigned it, "" to let
                                VIS choose one (it wins when set).
 
-A SLOT serves whichever model the catalog overlay adds and its deployment
-assigns it, so VIS cannot know from the catalog where that model's engine is.
+A SLOT serves whichever custom model the catalog overlay adds: the one its
+deployment pins to it, else the next one VIS assigns to a slot left free.
+Either way VIS cannot know from the catalog where that model's engine is.
 Before anything else the launcher registers on the state volume --
 <state dir>/slots/<slot>.json: the slot, its model, this container's hostname
 and a nonce new on every start -- and then:
@@ -200,24 +203,25 @@ couple of seconds; a spec whose content has not changed costs one read):
            cannot be woken from sleep.
 
 VIS moves an engine between those three by rewriting its spec; nothing else
-is needed on this side.
+is needed on this side. A sleep or a wake that fails is not retried until the
+spec changes: VIS decides what happens to an engine that would not move.
 
 A DISABLED ENGINE is one the catalog overlay takes out of the deployment. Its
 spec says `disabled: true` (and `parked`): the launcher serves the health stub
 for good, adds `"disabled": true` to what `/vif/parked` answers, and never
 loads the model, takes the load lock, reads the card or asks the hub about it
 -- `/vif/access` is not answered. A later spec without the flag is followed
-like any other change of desired state. A sleep or a wake that fails is not retried until the
-spec changes: VIS decides what happens to an engine that would not move.
+like any other change of desired state.
 
 THE POOL DUTIES, when several engines share one card:
 
   * the LOAD LOCK serializes cold loads, so five engines starting at once do
     not thrash the disk and the GPU.
-  * BOOT ORDER: the engine that should be serving loads LAST. Each engine's
-    memory reservation is sized on the assumption that every other engine is
-    asleep while it loads, so the active one, which stays awake, cannot load
-    first. Before it asks for the lock it waits until every other engine whose
+  * BOOT ORDER: an engine whose spec says `awake` (a member of the active
+    set) loads LAST. Each engine's memory reservation is sized on the
+    assumption that every other engine is asleep while it loads, and one that
+    loads awake stays awake, so it cannot load first. Before it asks for the
+    lock it waits until every other engine whose
     spec says `asleep` has published its readiness marker (loaded, and asleep)
     or rests parked (spec `parked`, or `asleep` without sleep mode). Engines
     whose spec says `parked`, and engines held parked by a crash note about
@@ -245,7 +249,9 @@ THE POOL DUTIES, when several engines share one card:
 THE STATE VOLUME, shared with VIS and every other engine:
 
   <state dir>/engines/<key>.json  this engine's spec          (written by VIS)
-  <state dir>/active-model        the id that should serve    (written by VIS)
+  <state dir>/active-model        legacy (VLM_STATE_FILE) only: an older VIS's
+                                  serving id, which VIS moves into its
+                                  overlay and deletes
   <state dir>/ready/<key>         loaded, awake or asleep     (written here)
   <state dir>/awake/<key>         awake and serving           (written here)
   <state dir>/loading/<key>       a load is under way         (written here)
@@ -281,7 +287,7 @@ neither the crash note carries `access_problem` (token_missing, token_rejected
 or license_not_accepted) instead of an exit code. The parked stub answers
 `GET /vif/access` with the same verdict, checked right then, and says where
 the token came from (`token_source`: environment, manager, or empty), so VIS
-can refuse an activate before it drains the engine that is serving. The note
+can refuse an activate before it moves any engine. The note
 carries a fingerprint of the token it was decided with (a truncated SHA-256,
 never the token); once the token in force is another one -- set or removed in
 the Manager, or a restart with a new .env -- the note is dropped and the next
@@ -355,12 +361,15 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-01.1"
+LAUNCHER_REVISION: str = "2026-10-07.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
-# Grace between SIGTERM and SIGKILL when this script stops a wedged engine.
-STOP_GRACE_SECONDS: int = 10
+# Grace between SIGTERM and SIGKILL when this script stops an engine (a park,
+# a reload, a wedged load). A clean exit of the largest model takes ~11 s with
+# its CUDA teardown, and only a clean exit frees the card before the next load
+# sizes itself against it; a kill also orphans vLLM's engine-core workers.
+STOP_GRACE_SECONDS: int = 30
 
 ENGINE_SPEC_VERSION: int = 1
 ENGINE_SPEC_DIRNAME: str = "engines"
@@ -373,7 +382,6 @@ ENGINE_PHASE_DIRNAME: str = "phase"
 ENGINE_SIZED_DIRNAME: str = "sized"
 ENGINE_SLOTS_DIRNAME: str = "slots"
 SLOT_ASSIGNMENT_SUFFIX: str = ".assignment.json"
-SLOT_POLL_SECONDS: float = 2.0
 ACTIVE_MODEL_FILENAME: str = "active-model"
 # Written by VIS, mode 0600: the HuggingFace token set in the Manager.
 HF_TOKEN_FILE: str = "secrets/hf-token"
@@ -384,8 +392,8 @@ DEFAULT_STARTING_FILE: str = "/tmp/vif-engine-starting"
 # neighbours reach it by service name.
 DEFAULT_ENGINE_HOST: str = "0.0.0.0"
 DEFAULT_SPEC_TIMEOUT_SECONDS: int = 300
-# How often the desired state is re-read. Fast enough that a switch is not
-# noticeably slower for it, slow enough to be free.
+# How often the desired state is re-read. Fast enough that a move between
+# states is not noticeably slower for it, slow enough to be free.
 DEFAULT_WATCH_POLL_SECONDS: float = 2.0
 # How long the engine that should be serving waits for the rest of the hot
 # pool to load first: the shipped catalog has five models, so at most four
@@ -1029,7 +1037,7 @@ def size_load(model: str, sizing: LoadSizing, card: CardMemory) -> SizedLoad:
     if not approved:
         reason = (
             f"{model} cannot be loaded on the card as it is now: "
-            f"{arithmetic}, less than its {sizing.weights_mib} MiB of weights."
+            f"{arithmetic}, less than the {sizing.weights_mib} MiB its pool needs."
         )
     else:
         cap: str = (
@@ -1366,7 +1374,7 @@ def plan_from_env(environ: dict[str, str]) -> LaunchPlan:
         f'--limit-mm-per-prompt={{"image": {max_images}, "video": 0}}',
     ]
 
-    # Processor kwargs only when the model's env file sets pixel caps.
+    # Processor kwargs only when the engine's environment sets pixel caps.
     if min_pixels or max_pixels:
         pairs: list[str] = []
         if min_pixels:
@@ -1859,11 +1867,11 @@ class Engine:
 
     def wait_for_pool(self, target: DesiredState) -> bool:
         """
-        Boot order: the engine that should be serving loads last.
+        Boot order: an engine that should be serving loads last.
 
         Every engine's memory reservation assumes the others are asleep while
         it loads, and an engine that loads awake stays awake. So before it
-        asks for the load lock, the engine that should be serving waits for
+        asks for the load lock, an engine that should be serving waits for
         every other engine whose spec says `asleep` to be loaded (its
         readiness marker) or to rest parked. Bounded: an engine that never
         arrives must not keep the pool from serving.
@@ -1945,7 +1953,7 @@ class Engine:
         """
         The load guard: an engine that should be asleep does not load beside a
         serving one, because the card has no room for it. An `awake` spec is
-        never guarded -- the manager retires what was there before it asks --
+        never guarded -- VIS sized it within its card's plan for the active set --
         and neither is one VIS sized to share its card (`gpu_shared`).
         """
         if target is not DesiredState.ASLEEP or self.plan.gpu_shared:
@@ -2023,12 +2031,8 @@ class Engine:
         """Through a rename: VIS polls this file and must never read half of it."""
         if not path:
             return
-        target: Path = Path(path)
-        temporary: Path = target.with_name(f".{target.name}.tmp")
         try:
-            make_shared_dir(target.parent)
-            temporary.write_text(json.dumps(document) + "\n", encoding="utf-8")
-            os.replace(temporary, target)
+            write_json_atomically(Path(path), document)
         except OSError as exc:
             warn(f"the {what} marker {path} could not be written ({exc}).")
 
@@ -2703,11 +2707,23 @@ class Engine:
             self._forwarded = True
         health: int = self.wait_for_health()
         if health == 1:
+            # The same posture as a load that dies: without a crash note the
+            # restarted launcher would load the same spec again and hold the
+            # load lock for another full budget, for as long as it stays wedged.
+            reason: str = (
+                f"vLLM gave no /health in {self.plan.health_timeout_seconds}s "
+                "during its load"
+            )
+            self.record_crash(
+                self._load_digest, self._load_decision, None, None, reason
+            )
             warn(
                 f"no /health in {self.plan.health_timeout_seconds}s; "
-                "releasing the lock and stopping."
+                "stopping it and releasing the lock. Not loading again until "
+                "its spec asks for something else."
             )
-            self.release_load_lock()
+            # stop_child releases the lock once the card is free: the next
+            # load sizes itself against the card as it finds it.
             self.stop_child()
             return EXIT_HEALTH_TIMEOUT
         if health == 2:
@@ -2745,7 +2761,8 @@ class Engine:
             self.state is DesiredState.PARKED
             and self._stub.disabled != self.plan.disabled
         ):
-            # The stub's answer says whether the engine is disabled.
+            # The flag changed while parked: restart the stub so /vif/parked
+            # answers for the spec now in force.
             self._stub.stop()
             self.hold_parked()
         if target is self.state:
@@ -2922,8 +2939,16 @@ def run_slot(environ: dict[str, str], slot: str) -> SlotLease:
     timeout: int = env_int(
         environ, "VIF_SPEC_TIMEOUT_SECONDS", DEFAULT_SPEC_TIMEOUT_SECONDS
     )
-    poll: float = env_float(environ, "VIF_WATCH_POLL_SECONDS", SLOT_POLL_SECONDS)
-    nonce: str = register_slot(state_dir, slot, model)
+    poll: float = env_float(
+        environ, "VIF_WATCH_POLL_SECONDS", DEFAULT_WATCH_POLL_SECONDS
+    )
+    try:
+        nonce: str = register_slot(state_dir, slot, model)
+    except OSError as exc:
+        raise ConfigError(
+            f"slot {slot} cannot register on {state_dir} ({exc}) -- is the state "
+            "volume mounted and writable?"
+        ) from None
     stub: ParkedStub = ParkedStub(
         env_value(environ, "VIF_ENGINE_HOST", DEFAULT_ENGINE_HOST)
     )
@@ -3041,10 +3066,11 @@ def main() -> int:
         log(f"revision {LAUNCHER_REVISION}")
         slot: str = env_value(dict(os.environ), "VIF_SLOT")
         lease: SlotLease | None = None
+        environ: dict[str, str] = dict(os.environ)
         if slot and not dry_run:
-            lease = run_slot(dict(os.environ), slot)
-            os.environ["VLM_MODEL"] = lease.model
-        plan: LaunchPlan = build_plan(dict(os.environ))
+            lease = run_slot(environ, slot)
+            environ["VLM_MODEL"] = lease.model
+        plan: LaunchPlan = build_plan(environ)
     except ConfigError as exc:
         warn(str(exc))
         return EXIT_CONFIG
@@ -3062,10 +3088,10 @@ def main() -> int:
             "with no engine process, no weights and no load lock, until VIS "
             "writes a spec without the flag."
         )
-        return supervise(plan, dict(os.environ), lease)
+        return supervise(plan, environ, lease)
     if plan.desired_state is DesiredState.PARKED:
         log(f"{plan.model} starts parked: no engine process until VIS asks for one.")
-        return supervise(plan, dict(os.environ), lease)
+        return supervise(plan, environ, lease)
 
     log("Launching vLLM with:")
     for part in [plan.model, *plan.args]:
@@ -3095,7 +3121,7 @@ def main() -> int:
     if not plan.needs_supervision:
         os.execvpe(plan.argv[0], plan.argv, {**os.environ, **plan.env})
 
-    return supervise(plan, dict(os.environ), lease)
+    return supervise(plan, environ, lease)
 
 
 if __name__ == "__main__":
