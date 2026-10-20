@@ -210,9 +210,12 @@ frequent cuts or a handheld camera, leave the filter on.
 to `0`.** A region is reported once its track has travelled
 `min_displacement`. A one-frame event — a cut, a light switched on — produces
 a region whose track starts on that very frame, so it has travelled nothing
-yet and is not reported at the default `0.02`. With only the filter off, you
-hear about a whole-picture change when it persists and moves (a slow fade, a
-pan), not about a single abrupt switch. With `min_displacement` at `0` the
+yet and is normally not reported at the default `0.02`. (It can slip through
+when something was moving just before the change: the picture-wide region
+then continues that subject's track and inherits its travel.) With only the
+filter off, you reliably hear about a whole-picture change only when it
+persists and moves (a slow fade, a pan), not about a single abrupt switch.
+With `min_displacement` at `0` the
 region is reported on the frame of the change with `confidence` `0`, so the
 listener that should receive it must keep its confidence threshold at `0.0` —
 the Manager UI's default for a motion listener (see
