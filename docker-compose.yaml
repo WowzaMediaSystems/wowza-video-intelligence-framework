@@ -447,7 +447,9 @@ services:
         restart: unless-stopped
         command: ["serve"]
         environment:
-            HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
+            # Read by HuggingFace and peft; left out of the container when unset (an
+            # empty value is not a truth value for peft).
+            HF_HUB_OFFLINE:
             SECURE_MODE: ${SECURE_MODE:-true}
             MODEL_TRAINER_API_KEY: ${MODEL_TRAINER_API_KEY:-}
             VIS_URL: http://video-intelligence-service.docker:5001
