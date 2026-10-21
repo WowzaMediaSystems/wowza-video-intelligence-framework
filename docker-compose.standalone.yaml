@@ -30,7 +30,9 @@ services:
             # The UI and the API
             - "${MODEL_TRAINER_PORT:-8090}:5002"
         environment:
-            HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-}
+            # Read by HuggingFace and peft; left out of the container when unset (an
+            # empty value is not a truth value for peft).
+            HF_HUB_OFFLINE:
             SECURE_MODE: ${SECURE_MODE:-true}
             # Required: the service refuses to start without it. It is the
             # sign-in secret of the page and the X-API-Key of the API.
