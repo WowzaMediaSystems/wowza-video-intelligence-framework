@@ -112,6 +112,10 @@ Add  `--help` to the above commands to see all the options available.
 	or every Manager request to a digest Engine stays a 401. `V2CorsPolicyTest` pins the shipped policy to what
 	the browser SDK actually sends, and pins the installer's value to the shipped policy.
 
+	An existing install does not pick a newer policy up on its own: a native install gets it by
+	rerunning the installer, which replaces the value; a Docker Engine whose `conf/` is a bind
+	mount keeps the `Server.xml` it was seeded with and needs the value updated by hand.
+
 ### Application.xml
 * add application Modules to each Application.xml that VIF will run under.
 	```xml

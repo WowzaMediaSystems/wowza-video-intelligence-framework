@@ -196,7 +196,7 @@ What this enables:
 
 This persistence makes testing and iteration easier, but after major WSE, VIS, model, or plugin changes you may need to remove outdated persisted files before retesting:
 
-- `./wse/*` can preserve older runtime or config state that masks image changes.
+- `./wse/*` can preserve older runtime or config state that masks image changes. `./wse/conf/Server.xml` in particular is seeded from the image once: a setting a newer release ships, such as the `restUserHTTPHeaders` CORS policy the Manager needs against an Engine on digest authentication, reaches an existing checkout only when you update the file by hand (the value is in [docs/README.wse-plugin.md](docs/README.wse-plugin.md)).
 - `./vis/models/engines` can preserve stale TensorRT engines built for an older runtime, model set, or GPU environment.
 - Take care with `./vis/models/`: it may also contain custom model weights (`.pth`) that you want to keep.
 
