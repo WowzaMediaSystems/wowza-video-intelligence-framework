@@ -62,7 +62,7 @@ VIF="http://localhost:8087/v2/vif"
 ```
 
 > [!NOTE]
-> The framework configures the Engine REST API for HTTP Basic authentication, which is what `curl -u` speaks by default. If your Engine is set to digest auth instead (`<AuthenticationMethod>` in `Server.xml` — the default on standalone Engine installs), add `--digest` to every `curl` call in this guide.
+> The framework configures the Engine REST API for HTTP Basic authentication, which is what `curl -u` speaks by default. If your Engine is set to digest auth instead (`<AuthenticationMethod>` in `Server.xml` — the default on standalone Engine installs), add `--digest` to every `curl` call in this guide. The Manager's VIF pages answer either scheme, provided the Engine's CORS policy exposes `WWW-Authenticate` (the `restUserHTTPHeaders` value in [README.wse-plugin.md](README.wse-plugin.md)).
 
 **1. Put a video where the Engine can see it.** Jobs analyze files under the Engine's content directory — `./wse/content` in a compose checkout:
 

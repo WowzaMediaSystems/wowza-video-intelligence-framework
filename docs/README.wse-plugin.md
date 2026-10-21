@@ -96,7 +96,7 @@ Add  `--help` to the above commands to see all the options available.
 		<Properties>
 			<Property>
 				<Name>restUserHTTPHeaders</Name>
-				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag</Value>
+				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag,WWW-Authenticate</Value>
 				<Type>String</Type>
 			</Property>
 		</Properties>
@@ -107,8 +107,14 @@ Add  `--help` to the above commands to see all the options available.
 	UI calls the API cross-origin (Manager on 8088, Engine REST on 8087), and the v2 API's
 	concurrency handshake needs `If-Match` allowed on requests and `ETag` exposed on responses —
 	without them every save from the browser fails its CORS preflight or loses its revision,
-	which reads like the Engine being down. `V2CorsPolicyTest` pins the shipped policy to what
+	which reads like the Engine being down. The SDK also reads `WWW-Authenticate` off a 401 to
+	answer a digest challenge, so an Engine whose `<RESTInterface>` uses `digest` needs it exposed,
+	or every Manager request to a digest Engine stays a 401. `V2CorsPolicyTest` pins the shipped policy to what
 	the browser SDK actually sends, and pins the installer's value to the shipped policy.
+
+	An existing install does not pick a newer policy up on its own: a native install gets it by
+	rerunning the installer, which replaces the value; a Docker Engine whose `conf/` is a bind
+	mount keeps the `Server.xml` it was seeded with and needs the value updated by hand.
 
 ### Application.xml
 * add application Modules to each Application.xml that VIF will run under.
