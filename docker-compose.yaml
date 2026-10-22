@@ -458,6 +458,9 @@ services:
             MODEL_TRAINER_MAX_UPLOAD_MB: ${MODEL_TRAINER_MAX_UPLOAD_MB:-512}
             MODEL_TRAINER_MAX_JOBS: ${MODEL_TRAINER_MAX_JOBS:-10}
             MODEL_TRAINER_JOB_TTL_SECONDS: ${MODEL_TRAINER_JOB_TTL_SECONDS:-2592000}
+        # The training dataloader's workers hand batches over through /dev/shm;
+        # Docker's 64 MB default stalls a fine-tune at its first batch.
+        shm_size: "2gb"
         volumes:
             # projects/ (the store) beside jobs/ (training jobs)
             - ./model_trainer:/model_trainer
