@@ -29,6 +29,9 @@ services:
         ports:
             # The UI and the API
             - "${MODEL_TRAINER_PORT:-8090}:5002"
+        # The training dataloader's workers hand batches over through /dev/shm;
+        # Docker's 64 MB default stalls a fine-tune at its first batch.
+        shm_size: "2gb"
         environment:
             # Read by HuggingFace and peft; left out of the container when unset (an
             # empty value is not a truth value for peft).
