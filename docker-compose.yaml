@@ -473,6 +473,9 @@ services:
             MODEL_TRAINER_VRAM_MIB_RFDETR_SMALL:
             MODEL_TRAINER_VRAM_MIB_RFDETR_MEDIUM:
             MODEL_TRAINER_VRAM_MIB_RFDETR_LARGE:
+        # The training dataloader's workers hand batches over through /dev/shm;
+        # Docker's 64 MB default stalls a fine-tune at its first batch.
+        shm_size: "2gb"
         volumes:
             # projects/ (the store) beside jobs/ (training jobs)
             - ./model_trainer:/model_trainer
