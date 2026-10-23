@@ -209,7 +209,7 @@ Add  `--help` to the above commands to see all the options available.
 
 ## Manager over HTTPS
 
-The VIF pages in Manager call the Engine REST API (port 8087) directly from the browser. A browser refuses plain `http://` requests from an `https://` page (mixed content), so when Manager is served over HTTPS (`httpsPort` in `manager/conf/tomcat.properties`) the UI addresses `https://<host>:8087`, and the Engine REST API has to serve HTTPS as well. Until it does, the VIF dashboard shows "Offline - lost connection to the Engine" even though Engine and VIS are fine.
+The VIF pages in Manager call the Engine REST API (port 8087) directly from the browser. A browser refuses plain `http://` requests from an `https://` page (mixed content), so when Manager is served over HTTPS (`httpsPort` in `manager/conf/tomcat.properties`) the UI addresses `https://<host>:8087`, and the Engine REST API has to serve HTTPS as well. Until it does, the VIF dashboard reports the Engine as offline and names this cause, even though Engine and VIS are fine.
 
 Wowza documents the Manager side in [Connect to Wowza Streaming Engine Manager over HTTPS](https://www.wowza.com/docs/how-to-connect-to-wowza-streaming-engine-manager-over-https) and the `SSLConfig` fields in the [Server.xml configuration reference](https://www.wowza.com/docs/wowza-streaming-engine-serverxml-configuration-reference). The step below is not covered by the article and is required to successfully enable the VIF dashboard in Manager.
 
@@ -235,7 +235,7 @@ Restart Engine:
 sudo systemctl restart WowzaStreamingEngine
 ```
 
-Then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, so make sure to use the correct URL.
+Then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, so make sure to use the correct URL. The browser has to trust that certificate too: the VIF pages call 8087 from the browser, and a certificate it rejects (self-signed, or one issued for another name) reads as the Engine being unreachable; opening `https://<domain>.streamlock.net:8087` in a new tab shows which.
 
 ## Engine over `wss` to VIS
 
