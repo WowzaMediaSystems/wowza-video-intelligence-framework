@@ -7,7 +7,7 @@ For compute requirements, see the [Compute Requirements](../README.md#compute-re
 ## Prerequisites
 
 - **Docker Engine** and **Docker Compose** (v2)
-- **NVIDIA GPU** with compatible drivers (v570 or above, `nvidia-smi` should work)
+- **NVIDIA GPU** with compatible drivers (v580 or above, `nvidia-smi` should work)
 - **NVIDIA Container Toolkit** (`nvidia-container-toolkit`) — [installation guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - **A VIS license** (`VIS_LICENSE`, a license string) — contact us via [wowza.com/contact](https://www.wowza.com/contact) if you don't have one
 - **A clone or copy of this repository**

@@ -37,7 +37,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose v2](https://docs.docker.com/compose/install/)
 - A valid [Wowza Streaming Engine](https://auth.wowza.com/register?type=engine) license key
 - A valid Video Intelligence Service license (`VIS_LICENSE`) for local VIS deployments
-- For local GPU inference: an NVIDIA GPU with driver **570+** and **CUDA 12.8+**, plus the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- For local GPU inference: an NVIDIA GPU with driver **580+** and **CUDA 12.8+**, plus the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - (Optional) [FFmpeg](https://www.ffmpeg.org/download.html) for publishing test streams
 
 > [!TIP]
@@ -55,6 +55,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Plugin Configuration Reference](#plugin-configuration-reference)
 - [Synthetic Video Detection (Optional)](#synthetic-video-detection-optional)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
+- [Deploying on AWS (EC2)](docs/AWS_DEPLOYMENT.md)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
 - [Running on NVIDIA Jetson (Optional)](#running-on-nvidia-jetson-optional)
@@ -107,10 +108,12 @@ Example:
 WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
 WSE_ADMIN_USER=admin
 WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
+IPWHITELIST=127.0.0.1,172.*.*.*,192.168.*.*,10.*.*.*
 VIS_PROTOCOL=ws
 VIS_HOST=video-intelligence-service.docker
 VIS_PORT=5001
-VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
+VIS_API_KEY=REPLACE_WITH_A_STRONG_RANDOM_KEY
+SECURE_MODE=true
 VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 ```
 
@@ -121,7 +124,8 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 
 > [!CAUTION]  
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
-> `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
+> `VIS_API_KEY` protects access to the Video Intelligence Service — generate a long, random, high-entropy key (e.g. `openssl rand -hex 32`) and rotate it regularly. VIS refuses to start without one while `SECURE_MODE=true` (the default).  
+> `IPWHITELIST` limits which source IPs may call the WSE REST API. The default covers localhost and private ranges — add your admin IP only if you call the REST API remotely.  
 
 #### 2. Verify your GPU and Docker can see it:
 
@@ -134,7 +138,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi
    ```
    You're ready when you see:
-   * Driver version **570 or higher**
+   * Driver version **580 or higher**
    * CUDA version **12.8 or higher**
    * Your GPU listed by name
    
@@ -165,8 +169,11 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    | `443` | HTTPS | TLS |
    | `554` | RTSP | RTSP |
    | `1935` | TCP | RTMP |
+   | `6970-6999` | UDP | WebRTC |
    | `8087` | HTTP | REST API |
+   | `8088` | HTTP | Manager UI |
    | `8089` | HTTP | REST API docs (if enabled) |
+   | `8443` | HTTPS | Manager UI (TLS) |
    | `10000` | UDP | SRT |
    
 > [!NOTE]
@@ -293,13 +300,15 @@ Use [`README.wse-plugin.md`](docs/README.wse-plugin.md) as the detailed configur
 
 ## Synthetic Video Detection (Optional)
 
-VIF can flag **synthetic / AI-generated** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC (VI-550 partnership) and needs an NVENC/NVDEC GPU (T4/A10/A16/A40/L4/L40/L40S/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
+VIF can flag **synthetic / AI-generated** video on a live stream via the optional `detector_type: "synthetic"` analyzer, backed by the **NVIDIA Synthetic Video Detector (SVD) NIM**. It is opt-in and bring-your-own endpoint: bring up the bundled NIM sidecar with `docker compose --profile default --profile svd up -d`, or point a stream at a hosted/self-hosted SVD endpoint. The NIM image is access-gated through NVIDIA NGC (AI for Media Private Access Program) and needs an NVENC/NVDEC GPU (T4/A10/A16/A40/L4/L40/L40S/RTX 4090/5090/RTX PRO 6000 Blackwell — **not** A100/H100/B100).
 
 See [`docs/SYNTHETIC_VIDEO_DETECTOR.md`](docs/SYNTHETIC_VIDEO_DETECTOR.md) for the full deployment, GPU support matrix, air-gapped pre-seed, stream-config, and EU AI Act context.
 
 ## Deploying Your Own VIF Service (Optional)
 
 If you want your own Video Intelligence Service deployment (for example on NVIDIA Brev), see [`docs/VIS_DEPLOYMENT.md`](docs/VIS_DEPLOYMENT.md).
+
+To run the full stack (Engine + Manager + VIS) on AWS, see [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md) — EC2 instance sizing, the recommended AMI, security groups, and a first test stream.
 
 ## Compute Requirements (Self-Hosted VIF)
 
