@@ -55,6 +55,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Plugin Configuration Reference](#plugin-configuration-reference)
 - [Synthetic Video Detection (Optional)](#synthetic-video-detection-optional)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
+- [Deploying on AWS (EC2 or ECS)](docs/AWS_DEPLOYMENT.md)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
 - [Running on NVIDIA Jetson (Optional)](#running-on-nvidia-jetson-optional)
@@ -306,6 +307,8 @@ See [`docs/SYNTHETIC_VIDEO_DETECTOR.md`](docs/SYNTHETIC_VIDEO_DETECTOR.md) for t
 ## Deploying Your Own VIF Service (Optional)
 
 If you want your own Video Intelligence Service deployment (for example on NVIDIA Brev), see [`docs/VIS_DEPLOYMENT.md`](docs/VIS_DEPLOYMENT.md).
+
+To run the full stack (Engine + Manager + VIS) on AWS, see [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md) — EC2 instance sizing, GPU driver and container-toolkit setup, security groups, and notes for porting the stack to ECS.
 
 ## Compute Requirements (Self-Hosted VIF)
 
