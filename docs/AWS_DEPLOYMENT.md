@@ -37,7 +37,7 @@ Match the instance to the [Compute Requirements](../README.md#compute-requiremen
 | `8087` | TCP | WSE REST API | Same as `8088` — the Manager's VIF pages call this port from your browser, so the two always open (or tunnel) together |
 
 > [!CAUTION]
-> Never open `8087` (REST API) or `8088` (Manager) to `0.0.0.0/0`. The safest setup keeps both closed in the security group and reaches them through an SSH tunnel (step 5). As a second layer, `IPWHITELIST` in `.env` restricts which source IPs the REST API accepts (the default already covers private ranges — add your admin IP only if you call the REST API across the internet).
+> Don't open `8087` (REST API) or `8088` (Manager) to `0.0.0.0/0` — out of the box, both carry admin credentials over plain HTTP. The SSH tunnel (step 5) is the recommended way in: both ports stay closed and the hop is encrypted. Opening them to your admin IP works too, but the traffic is still cleartext — fine across a VPN or private network, not the open internet. Serving the Manager over TLS on `8443` instead takes extra setup: a keystore mounted into the Manager container (`JKS_FILE`) **and** TLS enabled on the REST API (`SSLConfig` in `Server.xml`), because an HTTPS Manager page makes your browser call the REST API over HTTPS as well. As a second layer, `IPWHITELIST` in `.env` restricts which source IPs the REST API accepts (the default already covers private ranges — add your admin IP only if you call the REST API across the internet).
 
 ### 3. Verify the GPU and Docker
 
