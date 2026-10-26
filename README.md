@@ -107,10 +107,12 @@ Example:
 WSE_LICENSE_KEY=REPLACE_WITH_YOUR_WSE_LICENSE_KEY
 WSE_ADMIN_USER=admin
 WSE_ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
+IPWHITELIST=127.0.0.1,172.*.*.*,192.168.*.*,10.*.*.*
 VIS_PROTOCOL=ws
 VIS_HOST=video-intelligence-service.docker
 VIS_PORT=5001
-VIS_API_KEY=REPLACE_WITH_YOUR_VIS_API_KEY
+VIS_API_KEY=REPLACE_WITH_A_STRONG_RANDOM_KEY
+SECURE_MODE=true
 VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 ```
 
@@ -121,7 +123,8 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
 
 > [!CAUTION]  
 > `WSE_ADMIN_USER` and `WSE_ADMIN_PASSWORD` bootstrap local Manager/REST access. Do not keep defaults — use a strong password.  
-> `VIS_API_KEY` protects access to the Video Intelligence Service. Use a long, random, high-entropy key and rotate it regularly.  
+> `VIS_API_KEY` protects access to the Video Intelligence Service — generate a long, random, high-entropy key (e.g. `openssl rand -hex 32`) and rotate it regularly. VIS refuses to start without one while `SECURE_MODE=true` (the default).  
+> `IPWHITELIST` limits which source IPs may call the WSE REST API. The default covers localhost and private ranges — add your admin IP only if you call the REST API remotely.  
 
 #### 2. Verify your GPU and Docker can see it:
 
@@ -165,8 +168,11 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    | `443` | HTTPS | TLS |
    | `554` | RTSP | RTSP |
    | `1935` | TCP | RTMP |
+   | `6970-6999` | UDP | WebRTC |
    | `8087` | HTTP | REST API |
+   | `8088` | HTTP | Manager UI |
    | `8089` | HTTP | REST API docs (if enabled) |
+   | `8443` | HTTPS | Manager UI (TLS) |
    | `10000` | UDP | SRT |
    
 > [!NOTE]
