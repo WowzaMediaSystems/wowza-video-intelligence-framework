@@ -1,8 +1,6 @@
-# Deploying VIF on AWS (EC2 or ECS)
+# Deploying VIF on AWS (EC2)
 
-This guide walks through running the full VIF stack — Wowza Streaming Engine, Engine Manager, and the Video Intelligence Service (VIS) — on AWS.
-
-**Recommended path: a single EC2 GPU instance running the Docker Compose stack from this repository.** That is the setup this repo ships ready-to-run; everything in the [main README](../README.md) applies unchanged once the instance is prepared. An [ECS section](#ecs-deployment-notes) at the end covers what changes when you port the stack to ECS.
+This guide walks through running the full VIF stack — Wowza Streaming Engine, Engine Manager, and the Video Intelligence Service (VIS) — on a single EC2 GPU instance with the Docker Compose stack from this repository. That is the setup this repo ships ready-to-run; everything in the [main README](../README.md) applies unchanged once the instance is prepared.
 
 ## EC2 Deployment
 
@@ -115,21 +113,6 @@ For production you can run Engine on a CPU instance (e.g. `c6i.4xlarge`) and VIS
 1. On the GPU instance, start VIS alone behind the bundled TLS proxy (a cross-host hop **must** be `wss`): follow [Remote VIS — TLS via the bundled reverse proxy](VIS_DEPLOYMENT.md#remote-vis--tls-via-the-bundled-reverse-proxy-recommended).
 2. In the VIS instance's security group, open the TLS port (`5443` by default) **only to the Engine instance's security group**, not to the internet.
 3. On the Engine instance, run `docker compose --profile wse up -d` with `.env` pointing at the proxy: `VIS_PROTOCOL=wss`, `VIS_HOST=<vis-instance-dns>` (must match the certificate), `VIS_PORT=5443`, and the same `VIS_API_KEY` on both sides.
-
-## ECS Deployment (notes)
-
-The compose stack ports to ECS, with these adjustments:
-
-- **Launch type:** EC2 with the *ECS GPU-optimized AMI* (verify its driver is 580+). Fargate does not offer GPUs.
-- **Task layout:** run Engine + Manager as one service, and VIS as its own service pinned to the GPU capacity. Give the VIS container a GPU via `resourceRequirements: [{type: "GPU", value: "1"}]` and keep the `NVIDIA_DRIVER_CAPABILITIES` environment values from the compose file.
-- **Init one-shots:** `vis-init` (and `svd-cache-init` for the SVD profile) become containers in the same task with `essential: false` and a `dependsOn` condition of `SUCCESS` on the main container — the same ordering `depends_on: service_completed_successfully` gives in compose.
-- **Service discovery:** containers in one task (`awsvpc` mode) share a network namespace, so within a task `VIS_HOST=localhost` works. Across services, use ECS Service Connect / Cloud Map and set `VIS_HOST` to the service name — and once Engine and VIS are on different hosts, the hop must be `wss`/TLS, exactly as in the split EC2 topology above.
-- **Volumes:** bind the `wse/*` and `vis/models` paths to host EBS storage on the container instance so config, VOD jobs, and the TensorRT engine cache survive task restarts. Keep the VIS service pinned to one instance family — the engine cache is per GPU architecture.
-- **Secrets:** inject `WSE_LICENSE_KEY`, `VIS_LICENSE`, and `VIS_API_KEY` with `secrets` / `valueFrom` from Secrets Manager or SSM Parameter Store instead of a `.env` file.
-- **Ingress:** front RTMP/RTSP/SRT with an NLB (TCP/UDP listeners) and HLS with an ALB; keep the Manager and REST ports off any internet-facing load balancer.
-
-> [!TIP]
-> Validate your configuration on a single EC2 instance with compose first, then port it. Debugging stream rules and GPU plumbing is much faster with `docker compose logs -f` than through task definitions.
 
 ## Troubleshooting
 
