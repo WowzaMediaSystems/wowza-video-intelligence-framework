@@ -21,7 +21,7 @@ Match the instance to the [Compute Requirements](../README.md#compute-requiremen
 
 ### 2. Launch the instance
 
-- **AMI:** Ubuntu Server 24.04 LTS (x86_64). The *AWS Deep Learning Base GPU AMI* also works and ships with the NVIDIA driver preinstalled — verify `nvidia-smi` reports driver **580 or higher** before skipping step 3.
+- **AMI:** **Deep Learning Base AMI with Single CUDA (Ubuntu 24.04)** — it ships with the NVIDIA driver, Docker, and the NVIDIA Container Toolkit preinstalled, so no GPU or Docker setup is needed. (A plain Ubuntu AMI works too, but then you install the NVIDIA driver **580+**, Docker, and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) yourself.)
 - **Storage:** 100 GB+ gp3 root volume. Container images, model weights, the TensorRT engine cache, and (with the VLM sidecar) ~5 GB of VLM weights all live here; 32 GB fills up fast.
 - **Addressing:** attach an Elastic IP (or stable DNS name) if encoders will publish to the instance or viewers will play from it.
 
@@ -39,48 +39,19 @@ Match the instance to the [Compute Requirements](../README.md#compute-requiremen
 | `8087` | TCP | WSE REST API | Your admin IP only |
 
 > [!CAUTION]
-> Never open `8087` (REST API) or `8088` (Manager) to `0.0.0.0/0`. The safest setup keeps both closed in the security group and reaches them through an SSH tunnel (step 6). As a second layer, `IPWHITELIST` in `.env` restricts which source IPs the REST API accepts (the default already covers private ranges — add your admin IP only if you call the REST API across the internet).
+> Never open `8087` (REST API) or `8088` (Manager) to `0.0.0.0/0`. The safest setup keeps both closed in the security group and reaches them through an SSH tunnel (step 5). As a second layer, `IPWHITELIST` in `.env` restricts which source IPs the REST API accepts (the default already covers private ranges — add your admin IP only if you call the REST API across the internet).
 
-### 3. Install the NVIDIA driver (580+)
-
-```bash
-sudo apt update
-sudo ubuntu-drivers install --gpgpu nvidia:580-server
-sudo reboot
-```
-
-After the reboot, confirm the driver:
+### 3. Verify the GPU and Docker
 
 ```bash
 nvidia-smi   # Driver Version must be 580 or higher
-```
-
-### 4. Install Docker and the NVIDIA Container Toolkit
-
-```bash
-# Docker Engine + Compose v2
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER   # log out/in (or re-SSH) to pick this up
-
-# NVIDIA Container Toolkit
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-curl -sL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-sudo apt update && sudo apt install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-```
-
-Verify Docker can reach the GPU:
-
-```bash
 docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility \
   nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi
 ```
 
-### 5. Get the stack and configure it
+Both should list your GPU. If the `docker run` fails, the NVIDIA Container Toolkit is missing — use the Deep Learning Base AMI above, or follow the [install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+### 4. Get the stack and configure it
 
 ```bash
 git clone https://github.com/WowzaMediaSystems/wowza-video-intelligence-framework.git
@@ -97,7 +68,7 @@ Edit `.env` and set at minimum:
 
 Leave `VIS_PROTOCOL=ws` and `VIS_HOST=video-intelligence-service.docker` as they are — on a single instance, Engine and VIS talk over the internal Docker bridge.
 
-### 6. Start and verify
+### 5. Start and verify
 
 ```bash
 docker compose up -d
@@ -115,7 +86,7 @@ ssh -L 8088:localhost:8088 ubuntu@<instance-dns>
 # then open http://localhost:8088 locally
 ```
 
-### 7. Publish a test stream
+### 6. Publish a test stream
 
 From your workstation (with [FFmpeg](https://www.ffmpeg.org/download.html) installed), publish any MP4 — for example a sample clip from this repository's `videos/` folder — to the instance. A stream name matching `object.*` triggers object detection:
 
@@ -165,8 +136,8 @@ The compose stack ports to ECS, with these adjustments:
 | Problem | Action |
 |---|---|
 | Instance launch fails with a vCPU limit error | Request a G-instance quota increase (see step 1) |
-| `nvidia-smi` not found / no devices | Driver not installed or instance not rebooted after install (step 3) |
-| `docker run --gpus` test fails | Container toolkit missing or Docker not restarted after `nvidia-ctk runtime configure` (step 4) |
+| `nvidia-smi` not found / no devices | Use the Deep Learning Base AMI (step 2), or install the NVIDIA driver (580+) yourself on a plain Ubuntu AMI |
+| `docker run --gpus` test fails | NVIDIA Container Toolkit missing — preinstalled on the Deep Learning Base AMI; otherwise follow [NVIDIA's install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) |
 | VIS exits immediately at startup | `SECURE_MODE=true` (default) refuses to start without a non-empty `VIS_API_KEY` — set one in `.env` |
 | First stream analyzes after a long delay | First boot compiles TensorRT engines (20+ min); watch `docker compose logs -f video-intelligence-service-gpu` |
 | Disk fills up | Size the root volume 100 GB+; `docker image prune` after upgrades; old engines under `./vis/models/engines` can be cleared |
