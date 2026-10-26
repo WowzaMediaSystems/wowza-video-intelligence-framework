@@ -34,7 +34,7 @@ Match the instance to the [Compute Requirements](../README.md#compute-requiremen
 | `10000` | UDP | SRT | Encoder IPs (if used) |
 | `6970–6999` | UDP | WebRTC | As needed |
 | `8088` | TCP | Manager UI | Your admin IP only — or keep closed and use the SSH tunnel below |
-| `8087` | TCP | WSE REST API | Your admin IP only |
+| `8087` | TCP | WSE REST API | Same as `8088` — the Manager's VIF pages call this port from your browser, so the two always open (or tunnel) together |
 
 > [!CAUTION]
 > Never open `8087` (REST API) or `8088` (Manager) to `0.0.0.0/0`. The safest setup keeps both closed in the security group and reaches them through an SSH tunnel (step 5). As a second layer, `IPWHITELIST` in `.env` restricts which source IPs the REST API accepts (the default already covers private ranges — add your admin IP only if you call the REST API across the internet).
@@ -77,10 +77,10 @@ docker compose logs -f video-intelligence-service-gpu   # watch first-boot progr
 > [!NOTE]
 > The **first start can take 20+ minutes**: VIS downloads model weights and compiles TensorRT engines for your GPU. The engines are cached under `./vis/models`, so later restarts take 1–3 minutes.
 
-Reach the Manager UI without opening port 8088 by tunnelling it over SSH from your workstation:
+Reach the Manager UI without opening ports 8088 and 8087 by tunnelling both over SSH from your workstation. Both, because the VIF pages in the Manager call the Engine REST API (port 8087) directly from your browser — with only 8088 forwarded, the Manager loads but the VIF tab reports *"Offline — lost connection to the Engine"*:
 
 ```bash
-ssh -L 8088:localhost:8088 ubuntu@<instance-dns>
+ssh -L 8088:localhost:8088 -L 8087:localhost:8087 ubuntu@<instance-dns>
 # then open http://localhost:8088 locally
 ```
 
@@ -124,4 +124,5 @@ For production you can run Engine on a CPU instance (e.g. `c6i.4xlarge`) and VIS
 | VIS exits immediately at startup | `SECURE_MODE=true` (default) refuses to start without a non-empty `VIS_API_KEY` — set one in `.env` |
 | First stream analyzes after a long delay | First boot compiles TensorRT engines (20+ min); watch `docker compose logs -f video-intelligence-service-gpu` |
 | Disk fills up | Size the root volume 100 GB+; `docker image prune` after upgrades; old engines under `./vis/models/engines` can be cleared |
+| VIF tab shows "Offline — lost connection to the Engine" while the rest of Manager works | The VIF pages call the Engine REST API (8087) from your browser — forward 8087 in the SSH tunnel alongside 8088 (step 5), or open both ports to the same admin IP |
 | Manager/REST unreachable | Security group, SSH tunnel, and `IPWHITELIST` in `.env` all gate access — check all three |
