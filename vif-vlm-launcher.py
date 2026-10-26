@@ -200,7 +200,10 @@ couple of seconds; a spec whose content has not changed costs one read):
            cold start (a minute or two), during which nothing answers /health
            and VIF_STARTING_FILE keeps the container healthy instead. This is
            the cold tier, and the only state available to an engine that
-           cannot be woken from sleep.
+           cannot be woken from sleep. A park stops the process and serves
+           the stub only once the card has the engine's memory back (the
+           driver frees it some seconds after the process exits), bounded by
+           CARD_RELEASE_SECONDS, past which it warns and parks anyway.
 
 VIS moves an engine between those three by rewriting its spec; nothing else
 is needed on this side. A sleep or a wake that fails is not retried until the
@@ -223,9 +226,11 @@ THE POOL DUTIES, when several engines share one card:
     loads awake stays awake, so it cannot load first. Before it asks for the
     lock it waits until every other engine whose
     spec says `asleep` has published its readiness marker (loaded, and asleep)
-    or rests parked (spec `parked`, or `asleep` without sleep mode). Engines
-    whose spec says `parked`, and engines held parked by a crash note about
-    their current spec, are never waited for. The wait is bounded by
+    or rests parked (spec `parked`, or `asleep` without sleep mode). An
+    engine whose spec says `parked` is waited for only while its `ready/` or
+    `awake/` marker is still there (a park keeps them until the card has the
+    memory back); engines held parked by a crash note about their current
+    spec are never waited for. The wait is bounded by
     VIF_POOL_LOAD_TIMEOUT_SECONDS, then it loads anyway with a WARNING naming
     who it gave up on. It ends early, parked, if the spec stops saying
     `awake`, and so does the wait for the load lock: an engine never loads on
@@ -281,10 +286,12 @@ restamps it does not count -- so an engine that crashes while loading does
 not crash-loop under Docker's restart policy. A load
 that succeeds removes the marker; VIS removes it before a new cold start.
 A load that would only run into a license is refused the same way, before
-anything is started: a spec that says `gated` needs the weights on disk or an
-HF_TOKEN whose account has accepted the model's license, and when it has
-neither the crash note carries `access_problem` (token_missing, token_rejected
-or license_not_accepted) instead of an exit code. The parked stub answers
+anything is started: a spec that says `gated` needs an HF_TOKEN whose account
+has accepted the model's license -- weights already in the hub cache included,
+since an online vLLM still asks the hub for them -- unless the model is a local
+path or HF_HUB_OFFLINE=1 serves the cache as it is. Without one the crash note
+carries `access_problem` (token_missing, token_rejected or
+license_not_accepted) instead of an exit code. The parked stub answers
 `GET /vif/access` with the same verdict, checked right then, and says where
 the token came from (`token_source`: environment, manager, or empty), so VIS
 can refuse an activate before it moves any engine. The note
@@ -361,7 +368,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-07.1"
+LAUNCHER_REVISION: str = "2026-10-26.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -370,6 +377,15 @@ EXIT_CONFIG: int = 78
 # its CUDA teardown, and only a clean exit frees the card before the next load
 # sizes itself against it; a kill also orphans vLLM's engine-core workers.
 STOP_GRACE_SECONDS: int = 30
+# The driver frees a killed engine's memory some seconds after its process is
+# gone. A park waits for the card to get it back before it reports `parked`,
+# polling it, for at most CARD_RELEASE_SECONDS. Back means free memory grew by
+# CARD_RELEASED_FRACTION of what the awake load was sized to hold, or, when
+# that is not known, two reads in a row within CARD_SETTLED_MIB of each other.
+CARD_RELEASE_SECONDS: int = 30
+CARD_RELEASE_POLL_SECONDS: float = 0.5
+CARD_RELEASED_FRACTION: float = 0.9
+CARD_SETTLED_MIB: int = 128
 
 ENGINE_SPEC_VERSION: int = 1
 ENGINE_SPEC_DIRNAME: str = "engines"
@@ -851,16 +867,18 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def gated_access_problem(environ: dict[str, str], model: str) -> AccessProblem | None:
     """
-    Why a gated model cannot be downloaded here, or None when it can, is not
-    needed (already on disk, offline) or cannot be told.
+    Why a gated model cannot be loaded here, or None when it can, needs no
+    hub (a local path, or HF_HUB_OFFLINE) or cannot be told.
 
-    Without a token there is nothing to ask the hub. With one, a HEAD on the
-    model's config answers 401 for a token the hub does not accept and 403 for
-    an account that has not accepted the license; anything else, a network
-    failure included, is left for vLLM to run into rather than blocking a load
-    this check has no evidence against.
+    Weights in the hub cache are no exception: an online vLLM still asks the
+    hub for the model's files, and is refused without a token after minutes
+    of loading. Without a token there is nothing to ask the hub. With one, a
+    HEAD on the model's config answers 401 for a token the hub does not accept
+    and 403 for an account that has not accepted the license; anything else,
+    a network failure included, is left for vLLM to run into rather than
+    blocking a load this check has no evidence against.
     """
-    if weights_cache_state(environ, model)[0]:
+    if Path(model).exists() or env_bool(environ, "HF_HUB_OFFLINE"):
         return None
     token: str = hf_token(environ)
     if not token:
@@ -1724,6 +1742,9 @@ class Engine:
         self._phase_bytes: int = -1
         # Set by the log tee once vLLM says the weights are on the GPU.
         self._weights_loaded: bool = False
+        # What the running load holds on the card once loaded (its approved
+        # sizing's pool and outside-pool memory), or None when it was not sized.
+        self._held_mib: int | None = None
         self._gate_announced: str = ""
         self._starting_file: str = env_value(
             environ, "VIF_STARTING_FILE", DEFAULT_STARTING_FILE
@@ -1836,6 +1857,11 @@ class Engine:
     def _peer_loaded(self, peer: Peer) -> bool:
         return (Path(self.plan.ready_dir) / engine_key(peer.model)).exists()
 
+    def _peer_awake(self, peer: Peer) -> bool:
+        if not self.plan.awake_dir:
+            return False
+        return (Path(self.plan.awake_dir) / engine_key(peer.model)).exists()
+
     def _peer_crash_parked(self, peer: Peer) -> bool:
         """Whether the peer's launcher holds it parked on a note about its spec."""
         if not self.plan.crashed_dir:
@@ -1847,17 +1873,20 @@ class Engine:
 
     def pool_still_loading(self) -> list[str]:
         """
-        The other engines that should be asleep and are not loaded yet.
+        The other engines that should be asleep and are not loaded yet, and
+        those told to park that still hold the card.
 
         One whose last load of this very spec died is not coming: its launcher
-        stays parked until the spec asks for something else.
+        stays parked until the spec asks for something else. One told to park
+        keeps its markers until the card has its memory back.
         """
         pending: list[str] = []
         for peer in self._peer_specs():
-            if (
-                peer.desired is DesiredState.PARKED
-                or peer.desired is DesiredState.AWAKE
-            ):
+            if peer.desired is DesiredState.PARKED:
+                if self._peer_loaded(peer) or self._peer_awake(peer):
+                    pending.append(peer.model)
+                continue
+            if peer.desired is DesiredState.AWAKE:
                 continue
             if peer.desired is None:
                 pending.append(peer.model)
@@ -2289,6 +2318,7 @@ class Engine:
         the engine rests parked until its spec asks for something else.
         """
         sizing: LoadSizing | None = self.plan.load_sizing
+        self._held_mib = None
         if sizing is None:
             self._remove_marker(self.plan.sized_file)
             return self.plan.argv
@@ -2358,6 +2388,7 @@ class Engine:
                 "activating the model again sizes it anew."
             )
             return None
+        self._held_mib = sized.predicted_peak_mib - sizing.headroom_mib
         log(f"load sized from the card: {sized.reason}")
         return replace(
             self.plan, args=with_utilization(self.plan.args, sized.utilization)
@@ -2626,9 +2657,14 @@ class Engine:
         """
         A wedged engine may be unable to act on SIGTERM at all, so fall back to
         SIGKILL rather than hang here.
+
+        The markers and the lock go only once the card has the engine's memory
+        back: until then a neighbour must not load, nor VIS see it parked.
         """
         if self.child is None:
             return
+        was_awake: bool = self.state is DesiredState.AWAKE
+        before, _ = read_card_memory(self.plan.gpu_ids, self.plan.tensor_parallel_size)
         if self.child.poll() is None:
             self.child.terminate()
             try:
@@ -2641,11 +2677,56 @@ class Engine:
                 self.child.wait()
         self._join_tee()
         self.child = None
+        if before is not None:
+            self.await_card_released(
+                before.free_mib, self._held_mib if was_awake else None
+            )
         self.clear_awake()
         self.clear_ready()
         # The lock is never held across a park: whoever loads next must not
         # wait on an engine that no longer exists.
         self.release_load_lock()
+
+    def await_card_released(self, free_before_mib: int, held_mib: int | None) -> None:
+        """
+        Poll the card until it has an exited engine's memory back.
+
+        With `held_mib` (an awake engine with an approved sizing), back is free
+        memory up by CARD_RELEASED_FRACTION of it since `free_before_mib`;
+        otherwise two reads in a row that agree within CARD_SETTLED_MIB. Past
+        CARD_RELEASE_SECONDS, or on a stop, it warns or returns and the park
+        goes ahead.
+        """
+        target: int | None = (
+            None
+            if held_mib is None
+            else free_before_mib + math.ceil(held_mib * CARD_RELEASED_FRACTION)
+        )
+        previous: int | None = None
+        polls: int = math.ceil(CARD_RELEASE_SECONDS / CARD_RELEASE_POLL_SECONDS)
+        for _ in range(polls):
+            card, _why = read_card_memory(
+                self.plan.gpu_ids, self.plan.tensor_parallel_size
+            )
+            if card is None:
+                return
+            if (target is not None and card.free_mib >= target) or (
+                target is None
+                and previous is not None
+                and abs(card.free_mib - previous) <= CARD_SETTLED_MIB
+            ):
+                log(
+                    f"the card has the engine's memory back ({card.free_mib} MiB free)."
+                )
+                return
+            previous = card.free_mib
+            if pause(CARD_RELEASE_POLL_SECONDS):
+                return
+        warn(
+            f"the card did not get the engine's memory back within "
+            f"{CARD_RELEASE_SECONDS}s of its exit ({previous} MiB free); "
+            "parking anyway."
+        )
 
     def _join_tee(self) -> None:
         if self._tee is None:
