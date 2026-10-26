@@ -37,7 +37,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose v2](https://docs.docker.com/compose/install/)
 - A valid [Wowza Streaming Engine](https://auth.wowza.com/register?type=engine) license key
 - A valid Video Intelligence Service license (`VIS_LICENSE`) for local VIS deployments
-- For local GPU inference: an NVIDIA GPU with driver **570+** and **CUDA 12.8+**, plus the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- For local GPU inference: an NVIDIA GPU with driver **580+** and **CUDA 12.8+**, plus the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - (Optional) [FFmpeg](https://www.ffmpeg.org/download.html) for publishing test streams
 
 > [!TIP]
@@ -134,7 +134,7 @@ VIS_LICENSE=REPLACE_WITH_YOUR_VIS_LICENSE
    docker run --rm --gpus 'all' -e NVIDIA_DRIVER_CAPABILITIES=video,compute,utility nvidia/cuda:12.8.0-base-ubuntu22.04 nvidia-smi
    ```
    You're ready when you see:
-   * Driver version **570 or higher**
+   * Driver version **580 or higher**
    * CUDA version **12.8 or higher**
    * Your GPU listed by name
    
