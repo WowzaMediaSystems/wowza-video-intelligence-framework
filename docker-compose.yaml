@@ -272,9 +272,9 @@ services:
     #
     # ACCESS-GATED IMAGE: nvcr.io/nim/nvidia/synthetic-video-detector is
     # distributed through NVIDIA NGC / NVIDIA AI Enterprise and requires the
-    # VI-550 partnership entitlement. Before first run, authenticate to NGC
-    # and set NGC_API_KEY in .env (the container also reads it to pull the
-    # model profile on first boot):
+    # AI for Media Private Access Program entitlement. Before first run,
+    # authenticate to NGC and set NGC_API_KEY in .env (the container also
+    # reads it to pull the model profile on first boot):
     #   docker login nvcr.io   # username: $oauthtoken   password: <NGC_API_KEY>
     #
     # Streams opt in by setting `endpoint: "svd.docker:8001"` in their
