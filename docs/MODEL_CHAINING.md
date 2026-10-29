@@ -12,8 +12,7 @@ only when a car is in view.
 Use a chain wherever the v2 API accepts a `config.detector`: inline VOD jobs,
 saved stream group configs, per-stream overrides, or a running stream's
 detector. A frame-only chain works on VOD and live streams; a chain containing
-a synthetic stage is VOD-only. Chains and Verify cannot be nested inside a
-stage.
+a synthetic stage is VOD-only. Chains cannot be nested inside a stage.
 
 ## Table of contents
 
@@ -225,14 +224,20 @@ conditional stage without routing falls through to the next stage. Omitting
 `max_rings` limits executions per window to 8 by default, with a range of
 1–64. It is a loop bound, not the number of configured stages.
 
-Routing has a second, unconditional shape: `on_done` alone, combined with no
-rule member — a target taken whatever the stage returned. Ending through
-`on_done` is an answer, not a filter: the window reports
-`end_reason: "completed"` and delivers the stage's detections. A free-form VLM
-stage (`describe` mode, or `custom` without a `response_schema`) produces no
-classes for rules to match, so `on_done` is the only routing it accepts. The
-`describe` stage above ends the chain by being last; give such a stage
-`"routing": {"on_done": {"stage": ...}}` to continue past it instead.
+A routing block is either **conditional** — `rules`, with `match`, `on_match`
+and `on_no_match` — or **unconditional**: `on_done` alone, a target the chain
+always takes after the stage runs. The two shapes cannot be mixed. Ending
+through `on_done` is an answer (`end_reason: "completed"`), so `final` mode
+delivers that stage's result. A free-form VLM stage returns text rather than
+classes, so rules on it could never match: its routing must use `on_done`, and
+a conditional block on it is refused. Free-form means mode `describe`, or mode
+`custom` whose resolved output keeps no schema: a custom stage with `classes`
+and no custom user prompt keeps the service's per-class detection schema — a
+custom system prompt alone doesn't change that — so its rules match those
+classes, while setting `prompt.user` without an explicit `response_schema`
+makes the output free-form. The `describe` stage above ends the chain by being
+last; give such a stage `"routing": {"on_done": {"stage": ...}}` to continue
+past it instead.
 
 A window that ends on a miss was **filtered out**, and under the default
 `result_mode: final` its event listeners receive the gate stage's response type
@@ -241,8 +246,47 @@ window, timing and `end_reason: "no_match"` still arrive, so a listener with
 `suppress_empty_detections: true` skips filtered windows entirely while one
 without it can tell "filtered by the gate" from "analyzed, nothing found".
 Ending through `on_match` (`end_reason: "match_end"`) is an affirmative answer
-and delivers the stage's detections. Use `result_mode: combined` when listeners
-should see every executed stage, filtered windows included.
+and delivers the stage's detections. A gate whose endpoint is down ends the
+window with `end_reason: "degraded"` instead: it decided nothing, and its result
+arrives as analyzed and flagged `degraded`, so an outage never reads as a quiet
+scene. Use `result_mode: combined` when listeners should see every executed
+stage, filtered windows included.
+
+### End on a description in either branch
+
+A chain can end on a describe stage anywhere in its stage list. Here a gate
+sends matching windows to one description and every other window to another;
+`describe_vehicle` ends the window through `on_done`, so it never falls through
+to `describe_scene`, which ends the window by running past the last stage:
+
+```json
+{
+  "type": "chain",
+  "mode": "conditional",
+  "stages": [
+    {
+      "name": "gate",
+      "detector": { "type": "object", "classes": ["car", "truck"] },
+      "routing": {
+        "rules": [{ "classes": ["car", "truck"] }],
+        "on_match": { "stage": "describe_vehicle" },
+        "on_no_match": { "stage": "describe_scene" }
+      }
+    },
+    {
+      "name": "describe_vehicle",
+      "detector": { "type": "vlm", "mode": "describe" },
+      "routing": { "on_done": { "end": true } }
+    },
+    {
+      "name": "describe_scene",
+      "detector": { "type": "vlm", "mode": "describe" }
+    }
+  ]
+}
+```
+
+Both branches end `end_reason: "completed"` and deliver their description.
 
 ## Wake expensive stages on motion
 
@@ -294,9 +338,11 @@ chain to clip-window transport, which the motion entry does not support yet.
 
 Motion `confidence` is the region's net track displacement as a fraction of the frame
 diagonal, typically 0.02–0.3. It is **not** a quality score. Tune the gate with the
-motion detector's `sensitivity` (1–10, default 5), `min_displacement` (default 0.02)
-and `merge_distance` (default 0.08), not with a routing `min_confidence`; use
-`min_count` to require several moving regions. The motion detector itself is covered
+motion detector's `sensitivity` (1–10, default 5), `min_displacement` (default 0.02),
+`merge_distance` (default 0.08) and `suppress_global_changes` (default `true`; `false`
+reports a whole-picture change — a cut, a lighting change, a camera move — as the
+regions it produces), not with a routing `min_confidence`; use `min_count` to require
+several moving regions. The motion detector itself is covered
 in the [Motion Detection guide](MOTION_DETECTION.md).
 
 ## Crop detected regions
@@ -315,23 +361,28 @@ To run a stage on the preceding execution's boxes, add this to its stage wrapper
 ```
 
 Crop defaults are all classes, confidence 0, padding 0 and a `max_crops` budget
-of 16 per **window**: the highest-confidence boxes across all of the window's
-source frames are kept. When the parent object ring tracks, each track is
-cropped once per window — its highest-confidence box — so the budget counts
-objects, not appearances. No matching boxes produces an empty stage result.
+of 16 per **window**: when there are more boxes, the highest-confidence boxes
+across all of the window's source frames are kept. When the parent object ring
+tracks (`byte-track`), each tracked object is cropped once per window — its
+highest-confidence box — so a VLM stage describes each object once per window
+rather than once per frame, and the budget counts objects, not appearances;
+boxes without a track id keep one crop each. Use the stage's `frame_selection`
+to control which frames contribute. No matching boxes produces an empty stage
+result.
 
 The first stage, motion stages and synthetic stages cannot crop. In linear mode, the preceding
 stage must be an object or motion detector, the two types whose detections carry boxes.
 A stage after a motion entry crops to the moving regions, with `min_confidence`
 gating parents by their net displacement. A cropped object stage must disable tracking
 and tiling. Object tracking also requires every captured frame to reach the tracking
-stage exactly once. A chain of only object stages provides that on every stage; a
-scene or VLM stage anywhere puts the chain at window cadence, where only the entry
-stage still sees every captured frame, so only an object entry may track — with
-`frame_selection` left at `all`, and not on a dynamic chain, whose listener may
-revisit the entry. A chain with a synthetic stage, or one whose entry is not an
-object stage, cannot track at all. Set `"tracking": {"method": "none"}` where a
-stage's inherited tracking would otherwise violate these rules.
+stage exactly once. A chain of only object stages provides that on every stage. On a
+chain with a scene or VLM stage it is the entry stage alone: an object entry may
+track, because within a window the frames are as consecutive as the frame-cadence
+feed, while a tracked stage behind the window source, a tracked entry with
+`frame_selection`, a dynamic chain, and a route back to the tracked entry are each
+refused naming the broken shape. A chain with a synthetic stage, or one whose entry
+is not an object stage, cannot track at all. Set `"tracking": {"method": "none"}`
+where a stage's inherited tracking would otherwise violate these rules.
 
 Crop child coordinates refer to the original full frame. The result's
 `source_ring_index` and `source_detection_index` identify the parent execution
@@ -844,11 +895,11 @@ produce an answer, or stop short, and why?
 
 | `end_reason` | The chain stopped because | `final` mode delivers |
 |---|---|---|
-| `completed` | it ran past the last stage, or ended through an `on_done` | the last stage's detections |
+| `completed` | it ran past the last stage, ended through `on_done`, or ended through routing on a stage that cannot match (free-form describe) | the last stage's detections |
 | `match_end` | a rule **fired** into `{"end": true}` — stopping is the answer | that stage's detections |
 | `no_match` | a rule **missed** — the window was filtered out | the gate's type, no detections |
+| `degraded` | the gate's endpoint was down — it decided nothing | the gate's result as analyzed, flagged `degraded` |
 | `max_rings` | the execution cap cut it off — the result is truncated | the last ring's detections |
-| `degraded` | the gate stage that ended it could not decide — its endpoint was down, so the window was neither answered nor filtered | the gate's ring as analyzed, its `degraded` flag intact: an outage reads as "AI offline", never as a quiet scene |
 | *(absent)* | nothing routing-related ended it: a dynamic chain your decision listener ends, or an older service | the last ring's detections, as before the field existed |
 
 `match_end` and `no_match` come from which routing branch fired, not from the
@@ -884,10 +935,43 @@ costs its slowest stage; dynamic chains emit each ring as it completes while
 the window stays open. Overlay boxes are composited onto the live frame at the
 moment results arrive, with no frame matching, so boxes computed from a window
 trail the live video by roughly the chain's processing time plus the window's
-age in the buffer. Put the object stage first when box timeliness matters — the
-ordering tracking requires anyway once a scene or VLM stage gives the chain
-window cadence. `auto_frame_throttle` lowers the inference FPS
+age in the buffer. When box timeliness matters, keep the chain to object and motion
+stages so it runs at frame cadence; a scene or
+VLM stage anywhere makes every stage wait for the whole window. A stage's
+`frame_selection` trims that stage's inference cost, not the wait for the window
+to fill. `auto_frame_throttle` lowers the inference FPS
 when the stages cannot keep up.
+
+### Sizing the window
+
+A windowed chain answers once per `window_seconds`. When one window's stages take
+longer than the window covers, the next window starts late, the backlog grows, and
+`catch_up_to_live` eventually skips to the live edge — detection coverage gets a gap,
+and the WSE log carries an advisory naming these knobs. Size `window_seconds` at or
+above the chain's worst round trip:
+
+- **Window length** (`window_seconds`): the VLM calls of a window run concurrently,
+  so a window's cost is roughly its slowest stage's round trip — one call for a
+  whole-window stage, the slowest of up to `max_crops` calls for a cropping stage.
+  A longer window answers less often and keeps up more easily; it does not multiply
+  the VLM work.
+- **Work per window**: `frame_selection` (`middle`, `every_nth`) thins the frames a
+  windowed stage reads, and a crop's `max_crops` caps its calls. Both cut cost
+  without touching capture. With a tracked entry, a cropping stage already collapses
+  to one call per tracked object per window.
+- **Endpoint capacity**: a faster VLM endpoint — more powerful hardware, higher
+  concurrency — shrinks the round trip itself.
+
+`inference_fps` is not a latency lever on a windowed chain: it sets how many frames
+each window captures, which the tracker consumes, while the VLM cost scales with
+crops, not frames. With tracking enabled, keep `inference_fps` at 5 or above —
+ByteTrack matches objects between consecutive frames by overlap, and at low rates a
+fast object moves too far to keep one ID (the Engine warns at stream start below
+5 fps).
+
+When a window is skipped anyway, a tracked chain degrades gracefully: ByteTrack ages
+by fed frame, not wall clock, so existing tracks survive the gap — a slow mover
+re-matches by overlap and keeps its ID; a fast mover may re-enter with a new one.
 
 ## Live streams
 
