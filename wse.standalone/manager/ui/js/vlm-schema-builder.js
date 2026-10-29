@@ -5,10 +5,6 @@
     var NESTED_TYPES = ['object', 'object[]'];
     var ROWS_ID = 'cfg-vlm-schema-rows'; // top-level rows container (in the markup)
 
-    function el(id) {
-        return document.getElementById(id);
-    }
-
     function csvToList(str) {
         return str.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
     }
@@ -31,76 +27,6 @@
     // markDirty lives in stream-config.html; guard so the module is safe in isolation.
     function dirty() {
         if (typeof markDirty === 'function') markDirty();
-    }
-
-    // ── Sub-mode (Fields / Raw JSON) ──────────────────────────────────────────
-    function getMode() {
-        var checked = document.querySelector('#cfg-vlm-schema-mode input[name="vlm-schema-mode"]:checked');
-        return checked ? checked.value : 'fields';
-    }
-
-    // Pure view update — show one panel, refresh the inline error. No conversion.
-    function showPanels(mode) {
-        el('vlm-schema-fields').style.display = mode === 'fields' ? 'block' : 'none';
-        el('vlm-schema-raw').style.display = mode === 'raw' ? 'block' : 'none';
-        validateRaw();
-        // Re-fit the Raw-JSON textarea now it may have (re)appeared: switching to Raw
-        // or loading a schema sets its value programmatically (no 'input' event).
-        if (window.vlmAutoGrowAll) window.vlmAutoGrowAll();
-    }
-
-    function setModeRadios(mode) {
-        var radios = document.querySelectorAll('#cfg-vlm-schema-mode input[name="vlm-schema-mode"]');
-        radios.forEach(function (r) { r.checked = (r.value === mode); });
-    }
-
-    // Programmatic mode set (reset / populate) — no content conversion, no dirty.
-    function setMode(mode) {
-        setModeRadios(mode);
-        showPanels(mode);
-    }
-
-    // The panel on screen — read inside the radio handler before the panels move,
-    // so it is the mode we are switching AWAY from.
-    function currentPanel() {
-        return el('vlm-schema-raw').style.display !== 'none' ? 'raw' : 'fields';
-    }
-
-    // User toggled Fields/Raw: convert content across the two views so a toggle
-    // never silently drops the schema. Fields->Raw serializes the builder into the
-    // textarea; Raw->Fields imports the JSON only if it decomposes into the
-    // builder's supported shapes, otherwise it stays on Raw with an inline note.
-    function switchMode(target) {
-        var prev = currentPanel();
-        if (prev !== target && target === 'raw') {
-            var built = buildObjectSchema(el(ROWS_ID));
-            el('cfg-vlm-response-schema').value = built ? JSON.stringify(built, null, 2) : '';
-        } else if (prev !== target && target === 'fields') {
-            var ta = el('cfg-vlm-response-schema');
-            var text = ta.value.trim();
-            if (text) {
-                var parsed = null;
-                try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
-                var rows = parsed ? schemaToRows(parsed) : null;
-                if (!rows) {
-                    setModeRadios('raw');
-                    showPanels('raw');
-                    var err = el('vlm-schema-error');
-                    if (err) {
-                        err.textContent = parsed
-                            ? 'This schema is too advanced for the Fields builder — keep editing it as Raw JSON.'
-                            : 'Raw JSON is invalid — fix it before switching to Fields.';
-                        err.style.display = 'block';
-                    }
-                    dirty();
-                    return;
-                }
-                loadRows(el(ROWS_ID), rows);
-                ta.value = '';
-            }
-        }
-        showPanels(target);
-        dirty();
     }
 
     // ── Fields builder rows ───────────────────────────────────────────────────
@@ -361,158 +287,265 @@
         return null;
     }
 
-    // ── Raw JSON validation (only the Custom kind's Raw editor can be invalid) ─
-    function validateRaw() {
-        var err = el('vlm-schema-error');
-        if (getKind() !== 'custom' || getMode() !== 'raw') {
-            if (err) err.style.display = 'none';
-            return null;
-        }
-        var ta = el('cfg-vlm-response-schema');
-        var text = ta ? ta.value.trim() : '';
-        if (!text) {
-            if (err) err.style.display = 'none';
-            return null;
-        }
-        try {
-            JSON.parse(text);
-            if (err) err.style.display = 'none';
-            return null;
-        } catch (e) {
-            if (err) {
-                err.textContent = 'Invalid JSON: ' + e.message;
-                err.style.display = 'block';
-            }
-            return e.message;
-        }
-    }
-
-    // ── Output-schema KIND (free-form / per-class verdicts / custom) ──────────
-    // Free-form (default) sends no schema — VIS leaves output free-form (it no
-    // longer auto-imposes the class schema once a custom user_prompt is set).
-    // "Per-class verdicts" posts the live default class schema (relayed from VIS
-    // at /vlm/defaults), so VIS recognizes it (== its own default) and enforces
-    // the {class_name, reasoning} contract. "Custom schema" reveals the Fields/Raw
-    // builder.
-
     // The built-in class schema, sourced live from VIS (never mirrored here).
     function defaultClassSchema() {
         var d = window.defaultConfig && window.defaultConfig.vlm_defaults && window.defaultConfig.vlm_defaults.detect;
         return (d && d.response_schema) || null;
     }
 
-    function getKind() {
-        var checked = document.querySelector('#cfg-vlm-schema-kind input[name="vlm-schema-kind"]:checked');
-        return checked ? checked.value : 'freeform';
-    }
+    /** The schema builder mounted in `root` (the page document, or a prefixed detector-section root). */
+    function builderIn(root) {
+        var prefix = (root.dataset && root.dataset.vifPrefix) || '';
 
-    function renderKind(kind) {
-        var custom = el('vlm-schema-custom');
-        if (custom) custom.style.display = (kind === 'custom') ? 'block' : 'none';
-        var help = el('vlm-schema-kind-help');
-        if (help) {
-            if (kind === 'freeform') {
-                help.textContent = 'The model follows your prompt; output is free-form text.';
-            } else if (kind === 'default') {
-                help.textContent = defaultClassSchema()
-                    ? 'Structured per-class verdicts — the model returns {class_name, reasoning} for each class you list above (the built-in detection schema). Requires Classes.'
-                    : 'Per-class verdicts use the built-in schema reported by the VI service, which is currently unreachable — reload once it is up, or use Custom schema.';
-            } else {
-                help.textContent = '';
-            }
+        function el(id) {
+            return root.querySelector('#' + CSS.escape(prefix + id));
         }
-        validateRaw();
-    }
 
-    function setKindRadios(kind) {
-        var radios = document.querySelectorAll('#cfg-vlm-schema-kind input[name="vlm-schema-kind"]');
-        radios.forEach(function (r) { r.checked = (r.value === kind); });
-    }
+        function radios(groupId, name) {
+            return root.querySelectorAll('#' + CSS.escape(prefix + groupId) + ' input[name="' + prefix + name + '"]');
+        }
 
-    // User toggled the kind: update the view and mark dirty.
-    function switchKind(kind) {
-        renderKind(kind);
-        if (window.vlmAutoGrowAll) window.vlmAutoGrowAll();
-        dirty();
-    }
+        function checkedValue(groupId, name, fallback) {
+            var checked = Array.prototype.filter.call(radios(groupId, name), function (r) { return r.checked; })[0];
+            return checked ? checked.value : fallback;
+        }
 
-    // Programmatic kind set (populate / reset) — no dirty.
-    function setKind(kind) {
-        setKindRadios(kind);
-        renderKind(kind);
-    }
+        // ── Sub-mode (Fields / Raw JSON) ──────────────────────────────────────
+        function getMode() {
+            return checkedValue('cfg-vlm-schema-mode', 'vlm-schema-mode', 'fields');
+        }
 
-    // What to persist for response_schema given the selected kind. null => omit
-    // the key entirely (free-form). "default" posts the live class schema verbatim.
-    function outputSchemaForSave() {
-        var kind = getKind();
-        if (kind === 'freeform') return null;
-        if (kind === 'default') return defaultClassSchema();
-        return collect(); // custom: built Fields / parsed Raw, or null when empty
-    }
+        // Pure view update — show one panel, refresh the inline error. No conversion.
+        function showPanels(mode) {
+            el('vlm-schema-fields').style.display = mode === 'fields' ? 'block' : 'none';
+            el('vlm-schema-raw').style.display = mode === 'raw' ? 'block' : 'none';
+            validateRaw();
+            // Re-fit the Raw-JSON textarea now it may have (re)appeared: switching to Raw
+            // or loading a schema sets its value programmatically (no 'input' event).
+            if (window.vlmAutoGrowAll) window.vlmAutoGrowAll();
+        }
 
-    // Inverse for populateForm: choose the kind from a loaded schema, loading the
-    // Fields/Raw editor only for a genuinely custom one.
-    function applyOutputSchema(schema) {
-        if (!schema || typeof schema !== 'object') { setKind('freeform'); return; }
-        var def = defaultClassSchema();
-        if (def && deepEqual(schema, def)) { setKind('default'); return; }
-        setKind('custom');
-        load(schema);
-    }
+        function setModeRadios(mode) {
+            radios('cfg-vlm-schema-mode', 'vlm-schema-mode').forEach(function (r) { r.checked = (r.value === mode); });
+        }
 
-    // ── Public API ────────────────────────────────────────────────────────────
-    function collect() {
-        if (getMode() === 'raw') {
+        // Programmatic mode set (reset / populate) — no content conversion, no dirty.
+        function setMode(mode) {
+            setModeRadios(mode);
+            showPanels(mode);
+        }
+
+        // The panel on screen — read inside the radio handler before the panels move,
+        // so it is the mode we are switching AWAY from.
+        function currentPanel() {
+            return el('vlm-schema-raw').style.display !== 'none' ? 'raw' : 'fields';
+        }
+
+        // User toggled Fields/Raw: convert content across the two views so a toggle
+        // never silently drops the schema. Fields->Raw serializes the builder into the
+        // textarea; Raw->Fields imports the JSON only if it decomposes into the
+        // builder's supported shapes, otherwise it stays on Raw with an inline note.
+        function switchMode(target) {
+            var prev = currentPanel();
+            if (prev !== target && target === 'raw') {
+                var built = buildObjectSchema(el(ROWS_ID));
+                el('cfg-vlm-response-schema').value = built ? JSON.stringify(built, null, 2) : '';
+            } else if (prev !== target && target === 'fields') {
+                var ta = el('cfg-vlm-response-schema');
+                var text = ta.value.trim();
+                if (text) {
+                    var parsed = null;
+                    try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
+                    var rows = parsed ? schemaToRows(parsed) : null;
+                    if (!rows) {
+                        setModeRadios('raw');
+                        showPanels('raw');
+                        var err = el('vlm-schema-error');
+                        if (err) {
+                            err.textContent = parsed
+                                ? 'This schema is too advanced for the Fields builder — keep editing it as Raw JSON.'
+                                : 'Raw JSON is invalid — fix it before switching to Fields.';
+                            err.style.display = 'block';
+                        }
+                        dirty();
+                        return;
+                    }
+                    loadRows(el(ROWS_ID), rows);
+                    ta.value = '';
+                }
+            }
+            showPanels(target);
+            dirty();
+        }
+
+        // ── Raw JSON validation (only the Custom kind's Raw editor can be invalid) ─
+        function validateRaw() {
+            var err = el('vlm-schema-error');
+            if (getKind() !== 'custom' || getMode() !== 'raw') {
+                if (err) err.style.display = 'none';
+                return null;
+            }
             var ta = el('cfg-vlm-response-schema');
             var text = ta ? ta.value.trim() : '';
-            if (!text) return null;
-            try { return JSON.parse(text); } catch (e) { return null; }
+            if (!text) {
+                if (err) err.style.display = 'none';
+                return null;
+            }
+            try {
+                JSON.parse(text);
+                if (err) err.style.display = 'none';
+                return null;
+            } catch (e) {
+                if (err) {
+                    err.textContent = 'Invalid JSON: ' + e.message;
+                    err.style.display = 'block';
+                }
+                return e.message;
+            }
         }
-        return buildObjectSchema(el(ROWS_ID));
-    }
 
-    function load(schema) {
-        var rows = schemaToRows(schema);
-        var ta = el('cfg-vlm-response-schema');
-        if (rows) {
-            loadRows(el(ROWS_ID), rows);
+        // ── Output-schema KIND (free-form / per-class verdicts / custom) ──────
+        // Free-form (default) sends no schema — VIS leaves output free-form (it no
+        // longer auto-imposes the class schema once a custom user_prompt is set).
+        // "Per-class verdicts" posts the live default class schema (relayed from VIS
+        // at /vlm/defaults), so VIS recognizes it (== its own default) and enforces
+        // the {class_name, reasoning} contract. "Custom schema" reveals the Fields/Raw
+        // builder.
+        function getKind() {
+            return checkedValue('cfg-vlm-schema-kind', 'vlm-schema-kind', 'freeform');
+        }
+
+        function renderKind(kind) {
+            var custom = el('vlm-schema-custom');
+            if (custom) custom.style.display = (kind === 'custom') ? 'block' : 'none';
+            var help = el('vlm-schema-kind-help');
+            if (help) {
+                if (kind === 'freeform') {
+                    help.textContent = 'The model follows your prompt; output is free-form text.';
+                } else if (kind === 'default') {
+                    help.textContent = defaultClassSchema()
+                        ? 'Structured per-class verdicts — the model returns {class_name, reasoning} for each class you list above (the built-in detection schema). Requires Classes.'
+                        : 'Per-class verdicts use the built-in schema reported by the VI service, which is currently unreachable — reload once it is up, or use Custom schema.';
+                } else {
+                    help.textContent = '';
+                }
+            }
+            validateRaw();
+        }
+
+        function setKindRadios(kind) {
+            radios('cfg-vlm-schema-kind', 'vlm-schema-kind').forEach(function (r) { r.checked = (r.value === kind); });
+        }
+
+        // User toggled the kind: update the view and mark dirty.
+        function switchKind(kind) {
+            renderKind(kind);
+            if (window.vlmAutoGrowAll) window.vlmAutoGrowAll();
+            dirty();
+        }
+
+        // Programmatic kind set (populate / reset) — no dirty.
+        function setKind(kind) {
+            setKindRadios(kind);
+            renderKind(kind);
+        }
+
+        // What to persist for response_schema given the selected kind. null => omit
+        // the key entirely (free-form). "default" posts the live class schema verbatim.
+        function outputSchemaForSave() {
+            var kind = getKind();
+            if (kind === 'freeform') return null;
+            if (kind === 'default') return defaultClassSchema();
+            return collect(); // custom: built Fields / parsed Raw, or null when empty
+        }
+
+        // Inverse for populateForm: choose the kind from a loaded schema, loading the
+        // Fields/Raw editor only for a genuinely custom one.
+        function applyOutputSchema(schema) {
+            if (!schema || typeof schema !== 'object') { setKind('freeform'); return; }
+            var def = defaultClassSchema();
+            if (def && deepEqual(schema, def)) { setKind('default'); return; }
+            setKind('custom');
+            load(schema);
+        }
+
+        function collect() {
+            if (getMode() === 'raw') {
+                var ta = el('cfg-vlm-response-schema');
+                var text = ta ? ta.value.trim() : '';
+                if (!text) return null;
+                try { return JSON.parse(text); } catch (e) { return null; }
+            }
+            return buildObjectSchema(el(ROWS_ID));
+        }
+
+        function load(schema) {
+            var rows = schemaToRows(schema);
+            var ta = el('cfg-vlm-response-schema');
+            if (rows) {
+                loadRows(el(ROWS_ID), rows);
+                if (ta) ta.value = '';
+                setMode('fields');
+            } else {
+                el(ROWS_ID).innerHTML = '';
+                if (ta) ta.value = JSON.stringify(schema, null, 2);
+                setMode('raw');
+            }
+        }
+
+        function reset() {
+            var ta = el('cfg-vlm-response-schema');
             if (ta) ta.value = '';
+            var rows = el(ROWS_ID);
+            if (rows) rows.innerHTML = '';
+            var err = el('vlm-schema-error');
+            if (err) err.style.display = 'none';
             setMode('fields');
-        } else {
-            el(ROWS_ID).innerHTML = '';
-            if (ta) ta.value = JSON.stringify(schema, null, 2);
-            setMode('raw');
+            setKind('freeform');
         }
+
+        function addTopField() {
+            addRow(el(ROWS_ID), {});
+        }
+
+        return {
+            collect: collect,
+            load: load,
+            validate: validateRaw,
+            switchMode: switchMode,
+            reset: reset,
+            addField: addTopField,
+            switchKind: switchKind,
+            getKind: getKind,
+            renderKind: renderKind,
+            outputSchemaForSave: outputSchemaForSave,
+            applyOutputSchema: applyOutputSchema
+        };
     }
 
-    function reset() {
-        var ta = el('cfg-vlm-response-schema');
-        if (ta) ta.value = '';
-        var rows = el(ROWS_ID);
-        if (rows) rows.innerHTML = '';
-        var err = el('vlm-schema-error');
-        if (err) err.style.display = 'none';
-        setMode('fields');
-        setKind('freeform');
+    var builders = new WeakMap();
+
+    function vlmSchemaBuilder(root) {
+        root = root || document;
+        if (!builders.has(root)) builders.set(root, builderIn(root));
+        return builders.get(root);
     }
 
-    function addTopField() {
-        addRow(el(ROWS_ID), {});
-    }
+    var page = vlmSchemaBuilder(document);
 
-    window.collectVlmSchema = collect;
-    window.loadVlmSchema = load;
-    window.validateVlmSchema = validateRaw;
-    window.switchVlmSchemaMode = switchMode;
-    window.resetVlmSchemaBuilder = reset;
-    window.addVlmSchemaField = addTopField;
-    window.switchVlmSchemaKind = switchKind;
-    window.getVlmSchemaKind = getKind;
-    window.vlmOutputSchemaForSave = outputSchemaForSave;
-    window.applyVlmOutputSchema = applyOutputSchema;
+    window.vlmSchemaBuilder = vlmSchemaBuilder;
+    window.collectVlmSchema = page.collect;
+    window.loadVlmSchema = page.load;
+    window.validateVlmSchema = page.validate;
+    window.switchVlmSchemaMode = page.switchMode;
+    window.resetVlmSchemaBuilder = page.reset;
+    window.addVlmSchemaField = page.addField;
+    window.switchVlmSchemaKind = page.switchKind;
+    window.getVlmSchemaKind = page.getKind;
+    window.vlmOutputSchemaForSave = page.outputSchemaForSave;
+    window.applyVlmOutputSchema = page.applyOutputSchema;
 
     // Initialize the kind view (help text + Custom panel visibility) to match the
     // default-checked radio, so the panel is coherent before the first interaction.
-    renderKind(getKind());
+    page.renderKind(page.getKind());
 })();

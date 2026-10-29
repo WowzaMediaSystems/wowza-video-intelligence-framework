@@ -13,9 +13,10 @@
 // layers merge.
 //
 // Two layers: a flat operation client (VIF.sdk.RawClient, one method per
-// operationId, plus three URL builders — thumbnailUrl and vodJobThumbnailUrl
-// for <img src>, vodFileUploadUrl for an upload the page drives itself — the
-// only non-operation methods) and an OOP facade (VIF.sdk.VifClient) whose
+// operationId, plus three URL builders — thumbnailUrl, vodJobThumbnailUrl and
+// vodFileUploadUrl, for a caller that fetches the target itself; the pages
+// fetch thumbnails through the transport and show a blob — the only
+// non-operation methods) and an OOP facade (VIF.sdk.VifClient) whose
 // namespaces mirror the spec tags: vif.status() / vif.models(),
 // vif.runtime.streams, vif.persist.streamGroupConfigs, vif.persist.streams,
 // vif.persist.vodSettings(), vif.persist.secrets(), vif.probes, vif.vod.files,
@@ -117,9 +118,9 @@
         results: 1,
         values: 1
     };
-    // Maps whose KEYS are operator data — listener names — but whose values are
-    // models to convert.
-    var NAME_KEYED_KEYS = { listeners: 1 };
+    // Maps whose KEYS are operator data — listener names, a verify review's
+    // attribute names — but whose values are models to convert.
+    var NAME_KEYED_KEYS = { listeners: 1, attributes: 1 };
 
     function toCamel(key) {
         return key.replace(/_([a-z0-9])/g, function (_, c) { return c.toUpperCase(); });
@@ -225,10 +226,11 @@
     // request accepted a non-JSON type (an image, the ndjson results file), or
     // null for 204. Rejects only on a network-level failure. The transport
     // also exposes url(path, query), which the URL builders use to mint an
-    // <img src> or an upload target against the same base (credentials ride on
-    // the browser's own Engine session there, not on a header), and
-    // upload(path, query, body, contentType, onProgress): the same POST fetch
-    // would send, over XMLHttpRequest because fetch reports no upload progress.
+    // upload target against the same base, and upload(path, query, body,
+    // contentType, onProgress): the same POST fetch would send, over
+    // XMLHttpRequest because fetch reports no upload progress; its promise
+    // carries abort(). Credentials never ride a URL: an image is fetched
+    // through the transport and shown from a blob.
     function isBinary(value) {
         return (typeof Blob !== 'undefined' && value instanceof Blob)
             || (typeof ArrayBuffer !== 'undefined'
@@ -248,34 +250,303 @@
         return text ? { message: text } : null;
     }
 
+    // ── HTTP authentication ─────────────────────────────────────────────────
+    // The Engine's REST interface authenticates the way Server.xml says: basic,
+    // or digest (RFC 7616) over MD5 or SHA-256. Nothing here is configured: the
+    // transport sends Basic until a 401 names Digest, then answers that
+    // challenge and keeps its nonce for the requests that follow, so a Basic
+    // Engine costs nothing extra and a digest Engine costs one extra round trip
+    // per transport (and one more each time the nonce goes stale). The hashes
+    // are written out here because crypto.subtle only exists on secure origins
+    // (the Manager is reached over plain http) and has no MD5 in any case.
+    function utf8Bytes(text) {
+        return new TextEncoder().encode(String(text));
+    }
+
+    function hex32(word) {
+        return ('00000000' + (word >>> 0).toString(16)).slice(-8);
+    }
+
+    function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
+    function rotl(x, n) { return (x << n) | (x >>> (32 - n)); }
+
+    // Message padding shared by both digests: 0x80, zeros, then the bit length
+    // as a 64-bit integer (big-endian for SHA-256, little-endian for MD5).
+    function padded(bytes, littleEndian) {
+        var bitLength = bytes.length * 8;
+        var block = new Uint8Array(((bytes.length + 9 + 63) >> 6) << 6);
+        block.set(bytes);
+        block[bytes.length] = 0x80;
+        var view = new DataView(block.buffer);
+        var high = Math.floor(bitLength / 0x100000000);
+        var low = bitLength >>> 0;
+        if (littleEndian) {
+            view.setUint32(block.length - 8, low, true);
+            view.setUint32(block.length - 4, high, true);
+        } else {
+            view.setUint32(block.length - 8, high);
+            view.setUint32(block.length - 4, low);
+        }
+        return view;
+    }
+
+    var SHA256_K = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ];
+
+    function sha256Hex(text) {
+        var view = padded(utf8Bytes(text), false);
+        var h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        var w = new Uint32Array(64);
+        for (var offset = 0; offset < view.byteLength; offset += 64) {
+            var i;
+            for (i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4);
+            for (i = 16; i < 64; i++) {
+                var s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+                var s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+                w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+            }
+            var a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
+            for (i = 0; i < 64; i++) {
+                var t1 = (k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + SHA256_K[i] + w[i]) >>> 0;
+                var t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+                k = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+            }
+            h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
+            h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0; h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + k) >>> 0;
+        }
+        return h.map(hex32).join('');
+    }
+
+    var MD5_S = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+        5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+    ];
+    var MD5_K = [];
+    for (var md5Round = 0; md5Round < 64; md5Round++) {
+        MD5_K.push(Math.floor(Math.abs(Math.sin(md5Round + 1)) * 0x100000000) >>> 0);
+    }
+
+    function md5Hex(text) {
+        var view = padded(utf8Bytes(text), true);
+        var h = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
+        var m = new Uint32Array(16);
+        for (var offset = 0; offset < view.byteLength; offset += 64) {
+            var i;
+            for (i = 0; i < 16; i++) m[i] = view.getUint32(offset + i * 4, true);
+            var a = h[0], b = h[1], c = h[2], d = h[3];
+            for (i = 0; i < 64; i++) {
+                var f, g;
+                if (i < 16) { f = (b & c) | (~b & d); g = i; }
+                else if (i < 32) { f = (d & b) | (~d & c); g = (5 * i + 1) % 16; }
+                else if (i < 48) { f = b ^ c ^ d; g = (3 * i + 5) % 16; }
+                else { f = c ^ (b | ~d); g = (7 * i) % 16; }
+                f = (f + a + MD5_K[i] + m[g]) >>> 0;
+                a = d; d = c; c = b; b = (b + rotl(f, MD5_S[i])) >>> 0;
+            }
+            h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
+        }
+        // MD5 is little-endian throughout: each word is emitted low byte first.
+        return h.map(function (word) {
+            return hex32(((word & 0xff) << 24) | ((word & 0xff00) << 8) | ((word >>> 8) & 0xff00) | (word >>> 24));
+        }).join('');
+    }
+
+    var DIGEST_HASHES = { 'MD5': md5Hex, 'SHA-256': sha256Hex };
+
+    function randomHex(byteCount) {
+        var bytes = new Uint8Array(byteCount);
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            crypto.getRandomValues(bytes);
+        } else {
+            for (var i = 0; i < byteCount; i++) bytes[i] = Math.floor(Math.random() * 256);
+        }
+        return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    }
+
+    // The Digest challenge out of a WWW-Authenticate header, or null when the
+    // header names no Digest scheme. Several challenges may share the header
+    // ("Basic realm=…, Digest realm=…"): they split where a scheme word
+    // precedes a parameter, which no parameter list contains.
+    function parseDigestChallenge(header) {
+        if (!header) return null;
+        var challenges = String(header).split(/,\s*(?=[A-Za-z][\w-]*\s+[\w-]+=)/);
+        for (var i = 0; i < challenges.length; i++) {
+            var match = /^\s*Digest\s+([\s\S]*)$/i.exec(challenges[i]);
+            if (!match) continue;
+            var params = {};
+            var pair = /([\w-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s,]+))/g;
+            var found;
+            while ((found = pair.exec(match[1])) !== null) {
+                params[found[1].toLowerCase()] = found[2] !== undefined
+                    ? found[2].replace(/\\(.)/g, '$1') : found[3];
+            }
+            var algorithm = (params.algorithm || 'MD5').toUpperCase();
+            var base = algorithm.replace(/-SESS$/, '');
+            var qop = (params.qop || '').split(',').map(function (q) { return q.trim(); });
+            return {
+                realm: params.realm || '',
+                nonce: params.nonce || '',
+                opaque: params.opaque,
+                algorithm: algorithm,
+                hash: DIGEST_HASHES[base] || null,
+                sess: /-SESS$/.test(algorithm),
+                qop: qop.indexOf('auth') !== -1 ? 'auth' : null,
+                stale: /^true$/i.test(params.stale || ''),
+                nc: 0
+            };
+        }
+        return null;
+    }
+
+    function quoted(value) {
+        return String(value).replace(/[\\"]/g, '\\$&');
+    }
+
+    // The request target the digest signs: path and query, as the Engine sees
+    // them.
+    function requestTarget(url) {
+        var parsed = new URL(url, 'http://localhost');
+        return parsed.pathname + parsed.search;
+    }
+
+    function digestAuthorization(credentials, challenge, method, url) {
+        var hash = challenge.hash;
+        var uri = requestTarget(url);
+        var cnonce = randomHex(16);
+        challenge.nc += 1;
+        var nc = ('00000000' + challenge.nc.toString(16)).slice(-8);
+        var ha1 = hash(credentials.username + ':' + challenge.realm + ':' + credentials.password);
+        if (challenge.sess) ha1 = hash(ha1 + ':' + challenge.nonce + ':' + cnonce);
+        var ha2 = hash(String(method).toUpperCase() + ':' + uri);
+        var response = challenge.qop
+            ? hash(ha1 + ':' + challenge.nonce + ':' + nc + ':' + cnonce + ':' + challenge.qop + ':' + ha2)
+            : hash(ha1 + ':' + challenge.nonce + ':' + ha2);
+        var fields = [
+            'username="' + quoted(credentials.username) + '"',
+            'realm="' + quoted(challenge.realm) + '"',
+            'nonce="' + quoted(challenge.nonce) + '"',
+            'uri="' + uri + '"',
+            'algorithm=' + challenge.algorithm,
+            'response="' + response + '"'
+        ];
+        if (challenge.qop) fields.push('qop=' + challenge.qop, 'nc=' + nc, 'cnonce="' + cnonce + '"');
+        if (challenge.opaque !== undefined) fields.push('opaque="' + quoted(challenge.opaque) + '"');
+        return 'Digest ' + fields.join(', ');
+    }
+
+    // The username and password behind the transport's credentials: given
+    // outright, or recovered from the Basic token a chrome resolver minted.
+    function credentialsOf(options) {
+        if (options.username !== undefined) {
+            return { username: String(options.username || ''), password: String(options.password || '') };
+        }
+        if (!options.encodedCredentials) return null;
+        var decoded;
+        try { decoded = atob(options.encodedCredentials); } catch (e) { return null; }
+        var colon = decoded.indexOf(':');
+        return colon === -1
+            ? { username: decoded, password: '' }
+            : { username: decoded.slice(0, colon), password: decoded.slice(colon + 1) };
+    }
+
+    function cancelledUpload() {
+        return Object.assign(new VifError('Upload cancelled.', 0, null), { cancelled: true });
+    }
+
+    // The Digest challenge in force per base URL, shared by every transport on
+    // it. A page builds several transports (the dashboard's shared client, the
+    // VOD panel's, the secrets page's); one built after another has been
+    // challenged answers with Digest from its first request, so the password
+    // crosses the wire in clear at most once per base URL per page view. The
+    // object is shared too, so its counter is: no two answers on one nonce
+    // share a count. A Basic Engine never puts anything here.
+    var learnedChallenges = {};
+
     function httpTransport(options) {
         var baseUrl = String(options.baseUrl || '').replace(/\/+$/, '') + BASE_PATH;
-        var authorization = options.encodedCredentials
+        var credentials = credentialsOf(options);
+        var basicAuthorization = options.encodedCredentials
             ? 'Basic ' + options.encodedCredentials
-            : (options.username !== undefined
-                ? 'Basic ' + btoa((options.username || '') + ':' + (options.password || ''))
-                : null);
+            : (credentials ? 'Basic ' + btoa(credentials.username + ':' + credentials.password) : null);
+        // Whether a Basic header has been accepted, which settles the scheme
+        // the other way from a learned challenge.
+        var basicAccepted = false;
+
+        function challenge() {
+            return learnedChallenges[baseUrl] || null;
+        }
+
+        function authorization(method, url) {
+            var current = challenge();
+            if (current) return digestAuthorization(credentials, current, method, url);
+            return basicAuthorization;
+        }
+
+        // Takes a 401's WWW-Authenticate on board. True when the request is
+        // worth repeating: the header named Digest and this transport can
+        // answer it. A 401 the browser cannot read the challenge of (the
+        // Engine's CORS policy has to expose WWW-Authenticate) stays a 401.
+        function adopt(wwwAuthenticate) {
+            var parsed = parseDigestChallenge(wwwAuthenticate);
+            if (!parsed || !credentials) return false;
+            if (!parsed.hash) {
+                throw new AuthError('The Engine asks for digest authentication with algorithm '
+                    + parsed.algorithm + ', which this client cannot compute', 401, null);
+            }
+            // The same nonce arriving again keeps its counter, whether requests
+            // in flight together were refused together or a stale refusal
+            // handed them all one fresh nonce: no two answers share a count.
+            var current = challenge();
+            if (current && current.nonce === parsed.nonce) parsed.nc = current.nc;
+            learnedChallenges[baseUrl] = parsed;
+            return true;
+        }
+
+        function settle(status) {
+            if (!challenge() && status >= 200 && status < 300 && basicAuthorization) basicAccepted = true;
+        }
 
         var transport = async function (request) {
             var url = transport.url(request.path, request.query);
-
-            var headers = {};
-            if (authorization) headers['Authorization'] = authorization;
-            if (request.accept) headers['Accept'] = request.accept;
-            if (request.contentType) headers['Content-Type'] = request.contentType;
-            if (request.ifMatch) headers['If-Match'] = request.ifMatch;
+            var payload = request.body === undefined || isBinary(request.body)
+                ? request.body : JSON.stringify(request.body);
 
             var response;
-            try {
-                response = await fetch(url, {
-                    method: request.method,
-                    headers: headers,
-                    body: request.body === undefined || isBinary(request.body)
-                        ? request.body : JSON.stringify(request.body)
-                });
-            } catch (networkError) {
-                throw new TransportError('Cannot reach the Engine REST API: ' + networkError.message, 0, null);
+            for (var attempt = 0; ; attempt++) {
+                var headers = {};
+                var auth = authorization(request.method, url);
+                if (auth) headers['Authorization'] = auth;
+                if (request.accept) headers['Accept'] = request.accept;
+                if (request.contentType) headers['Content-Type'] = request.contentType;
+                if (request.ifMatch) headers['If-Match'] = request.ifMatch;
+
+                try {
+                    response = await fetch(url, {
+                        method: request.method,
+                        headers: headers,
+                        body: payload,
+                        cache: 'no-store'
+                    });
+                } catch (networkError) {
+                    throw new TransportError('Cannot reach the Engine REST API: ' + networkError.message, 0, null);
+                }
+                if (response.status === 401 && attempt === 0
+                        && adopt(response.headers.get('WWW-Authenticate'))) {
+                    continue;
+                }
+                break;
             }
+            settle(response.status);
 
             var contentType = response.headers.get('content-type') || '';
             var body = null;
@@ -298,30 +569,67 @@
             return baseUrl + path + (queryString ? '?' + queryString : '');
         };
 
-        transport.upload = async function (path, query, body, contentType, onProgress) {
+        // Settles the scheme before a body worth not sending twice goes out: a
+        // cheap read either comes back accepted under Basic or brings the
+        // Digest challenge. Outcomes other than those two are the upload's to
+        // report, not this probe's.
+        function primed() {
+            if (!credentials || challenge() || basicAccepted) return Promise.resolve();
+            return transport({ method: 'GET', path: '/status' }).then(function () {}, function () {});
+        }
+
+        // Resolves like the transport; the promise carries abort(), which
+        // rejects it with an error flagged `cancelled`.
+        transport.upload = function (path, query, body, contentType, onProgress) {
             if (typeof XMLHttpRequest === 'undefined') {
-                throw new VifError('Uploads with progress need a browser: there is no XMLHttpRequest here', 0, null);
+                return Promise.reject(new VifError('Uploads with progress need a browser: there is no XMLHttpRequest here', 0, null));
             }
-            return new Promise(function (resolve, reject) {
-                var xhr = new XMLHttpRequest();
-                xhr.open('POST', transport.url(path, query));
-                if (authorization) xhr.setRequestHeader('Authorization', authorization);
-                xhr.setRequestHeader('Content-Type', contentType);
-                xhr.upload.onprogress = function (event) { onProgress(event.loaded, event.total); };
-                xhr.onerror = function () {
-                    reject(new TransportError('Cannot reach the Engine REST API: the upload failed', 0, null));
-                };
-                xhr.onload = function () {
-                    var responseType = xhr.getResponseHeader('Content-Type') || '';
-                    var answer = xhr.status === 204 ? null : parseBody(responseType, xhr.responseText);
-                    if (xhr.status < 200 || xhr.status >= 300) {
-                        reject(errorFor(xhr.status, answer, responseType, xhr.statusText));
-                        return;
+            var url = transport.url(path, query);
+            var xhr = null;
+            var aborted = false;
+            // Set once a 401 has been answered: the body goes out a second time
+            // at most.
+            var answered = false;
+            var promise = primed().then(function () {
+                return new Promise(function (resolve, reject) {
+                    function send() {
+                        if (aborted) { reject(cancelledUpload()); return; }
+                        xhr = new XMLHttpRequest();
+                        xhr.open('POST', url);
+                        var auth = authorization('POST', url);
+                        if (auth) xhr.setRequestHeader('Authorization', auth);
+                        xhr.setRequestHeader('Content-Type', contentType);
+                        xhr.upload.onprogress = function (event) { onProgress(event.loaded, event.total); };
+                        xhr.onerror = function () {
+                            reject(new TransportError('Cannot reach the Engine REST API: the upload was cut off or refused', 0, null));
+                        };
+                        xhr.onabort = function () { reject(cancelledUpload()); };
+                        xhr.onload = function () {
+                            var responseType = xhr.getResponseHeader('Content-Type') || '';
+                            var answer = xhr.status === 204 ? null : parseBody(responseType, xhr.responseText);
+                            if (xhr.status === 401 && !answered) {
+                                var repeat;
+                                try { repeat = adopt(xhr.getResponseHeader('WWW-Authenticate')); }
+                                catch (unsupported) { reject(unsupported); return; }
+                                if (repeat) { answered = true; send(); return; }
+                            }
+                            settle(xhr.status);
+                            if (xhr.status < 200 || xhr.status >= 300) {
+                                reject(errorFor(xhr.status, answer, responseType, xhr.statusText));
+                                return;
+                            }
+                            resolve({ status: xhr.status, etag: xhr.getResponseHeader('ETag'), body: answer });
+                        };
+                        xhr.send(body);
                     }
-                    resolve({ status: xhr.status, etag: xhr.getResponseHeader('ETag'), body: answer });
-                };
-                xhr.send(body);
+                    send();
+                });
             });
+            promise.abort = function () {
+                aborted = true;
+                if (xhr) xhr.abort();
+            };
+            return promise;
         };
 
         return transport;
@@ -593,7 +901,9 @@
             return answer.value();
         },
 
-        // Not an operation: the getThumbnail URL, for <img src>. It is synchronous,
+        // Not an operation: the getThumbnail URL, for a caller that fetches it
+        // itself (the pages fetch thumbnails through the transport and show a
+        // blob). It is synchronous,
         // and the generated client only knows its own URL inside an async request,
         // so this, vodJobThumbnailUrl and vodFileUploadUrl are the three paths the
         // SDK still spells out.
@@ -740,6 +1050,24 @@
             }));
         },
 
+        async probeSvdEndpoint(request) {
+            return document(this.__api.probes.probeSvdEndpointRaw({
+                svdEndpointProbeRequest: request
+            }));
+        },
+
+        async probeWebhookListener(request) {
+            return document(this.__api.probes.probeWebhookListenerRaw({
+                webhookProbeRequest: request
+            }));
+        },
+
+        async probeLifecycleWebhook(request) {
+            return document(this.__api.probes.probeLifecycleWebhookRaw({
+                lifecycleWebhookProbeRequest: request || {}
+            }));
+        },
+
         async listVodFiles() {
             return document(this.__api.vod.listVodFilesRaw());
         },
@@ -801,6 +1129,10 @@
             }));
         },
 
+        async getVodJobVerifyReport(jobId) {
+            return document(this.__api.vod.getVodJobVerifyReportRaw({ jobId: jobId }));
+        },
+
         // Returns a Blob of newline-delimited JSON. As with getThumbnail, the
         // generated client sends no Accept, and Accept is what keeps a transport
         // from parsing the body as one JSON document.
@@ -817,7 +1149,8 @@
             return answer.value();
         },
 
-        // Not an operation: the getVodJobThumbnail URL, for <img src>.
+        // Not an operation: the getVodJobThumbnail URL, for a caller that
+        // fetches it itself.
         vodJobThumbnailUrl(jobId) {
             if (!this.transport.url) {
                 throw new VifError('This transport does not expose url(); cannot build a thumbnail URL', 0, null);
@@ -1847,23 +2180,28 @@
     // through the transport's own path when it has one; the generated operation
     // bypassed there, its response runs through the same generated mapper so
     // both routes answer the same document.
-    VodFiles.prototype.upload = async function (name, body, options) {
+    // The returned promise carries abort() when the transport's upload path
+    // does; a cancelled upload rejects with an error flagged `cancelled`.
+    VodFiles.prototype.upload = function (name, body, options) {
         options = options || {};
         var contentType = options.contentType || (body && body.type) || 'video/mp4';
         var transport = this.client.raw.transport;
-        try {
-            if (options.onProgress && transport.upload) {
-                var answer = await transport.upload(
-                    '/vod/files', { file: name }, body, contentType, options.onProgress);
-                return VIF.api.models.VodFileFromJSON(answer.body);
-            }
-            return await this.client.raw.createVodFile(name, body, contentType);
-        } catch (error) {
+        var pending = null;
+        var answer;
+        if (options.onProgress && transport.upload) {
+            pending = transport.upload('/vod/files', { file: name }, body, contentType, options.onProgress);
+            answer = pending.then(function (result) { return VIF.api.models.VodFileFromJSON(result.body); });
+        } else {
+            answer = this.client.raw.createVodFile(name, body, contentType);
+        }
+        var result = answer.catch(function (error) {
             if (error instanceof ConflictError) {
                 throw new AlreadyExistsError("file '" + name + "' already exists", error.status, error.problem);
             }
             throw error;
-        }
+        });
+        if (pending && typeof pending.abort === 'function') result.abort = pending.abort;
+        return result;
     };
 
     // DELETE by the name the listing gives: 404 when nothing is there, 409
@@ -1916,6 +2254,10 @@
         return this.client.raw.getVodJobResultsFile(jobId);
     };
 
+    VodJobs.prototype.verifyReport = function (jobId) {
+        return this.client.raw.getVodJobVerifyReport(jobId);
+    };
+
     VodJobs.prototype.thumbnail = function (jobId) {
         return this.client.raw.getVodJobThumbnail(jobId);
     };
@@ -1957,7 +2299,10 @@
             }
         };
         client.probes = {
-            vlmEndpoint: function (request) { return base.raw.probeVlmEndpoint(request); }
+            vlmEndpoint: function (request) { return base.raw.probeVlmEndpoint(request); },
+            svdEndpoint: function (request) { return base.raw.probeSvdEndpoint(request); },
+            webhook: function (request) { return base.raw.probeWebhookListener(request); },
+            lifecycleWebhook: function (request) { return base.raw.probeLifecycleWebhook(request); }
         };
         client.vod = { files: new VodFiles(client), jobs: new VodJobs(client) };
     }

@@ -24,10 +24,47 @@ VIF.vod = VIF.vod || {};
 		return (group && group.config && group.config.detector) || null;
 	}
 
+	function isVerifyGroup(group) {
+		return (groupDetector(group) || {}).type === 'verify';
+	}
+
+	/** The stored Verify configs, offered on the Verify tab and nowhere else. */
+	function verifyGroups() {
+		return (V.store.groups || []).filter(isVerifyGroup);
+	}
+
+	/** Every other stored config, offered by the Stored-config picker. */
+	function liveGroups() {
+		return (V.store.groups || []).filter((g) => !isVerifyGroup(g));
+	}
+
+	/* Derived group names spell punctuation out (live_vlm_DotStar) — label with the decoded
+	   match rule the way the Stream Configs page shows it. The value stays the name, the API
+	   identity a submit sends; the name is appended only to break a tie when two groups share
+	   one rule. */
+	function groupLabel(group, groups) {
+		const m = group.match || {};
+		const rule = m.application && m.streamPattern ? m.application + ' / ' + m.streamPattern : group.name;
+		const dup = groups.some((o) => o !== group && o.match
+			&& o.match.application === m.application && o.match.streamPattern === m.streamPattern);
+		return rule + (dup ? ' (' + group.name + ')' : '');
+	}
+
 	/** The VLM endpoint members the default config publishes; the key is never echoed. */
 	function vlmDefaults() {
 		const detectors = (V.store.defaults && V.store.defaults.detectors) || {};
 		return (detectors.vlm && detectors.vlm.endpoint) || {};
+	}
+
+	/** The verify baseline the default config publishes; credentials are never echoed. */
+	function verifyDefaults() {
+		const detectors = (V.store.defaults && V.store.defaults.detectors) || {};
+		return detectors.verify || {};
+	}
+
+	/** What the review stage runs when neither the config nor the baseline names a model. */
+	function verifyFallbackModel() {
+		return (window.VIF.fieldRegistry && VIF.fieldRegistry.VERIFY_FALLBACK_REVIEW_MODEL) || 'nvidia/Cosmos3-Nano';
 	}
 
 	/* Same completion the live editor applies to a typed endpoint: a bare host gets a
@@ -63,11 +100,11 @@ VIF.vod = VIF.vod || {};
 				// selected is a list: one submit fires one job per file, same analysis for all.
 				files: null, filesError: null, filter: '', selected: [],
 				uploads: [], dragDepth: 0,
-				mode: 'config', groupName: '',
+				mode: 'config', groupName: '', verifyGroupName: '',
 				config: { detector: { type: 'synthetic' }, processing: {} },
 				vlmModelOther: false, vlmVerify: null,
 				jsonDraft: null, jsonDirty: false, jsonOpen: false,
-				storeResults: true, webhookMode: 'inherit', webhookUrl: '', webhookSecret: '', autoResume: 'inherit', tag: '',
+				storeResults: true, webhookMode: 'inherit', webhookUrl: '', webhookSecret: '', webhookHeader: '', tag: '',
 				queueDepth: null, submitting: false, submitError: null,
 			};
 		},
@@ -102,7 +139,8 @@ VIF.vod = VIF.vod || {};
 					V.store.vodSettings ? Promise.resolve(null) : api.vodSettings().catch(() => null),
 				]);
 				s.files = files;
-				if (!s.groupName && groups.length) s.groupName = groups[0].name;
+				if (!s.groupName && liveGroups().length) s.groupName = liveGroups()[0].name;
+				if (!s.verifyGroupName && verifyGroups().length) s.verifyGroupName = verifyGroups()[0].name;
 				if (jobs) s.queueDepth = jobs.total;
 			} catch (e) {
 				s.filesError = e.message;
@@ -115,7 +153,7 @@ VIF.vod = VIF.vod || {};
 			this.undocDrag();
 			// A fragment swap or view change must not keep pushing bytes at the Engine.
 			for (const u of (this.state && this.state.uploads) || []) {
-				if (u.xhr) { u.aborted = true; u.xhr.abort(); }
+				if (u.upload) { u.aborted = true; u.upload.abort(); }
 			}
 		},
 
@@ -129,7 +167,11 @@ VIF.vod = VIF.vod || {};
 		/* ---------- state helpers ---------- */
 
 		selectedGroup() {
-			return (V.store.groups || []).find((g) => g.name === this.state.groupName) || null;
+			return liveGroups().find((g) => g.name === this.state.groupName) || null;
+		},
+
+		selectedVerifyGroup() {
+			return verifyGroups().find((g) => g.name === this.state.verifyGroupName) || null;
 		},
 
 		/** The config object as it will be posted: empty strings and empty blocks dropped. */
@@ -154,30 +196,30 @@ VIF.vod = VIF.vod || {};
 			const s = this.state;
 			const body = { file: file ? file.file : (s.selected[0] ? s.selected[0].file : '(pick a file in step 01)') };
 			if (s.mode === 'config') body.streamGroupConfig = s.groupName;
+			else if (s.mode === 'verify') body.streamGroupConfig = s.verifyGroupName;
 			else body.config = this.prunedConfig();
 			if (!s.storeResults) body.storeResults = false;
 			if (s.tag.trim()) body.tag = s.tag.trim();
 			if (s.webhookMode === 'custom') body.lifecycleWebhook = s.webhookUrl.trim();
 			if (s.webhookMode === 'custom' && s.webhookSecret) body.lifecycleWebhookSecret = s.webhookSecret;
+		if (s.webhookMode === 'custom' && s.webhookSecret && s.webhookHeader.trim()) body.lifecycleWebhookHeader = s.webhookHeader.trim();
 			if (s.webhookMode === 'off') body.lifecycleWebhook = '';
-			if (s.autoResume === 'on') body.autoResume = true;
-			if (s.autoResume === 'off') body.autoResume = false;
+			// auto_resume rides the global default (VOD settings); the API still
+			// accepts a per-job override, the form just doesn't offer one.
 			return body;
-		},
-
-		/** What "View request JSON" shows: the wire body, or one per selected file. */
-		requestPreview() {
-			const s = this.state;
-			if (s.selected.length <= 1) return VIF.sdk.toWire(this.requestBody(s.selected[0]));
-			return s.selected.map((f) => VIF.sdk.toWire(this.requestBody(f)));
 		},
 
 		async submit() {
 			const s = this.state;
 			if (!s.selected.length) { toast('Pick a source file first.', 'err'); return; }
-			if (s.mode === 'config' && !s.groupName) {
-				toast((V.store.groups || []).length ? 'Pick a stored config first.'
+			if (s.mode === 'config' && !this.selectedGroup()) {
+				toast(liveGroups().length ? 'Pick a stored config first.'
 					: 'No stream configs on this Engine yet. Create one under Configs → Stream Configs.', 'err');
+				return;
+			}
+			if (s.mode === 'verify' && !this.selectedVerifyGroup()) {
+				toast(verifyGroups().length ? 'Pick a Verify config first.'
+					: 'No Verify configs on this Engine yet. Create one under Configs → Stream Configs with the detector type Verify.', 'err');
 				return;
 			}
 			if (s.webhookMode === 'custom' && !s.webhookUrl.trim()) {
@@ -205,7 +247,7 @@ VIF.vod = VIF.vod || {};
 			for (const item of batch) {
 				try {
 					const created = await api.submitJob(item.body);
-					queued.push(created.jobId);
+					queued.push(created);
 					// The submit response's listener_warning is NOT toasted: the report
 					// this navigates to shows it as a persistent notice, in plain words.
 				} catch (e) {
@@ -214,13 +256,12 @@ VIF.vod = VIF.vod || {};
 			}
 			if (gen !== V.gen) return; // the user left (or remounted) this view mid-submit
 			if (!failed.length) {
-				if (queued.length === 1) {
-					toast('Job queued: ' + queued[0]);
-					V.nav('job', { id: queued[0] });
-				} else {
-					toast(queued.length + ' jobs queued.');
-					V.nav('jobs');
-				}
+				// Always land on the jobs list: the submit response says pending even
+				// when a worker grabs the job right away, so it cannot tell a started
+				// job from a queued one - and one predictable flow beats two.
+				toast(queued.length === 1 ? 'Job submitted: ' + queued[0].jobId
+					: queued.length + ' jobs submitted.');
+				V.nav('jobs');
 				return;
 			}
 			// Keep only the files that failed selected, so a retry resubmits just those.
@@ -265,14 +306,14 @@ VIF.vod = VIF.vod || {};
 					if (u.barEl) u.barEl.style.width = Math.round(pct * 100) + '%';
 					if (u.pctEl) u.pctEl.textContent = Math.round(pct * 100) + '%';
 				});
-				u.xhr = post.xhr;
+				u.upload = post;
 				try {
 					await post;
 					u.done = true;
 				} catch (e) {
 					u.error = e.cancelled ? 'cancelled' : e.message;
 				}
-				u.xhr = null;
+				u.upload = null;
 				u.file = null;
 				if (gen !== V.gen) return;
 				this.render();
@@ -304,8 +345,8 @@ VIF.vod = VIF.vod || {};
 						u.error ? h('span', { class: 'uplmsg' }, u.error)
 							: u.done ? h('span', { class: 'uplmsg ok' }, 'uploaded ✓')
 								: pctEl,
-						u.xhr ? h('button', { class: 'btn btn-sm btn-ghost', title: 'Cancel this upload',
-							onclick: () => { u.aborted = true; u.xhr.abort(); } }, '✕')
+						u.upload ? h('button', { class: 'btn btn-sm btn-ghost', title: 'Cancel this upload',
+							onclick: () => { u.aborted = true; u.upload.abort(); } }, '✕')
 							: h('button', { class: 'btn btn-sm btn-ghost', title: 'Dismiss',
 								// aborted first: a still-queued item must not upload after its row is gone
 								onclick: () => { u.aborted = true; s.uploads = s.uploads.filter((x) => x !== u); this.render(); } }, '✕')),
@@ -365,15 +406,16 @@ VIF.vod = VIF.vod || {};
 							h('span', { class: 'fname', style: 'font-size:12.5px;flex:1' }, f.file),
 							h('span', { class: 'fmeta', style: 'margin:0;flex-shrink:0' }, V.fmtBytes(f.sizeBytes)),
 							h('button', { class: 'btn btn-sm btn-ghost', title: 'Remove from the selection',
-								onclick: () => { s.selected = s.selected.filter((x) => x.file !== f.file); this.render(); } }, '✕'))),
+								onclick: () => { s.selected = s.selected.filter((x) => x.file !== f.file); this.renderKeepingFileScroll(); } }, '✕'))),
 						h('div', { class: 'hint', style: 'margin-top:7px' },
 							s.selected.length > 1
 								? s.selected.length + ' files — one job per file, all with the same analysis and options.'
-								: 'Listed by extension (.mp4 · .m4v · .mov · .f4v) — the H.264 track is probed only when the job runs; an HEVC-only .mp4 submits fine and then fails as source_error.')),
-					h('button', { class: 'btn btn-sm btn-ghost', style: 'flex-shrink:0', onclick: () => { s.selected = []; this.render(); } },
+								: 'Listed by extension (.mp4 · .m4v · .mov · .f4v). The video track must be H.264 or H.265 — a file in another codec (AV1, VP9…) is refused at submit.')),
+					h('button', { class: 'btn btn-sm btn-ghost', style: 'flex-shrink:0', onclick: () => { s.selected = []; this.renderKeepingFileScroll(); } },
 						s.selected.length > 1 ? 'Clear all' : 'Clear')) : null,
-				// Sampling is a Custom-mode concern: with a stored config every knob
-				// came back disabled and saying "from config" — three dead inputs.
+				// Sampling belongs to the mode that builds a config here: with a stored
+				// config every knob came back disabled and saying "from config" — three
+				// dead inputs.
 				s.mode === 'custom' ? h('div', { class: 'hr2' }) : null,
 				s.mode === 'custom' ? this.renderSampling() : null);
 		},
@@ -383,12 +425,17 @@ VIF.vod = VIF.vod || {};
 			const el = clear(this.fileListEl);
 			if (!s.files) { el.appendChild(h('div', { class: 'frow muted' }, 'Loading…')); return; }
 			const list = (s.files.files || []).filter((f) => !s.filter || f.file.toLowerCase().includes(s.filter.toLowerCase()));
-			if (!list.length) { el.appendChild(h('div', { class: 'frow muted' }, 'No analyzable files under the content root.')); return; }
+			if (!list.length) {
+				el.appendChild(h('div', { class: 'frow muted' }, s.filter
+					? 'No files match "' + s.filter + '".'
+					: 'No analyzable files under the content root.'));
+				return;
+			}
 			for (const f of list) {
 				const picked = s.selected.some((x) => x.file === f.file);
 				const toggle = () => {
 					s.selected = picked ? s.selected.filter((x) => x.file !== f.file) : s.selected.concat([f]);
-					this.render();
+					this.renderKeepingFileScroll();
 				};
 				// A div, not a button: the row carries a Delete button of its own, and a
 				// button cannot contain one.
@@ -399,10 +446,18 @@ VIF.vod = VIF.vod || {};
 					h('span', { class: 'fck' }, picked ? '✓' : ''),
 					h('span', { class: 'fn' }, f.file),
 					h('span', { class: 'fs' }, V.fmtBytes(f.sizeBytes)),
-					h('span', { class: 'fm' }, V.fmtClock(f.modifiedAt)),
+					h('span', { class: 'fm' }, V.fmtDayClock(f.modifiedAt)),
 					h('button', { class: 'btn btn-sm btn-ghost fdel', title: 'Delete this file from the Engine’s content directory',
 						onclick: (e) => { e.stopPropagation(); this.deleteFile(f); } }, 'Delete')));
 			}
+		},
+
+		/** Re-render for a selection change without the file list jumping to the top:
+		    render() rebuilds the list element, which resets its scroll. */
+		renderKeepingFileScroll() {
+			const top = this.fileListEl ? this.fileListEl.scrollTop : 0;
+			this.render();
+			if (this.fileListEl) this.fileListEl.scrollTop = top;
 		},
 
 		/** DELETE /vod/files?file=…, after a confirm that says what the jobs list knows about the file. */
@@ -474,19 +529,32 @@ VIF.vod = VIF.vod || {};
 
 		renderAnalysis() {
 			const s = this.state;
-			const groups = V.store.groups || [];
+			const groups = liveGroups();
 
 			const seg = h('div', { class: 'seg' },
 				h('button', { class: 'opt' + (s.mode === 'config' ? ' on' : ''), onclick: () => { s.mode = 'config'; this.render(); } }, 'Stored config'),
 				h('button', { class: 'opt' + (s.mode === 'custom' ? ' on' : ''), onclick: () => { s.mode = 'custom'; this.render(); } }, 'Custom'));
 
+			// The visible choice: a stored config, or Verify — a stored Verify config,
+			// which has its own tab so the two kinds never mix in one list.
+			const modeSeg = h('div', { class: 'seg' },
+				h('button', { class: 'opt' + (s.mode === 'config' ? ' on' : ''), onclick: () => { s.mode = 'config'; this.render(); } }, 'Stored config'),
+				h('button', { class: 'opt' + (s.mode === 'verify' ? ' on' : ''),
+					title: 'Verify a file for AI-generated content with a stored Verify config', onclick: () => { s.mode = 'verify'; this.render(); } }, 'Verify'));
+
 			// Custom mode is parked for now: the toggle row is hidden, not removed —
 			// the machinery stays wired, and unhiding is deleting one style.
-			const body = [h('div', { style: 'display:none;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap' }, seg,
+			const body = [];
+			// Without Verify there is only one visible mode, so the picker row says nothing.
+			if (VIF.core.verifyEnabled())
+				body.push(h('div', { style: 'display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap' }, modeSeg));
+			body.push(h('div', { style: 'display:none;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap' }, seg,
 				h('span', { class: 'hint' }, 'the API takes ', h('span', { class: 'mono' }, 'stream_group_config'), ', ',
-					h('span', { class: 'mono' }, 'config'), ' or both — this form sends one'))];
+					h('span', { class: 'mono' }, 'config'), ' or both — this form sends one')));
 
-			if (s.mode === 'config') {
+			if (s.mode === 'verify') {
+				body.push(this.renderVerify());
+			} else if (s.mode === 'config') {
 				if (!groups.length) {
 					body.push(h('div', { class: 'empty', style: 'padding:24px 0' },
 						'No stream configs on this Engine yet. Create one under ',
@@ -501,18 +569,9 @@ VIF.vod = VIF.vod || {};
 						h('div', { style: 'display:flex;gap:8px;align-items:center' },
 							h('select', { class: 'input sel', style: 'flex:1;min-width:0', onchange: (e) => { s.groupName = e.target.value; this.render(); } },
 								groups.map((g) => {
-									// Derived group names spell punctuation out (live_vlm_DotStar) —
-									// label with the decoded match rule the way the Stream Configs
-									// page shows it. The value stays the name, the API identity a
-									// submit sends; the name is appended only to break a tie when
-									// two groups share one rule.
 									const type = (groupDetector(g) || {}).type;
-									const m = g.match || {};
-									const rule = m.application && m.streamPattern ? m.application + ' / ' + m.streamPattern : g.name;
-									const dup = groups.some((o) => o !== g && o.match
-										&& o.match.application === m.application && o.match.streamPattern === m.streamPattern);
 									return h('option', { value: g.name, selected: g.name === s.groupName },
-										rule + (dup ? ' (' + g.name + ')' : '') + (type ? ' · ' + type : ''));
+										groupLabel(g, groups) + (type ? ' · ' + type : ''));
 								})),
 							group ? h('button', { class: 'btn btn-sm', style: 'flex-shrink:0',
 								title: 'Open this config in the Stream Configs editor — come back here when it is saved',
@@ -532,25 +591,18 @@ VIF.vod = VIF.vod || {};
 		detectorCard(group) {
 			const det = groupDetector(group) || {};
 			const type = det.type || '';
+			if (type === 'chain') return h('div', { class: 'dcard' }, V.chain.definition(det), this.listenersFoot(group));
 			const meta = DETECTOR_META[type] || { badge: '?', name: type || 'unknown', desc: '', outs: '' };
 			const endpoint = det.endpoint || {};
 			const modelTag =
 				type === 'object' ? (det.checkpointPath || det.model) :
 				type === 'vlm' ? (endpoint.model || vlmDefaults().model) :
-				type === 'synthetic' ? 'NVIDIA Maxine SVD' : null;
+				type === 'synthetic' ? 'NVIDIA SVD' : null;
 			const baselines = (V.store.defaults && V.store.defaults.detectors) || {};
 			const threshold = type === 'synthetic'
 				? (det.classificationThreshold
 					?? (baselines.synthetic && baselines.synthetic.classificationThreshold))
 				: null;
-			// Which of the config's listeners a file job can serve, by the same set the custom
-			// editor offers; the submit response's listener_warning is the authoritative answer.
-			const vodCapable = new Set(LISTENER_DEFS.map((x) => x.type));
-			const runs = [], flagged = [];
-			for (const [name, l] of Object.entries((group.config && group.config.listeners) || {})) {
-				(l && vodCapable.has(l.type) ? runs : flagged).push(name);
-			}
-
 			return h('div', { class: 'dcard' },
 				h('div', { class: 'drow' },
 					h('span', { class: 'dbadge' }, meta.badge),
@@ -560,14 +612,25 @@ VIF.vod = VIF.vod || {};
 						h('div', { class: 'douts' }, meta.outs))),
 				type === 'synthetic' ? h('div', { class: 'gstrip' },
 					h('span', { class: 'gl' }, 'Verdict'),
-					h('span', { class: 'gx' }, 'window is "synthetic" when score ≥ ' + (threshold ?? 'the classification_threshold'))) : null,
-				h('div', { class: 'dfoot' }, runs.length || flagged.length
-					? ['Listeners from this config: ',
-						runs.join(' · '),
-						runs.length && flagged.length ? ' · ' : null,
-						flagged.length ? h('span', { class: 'dwarn' },
-							flagged.join(' · ') + ' — skipped for file jobs; detections still land in the stored results') : null]
-					: 'No event listeners configured — detections land in the stored results only.'));
+					h('span', { class: 'gx' }, 'window is "synthetic" when score > ' + (threshold ?? 'the classification_threshold'))) : null,
+				this.listenersFoot(group));
+		},
+
+		/* Which of the config's listeners a file job can serve, by the same set the custom
+		   editor offers; the submit response's listener_warning is the authoritative answer. */
+		listenersFoot(group, lead) {
+			const vodCapable = new Set(LISTENER_DEFS.map((x) => x.type));
+			const runs = [], flagged = [];
+			for (const [name, l] of Object.entries((group.config && group.config.listeners) || {})) {
+				(l && vodCapable.has(l.type) ? runs : flagged).push(name);
+			}
+			return h('div', { class: 'dfoot' }, lead || null, runs.length || flagged.length
+				? ['Listeners from this config: ',
+					runs.join(' · '),
+					runs.length && flagged.length ? ' · ' : null,
+					flagged.length ? h('span', { class: 'dwarn' },
+						flagged.join(' · ') + ' — skipped for file jobs; detections still land in the stored results') : null]
+				: 'No event listeners configured — detections land in the stored results only.');
 		},
 
 		renderCustom() {
@@ -618,6 +681,70 @@ VIF.vod = VIF.vod || {};
 					} }));
 
 			let fields = null;
+			/* An inline credential slot holds a typed value OR a stored secret picked by
+			   name — exclusive, as the API refuses both. The picker shows when the slot
+			   holds a reference; a stored secret is kept in the job record by name (a
+			   name is not a secret), which is what keeps the job resumable without
+			   re-supplying anything. In value mode, "Save as secret…" promotes the typed
+			   value into the document and switches the slot to it. */
+			const credField = (holder, label, onEdit) => {
+				const modeKey = type + '.' + label;
+				const modes = s.credModes || (s.credModes = {});
+				const stored = modes[modeKey] !== undefined ? modes[modeKey] : holder.apiKeySecret !== undefined;
+				const saving = (s.credSaving || (s.credSaving = {}));
+				const names = V.store.secretNames || [];
+				const saveAsSecret = async () => {
+					const name = (saving[modeKey] || '').trim();
+					const value = (holder.apiKey || '').trim();
+					if (!name || !value) { toast('A secret needs both a name and the typed value.', 'err'); return; }
+					if (names.includes(name)) { toast('Secret "' + name + '" already exists — pick it from the list.', 'err'); return; }
+					try {
+						const values = {};
+						values[name] = value;
+						await api.secretNames();
+						V.store.secretNames = (await api.secrets().update({ values })).names;
+					} catch (e) { toast(e.message, 'err'); return; }
+					holder.apiKey = undefined;
+					holder.apiKeySecret = name;
+					modes[modeKey] = true;
+					delete saving[modeKey];
+					if (onEdit) onEdit();
+					this.updateJson();
+					this.render();
+					toast('Secret "' + name + '" saved — this field now uses it.');
+				};
+				return h('div', { class: 'field' }, h('label', null, label),
+					h('select', { class: 'input sel', style: 'margin-bottom:4px', onchange: (e) => {
+						modes[modeKey] = e.target.value === 'stored';
+						if (modes[modeKey]) holder.apiKey = undefined;
+						else holder.apiKeySecret = undefined;
+						if (onEdit) onEdit();
+						this.updateJson();
+						this.render();
+					} },
+						h('option', { value: 'stored', selected: stored ? 'selected' : null }, 'Use a stored secret'),
+						h('option', { value: 'value', selected: !stored ? 'selected' : null }, 'Enter a value')),
+					stored
+						? h('select', { class: 'input sel', onchange: (e) => {
+							holder.apiKeySecret = e.target.value || undefined;
+							if (onEdit) onEdit();
+							this.updateJson();
+						} },
+							h('option', { value: '' }, names.length ? '(pick a secret)' : '(none — add one on the Secrets page)'),
+							names.map((n) => h('option', { value: n, selected: holder.apiKeySecret === n ? 'selected' : null }, n)),
+							holder.apiKeySecret && !names.includes(holder.apiKeySecret)
+								? h('option', { value: holder.apiKeySecret, selected: 'selected' }, holder.apiKeySecret + ' (not configured)') : null)
+						: h('input', { class: 'input', type: 'password', autocomplete: 'off', value: holder.apiKey ?? '',
+							oninput: (e) => { holder.apiKey = e.target.value === '' ? undefined : e.target.value; if (onEdit) onEdit(); this.updateJson(); } }),
+					!stored && holder.apiKey ? h('div', { style: 'display:flex;gap:6px;margin-top:4px;align-items:center' },
+						h('input', { class: 'input', style: 'flex:0 1 200px', placeholder: 'secret name',
+							value: saving[modeKey] || '',
+							oninput: (e) => { saving[modeKey] = e.target.value; } }),
+						h('button', { class: 'btn btn-sm', onclick: saveAsSecret }, 'Save as secret')) : null,
+					!stored && holder.apiKey ? h('span', { class: 'hint' }, 'Save the typed value as a secret to reuse it by name — and keep this job resumable.') : null,
+					stored ? h('span', { class: 'hint' }, 'A stored secret keeps the job resumable: the record stores only its name, and the value is resolved when the job runs.') : null);
+			};
+
 			if (type === 'object') {
 				fields = h('div', { style: 'display:flex;flex-direction:column;gap:12px' },
 					classNames(d),
@@ -682,9 +809,7 @@ VIF.vod = VIF.vod || {};
 				fields = h('div', { style: 'display:flex;flex-direction:column;gap:12px' },
 					h('div', { class: 'grid2' }, modelField, endpointField),
 					h('div', { class: 'grid2' },
-						h('div', { class: 'field' }, h('label', null, 'API key'),
-							h('input', { class: 'input', type: 'password', autocomplete: 'off', value: endpoint.apiKey ?? '',
-								oninput: (e) => { endpoint.apiKey = e.target.value === '' ? undefined : e.target.value; this.clearVlmVerify(); this.updateJson(); } })),
+						credField(endpoint, 'API key', () => this.clearVlmVerify()),
 						modeSeg),
 					detect ? classNames(detect) : null,
 					detect ? h('div', { class: 'field' }, h('label', null, 'Reasoning level'),
@@ -707,7 +832,7 @@ VIF.vod = VIF.vod || {};
 						txt(generation, 'maxTokens', 'Max tokens', { num: true }),
 						txt(generation, 'temperature', 'Temperature', { num: true })),
 					h('p', { class: 'hint', style: 'margin:0' },
-						'Inline credentials are never written to disk on the Engine — a resume of this job will ask for them again.'));
+						'An inline credential VALUE is never written to disk on the Engine — a resume of this job will ask for it again. A stored secret is kept by name and needs no re-supply.'));
 			} else {
 				const endpoint = block(d, 'endpoint');
 				fields = h('div', { style: 'display:flex;flex-direction:column;gap:12px' },
@@ -715,19 +840,28 @@ VIF.vod = VIF.vod || {};
 						txt(endpoint, 'address', 'Endpoint'),
 						txt(endpoint, 'functionId', 'Function ID')),
 					h('div', { class: 'grid2' },
-						txt(endpoint, 'apiKey', 'API key', { attrs: { type: 'password', autocomplete: 'off' } }),
+						credField(endpoint, 'API key'),
 						txt(d, 'classificationThreshold', 'Classification threshold', { num: true })),
 					h('label', { class: 'hint', style: 'display:flex;gap:7px;align-items:center' },
 						h('input', { type: 'checkbox', checked: (endpoint.tls && endpoint.tls.enabled) === true ? 'checked' : null,
 							onchange: (e) => { endpoint.tls = e.target.checked ? { enabled: true } : undefined; this.updateJson(); } }),
 						'Use TLS to the SVD endpoint'),
 					h('p', { class: 'hint', style: 'margin:0' },
-						'Unset fields inherit the Engine’s default config. Inline credentials are never written to disk.'));
+						'Unset fields inherit the Engine’s default config. An inline credential value is never written to disk; a stored secret is kept by name and keeps the job resumable.'));
 			}
 
-			// Hand-typed JSON survives every re-render until it is applied or the type changes.
-			// The dirty affordances flip live in the input handler — a full render here would
-			// rebuild the DOM and throw the user out of the textarea mid-typing.
+			return h('div', { style: 'display:flex;flex-direction:column;gap:13px' },
+				h('div', { class: 'field' }, h('label', null, 'Detector type'), typeSeg),
+				fields,
+				this.renderListeners(),
+				this.renderAdvancedJson());
+		},
+
+		/* Hand-typed JSON survives every re-render until it is applied or the type changes.
+		   The dirty affordances flip live in the input handler — a full render here would
+		   rebuild the DOM and throw the user out of the textarea mid-typing. */
+		renderAdvancedJson() {
+			const s = this.state;
 			const DIRTY_HINT = 'Unapplied edits — the form and submit ignore them until you Apply.';
 			const CLEAN_HINT = 'Any Config field works here, not just the essentials above.';
 			const discardBtn = h('button', { class: 'btn btn-sm btn-ghost', disabled: !s.jsonDirty,
@@ -750,7 +884,8 @@ VIF.vod = VIF.vod || {};
 								// fromWire also accepts a document pasted in the API's own
 								// spelling; a camelCase one passes through unchanged.
 								s.config = VIF.sdk.fromWire(JSON.parse(this.jsonArea.value));
-								// The JSON is authoritative; the form re-infers its VLM affordances from it.
+								// The JSON is authoritative; the form re-infers its model
+								// affordances from it.
 								s.vlmModelOther = false;
 								this.clearVlmVerify();
 								s.jsonDraft = null;
@@ -762,12 +897,82 @@ VIF.vod = VIF.vod || {};
 						discardBtn,
 						jsonHint)));
 			json.addEventListener('toggle', () => { s.jsonOpen = json.open; });
+			return json;
+		},
 
-			return h('div', { style: 'display:flex;flex-direction:column;gap:13px' },
-				h('div', { class: 'field' }, h('label', null, 'Detector type'), typeSeg),
-				fields,
-				this.renderListeners(),
-				json);
+		/* ---------- verify mode (step 02) ---------- */
+
+		/* The Verify tab: pick a stored Verify config, see what its two stages will do, and
+		   go to the editor to change or create one. Thresholds and endpoints are the config's;
+		   what it leaves blank inherits the Stream Config Defaults' Verify baseline. */
+		renderVerify() {
+			const s = this.state;
+			const groups = verifyGroups();
+			const newBtn = h('button', { class: 'btn btn-sm', style: 'flex-shrink:0',
+				title: 'Create a Verify config in the Stream Configs editor — come back here when it is saved',
+				onclick: () => V.openNewStreamConfig('verify') }, 'New Verify config ↗');
+			if (!groups.length) {
+				return h('div', { class: 'empty', style: 'padding:24px 0;display:flex;flex-direction:column;gap:10px;align-items:flex-start' },
+					h('div', null, 'No Verify configs on this Engine yet. A Verify config names the scoring endpoint, the review model and the gate between them; create one under ',
+						h('a', { href: '#', onclick: (e) => { e.preventDefault(); V.openNewStreamConfig('verify'); } }, 'Configs → Stream Configs'),
+						' with the detector type Verify, then come back.'),
+					newBtn);
+			}
+			const group = this.selectedVerifyGroup() || groups[0];
+			if (group.name !== s.verifyGroupName) s.verifyGroupName = group.name;
+			return h('div', null,
+				h('div', { class: 'field', style: 'margin-bottom:12px' }, h('label', null, 'Verify config'),
+					h('div', { style: 'display:flex;gap:8px;align-items:center' },
+						h('select', { class: 'input sel', style: 'flex:1;min-width:0', onchange: (e) => { s.verifyGroupName = e.target.value; this.render(); } },
+							groups.map((g) => h('option', { value: g.name, selected: g.name === group.name }, groupLabel(g, groups)))),
+						h('button', { class: 'btn btn-sm', style: 'flex-shrink:0',
+							title: (groupDetector(group) || {}).type === 'chain' ? 'View this chain definition' : 'Open this config in the Stream Configs editor — come back here when it is saved',
+							onclick: () => V.openStreamConfig(group) }, 'Edit ↗'),
+						newBtn)),
+				this.verifyCard(group));
+		},
+
+		/** Read-only preview of a Verify config: both stages, the gate between them, the listeners. */
+		verifyCard(group) {
+			const d = groupDetector(group) || {};
+			const defaults = verifyDefaults();
+			const unit = (v, fallback) => (typeof v === 'number' && v >= 0 && v <= 1) ? v : fallback;
+			const flag = unit(d.flagThreshold, unit(defaults.flagThreshold, 0.3));
+			const strong = unit(d.strongThreshold, unit(defaults.strongThreshold, 0.9));
+			const endpoint = d.endpoint || {};
+			const defEndpoint = defaults.endpoint || {};
+			const review = d.review || {};
+			const defReview = defaults.review || {};
+			const address = endpoint.address || defEndpoint.address;
+			const model = review.model || defReview.model || verifyFallbackModel();
+			const url = review.url || defReview.url;
+			const inherited = (own, label) => own ? null : h('span', { class: 'tag tag-n', title: 'Not set on this config — inherited from the Stream Config Defaults’ Verify baseline' }, label);
+			const gateText = 'score > ' + flag + ' → the window is reviewed · below → it stands as scored'
+				+ (strong < 1 ? ' · above ' + strong + ' → strong synthetic confidence, the VLM only explains' : '');
+
+			const stage = (no, name, tag, desc, outs) => h('div', { class: 'drow' },
+				h('span', { class: 'dbadge' }, no),
+				h('div', null,
+					h('div', { class: 'dname' }, name, tag),
+					h('div', { class: 'ddesc' }, desc),
+					h('div', { class: 'douts' }, outs)));
+
+			return h('div', { class: 'dcard', style: 'margin-top:0' },
+				stage('1', 'Synthetic Detection', h('span', { class: 'tag tag-n' }, 'NVIDIA SVD'),
+					['Scores every window of the file for AI-generated content. ',
+						address ? ['Endpoint ', h('span', { class: 'mono' }, address), ' ', inherited(endpoint.address, 'inherited')]
+							: h('span', { class: 'dwarn' }, 'No scoring endpoint on this config or in the baseline — the job will fail at start.')],
+					'outputs → synthetic_score, verdict'),
+				h('div', { class: 'gstrip' }, h('span', { class: 'gl' }, 'Gate'), h('span', { class: 'gx' }, gateText),
+					inherited(typeof d.flagThreshold === 'number' || typeof d.strongThreshold === 'number', 'thresholds inherited')),
+				stage('2', 'VLM Review', h('span', { class: 'tag tag-n' }, String(model).split('/').pop()),
+					['Reviews each flagged window against physical accuracy, temporal consistency, lighting, texture, edges and motion. ',
+						url ? ['Endpoint ', h('span', { class: 'mono' }, url), ' ', inherited(review.url, 'inherited')]
+							: h('span', { class: 'dwarn' }, 'No review endpoint on this config or in the baseline — flagged windows will go unreviewed.'),
+						review.model ? null : [' ', inherited(false, 'model inherited')]],
+					'outputs → verdict, confidence, reasoning, attributes'),
+				this.listenersFoot(group, h('div', { style: 'margin-bottom:6px' },
+					'Everything above comes from the config; blank members inherit the Engine’s default config (Configs → Stream Config Defaults). Frame sampling and the window length come from the config too.')));
 		},
 
 		/* ---------- listeners (custom mode) ---------- */
@@ -852,16 +1057,17 @@ VIF.vod = VIF.vod || {};
 				this.render();
 				return;
 			}
-			// Only this form's key: the API never echoes a stored one, and never sends a stored
-			// one to a URL the caller supplied.
-			const apiKey = b.apiKey || '';
+			// This form's own key: a typed one, or a picked secret sent by name for the server to
+			// resolve, as the live Verify does.
+			const apiKeySecret = b.apiKeySecret || '';
+			const apiKey = apiKeySecret ? '' : (b.apiKey || '');
 			const gen = this.gen;
 			const seq = this.vlmVerifySeq = (this.vlmVerifySeq || 0) + 1;
 			s.vlmVerify = { cls: 'busy', text: 'Verifying ' + url + '…' };
 			this.render();
 			let result;
 			try {
-				result = await api.vlmTest(url, apiKey);
+				result = await api.vlmTest(url, apiKey, apiKeySecret);
 			} catch (e) {
 				result = { reachable: false, error: e.message };
 			}
@@ -893,19 +1099,25 @@ VIF.vod = VIF.vod || {};
 
 		/* ---------- step 03: outputs & options ---------- */
 
-		/* Authorization for a custom destination: pick a name from the secrets document; the
-		   value rides only the deliveries, never the submit body or the job record. */
-		secretPicker() {
+		/* The credential for a custom destination, reading as the sentence it is:
+		   [secret] sent as [header]. The name comes from the secrets document; the value
+		   rides only the deliveries, never the submit body or the job record. The header
+		   input appears once a secret is picked, since it labels the secret. */
+		credentialRow() {
 			const s = this.state;
 			const names = V.store.secretNames || [];
 			if (!names.length) {
 				if (s.webhookSecret) s.webhookSecret = '';
-				return h('span', null, 'To authenticate deliveries, add a named secret on the settings page and pick it here.');
+				return h('span', null, 'To let your service verify the caller, add a secret on the Secrets page; it will appear here to pick.');
 			}
 			if (s.webhookSecret && !names.includes(s.webhookSecret)) s.webhookSecret = '';
-			return h('select', { class: 'input', style: 'max-width:360px;font-size:11.5px', onchange: (e) => { s.webhookSecret = e.target.value; } },
-				h('option', { value: '' }, 'No Authorization secret'),
-				names.map((n) => h('option', { value: n, selected: s.webhookSecret === n ? 'selected' : null }, n)));
+			return h('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' },
+				h('select', { class: 'input', style: 'max-width:250px;font-size:11.5px', onchange: (e) => { s.webhookSecret = e.target.value; this.render(); } },
+					h('option', { value: '' }, 'No credential'),
+					names.map((n) => h('option', { value: n, selected: s.webhookSecret === n ? 'selected' : null }, n))),
+				s.webhookSecret ? h('span', { style: 'white-space:nowrap' }, 'sent as') : null,
+				s.webhookSecret ? h('input', { class: 'input', style: 'max-width:170px;font-size:11.5px', placeholder: 'Authorization',
+					value: s.webhookHeader, oninput: (e) => { s.webhookHeader = e.target.value; } }) : null);
 		},
 
 		renderOutputs() {
@@ -928,23 +1140,20 @@ VIF.vod = VIF.vod || {};
 					h('div', { style: 'flex:1' }, h('div', { class: 'ol' }, 'Lifecycle webhook'),
 						h('div', { class: 'oh', style: 'display:flex;flex-direction:column;gap:7px;margin-top:6px' },
 							tri(s.webhookMode, (v) => { s.webhookMode = v; }),
-							s.webhookMode === 'inherit' ? h('span', null, globalHook ? 'Global destination: ' + globalHook : 'No global webhook is configured — inherit means none.') : null,
+							s.webhookMode === 'inherit' ? h('span', null, globalHook
+								? 'Status updates go to the global webhook: ' + globalHook
+								: 'No global webhook is set, so this job will send no updates. Set one on the On-Demand Configs page, or choose Custom.') : null,
 							s.webhookMode === 'custom' ? h('input', { class: 'input', style: 'max-width:360px;font-size:11.5px', placeholder: 'https://…', value: s.webhookUrl, oninput: (e) => { s.webhookUrl = e.target.value; } }) : null,
-							s.webhookMode === 'custom' ? this.secretPicker() : null,
-							s.webhookMode === 'custom' ? h('span', null, 'A per-job URL is stored in the job’s manifest on disk — don’t embed tokens in it; a named secret sends the Authorization header without the value ever touching the job record.') : null,
-							s.webhookMode === 'off' ? h('span', null, 'Sends "" — this job posts no lifecycle notifications.') : null))),
-				h('div', { class: 'checkrow' },
-					h('div', { style: 'width:15px' }),
-					h('div', null, h('div', { class: 'ol' }, 'Auto-resume'),
-						h('div', { class: 'oh', style: 'margin-top:6px' },
-							tri(s.autoResume === 'on' ? 'custom' : s.autoResume, (v) => { s.autoResume = v === 'custom' ? 'on' : v; }),
-							h('div', { style: 'margin-top:5px' }, 'Transient failures retry on a backoff, up to 3 attempts; the counter resets on progress. "Custom" forces it on for this job.')))),
+							s.webhookMode === 'custom' ? this.credentialRow() : null,
+							s.webhookMode === 'custom' ? h('span', null, 'Status updates post to this URL. The URL is saved with the job record, so don’t put passwords or tokens in it; a secret picked above rides a header on each delivery, and the job stores only the secret’s name.') : null,
+							s.webhookMode === 'off' ? h('span', null, 'This job sends no status updates, even when a global webhook is set.') : null))),
 				h('div', { class: 'checkrow' },
 					h('div', { style: 'width:15px' }),
 					h('div', null, h('div', { class: 'ol' }, 'Tag'),
 						h('div', { class: 'oh', style: 'margin-top:6px' },
-							h('input', { class: 'input', style: 'max-width:220px;font-size:11.5px', placeholder: 'nightly', value: s.tag, oninput: (e) => { s.tag = e.target.value; } }),
-							h('div', { style: 'margin-top:4px' }, 'Free-form label · exact-match filter on the jobs list.')))));
+							h('input', { class: 'input', style: 'max-width:220px;font-size:11.5px', placeholder: 'nightly', value: s.tag,
+								maxlength: '64', oninput: (e) => { s.tag = e.target.value; } }),
+							h('div', { style: 'margin-top:4px' }, 'A label you pick so you can find this job later. Up to 64 characters; the jobs list filter matches it exactly.')))));
 		},
 
 		/* ---------- assembly ---------- */
@@ -974,7 +1183,6 @@ VIF.vod = VIF.vod || {};
 				s.queueDepth ? h('div', { class: 'fstat' }, h('div', { class: 'fl' }, 'Queue'),
 					h('div', { class: 'fv' }, s.queueDepth + ' job' + (s.queueDepth === 1 ? '' : 's') + ' ahead of ' + (n > 1 ? 'these' : 'this one') + '; starts when a worker frees up')) : null,
 				h('div', { class: 'sp' },
-					h('button', { class: 'btn', onclick: () => modal('Request JSON' + (n > 1 ? ' — one job per file' : ''), h('pre', null, JSON.stringify(this.requestPreview(), null, 2))) }, 'View request JSON'),
 					h('button', { class: 'btn btn-pri', disabled: s.submitting,
 						title: 'POST /v2/vif/vod/jobs' + (n > 1 ? ' × ' + n : '') + '\nRuns in the background; the jobs list tracks progress.',
 						onclick: () => this.submit() },

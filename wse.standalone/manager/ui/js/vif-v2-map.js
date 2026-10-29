@@ -46,6 +46,10 @@
 
     // Fields whose values are credentials, by their flat name. These follow the
     // tri-state write rule and are never echoed by a v2 read.
+    //
+    // Their *_secret counterparts are deliberately NOT here: a reference is a NAME, echoed
+    // by every read, and round-trips like any ordinary member — vi_service_api_key_secret
+    // rides SCALAR_PATHS below and the detector references ride the detector builders.
     var SECRET_FLAT_PATHS = {
         'vi_service_api_key': ['config', 'service', 'apiKey'],
         'vlm_analysis.api_key': ['config', 'detector', 'endpoint', 'apiKey'],
@@ -70,6 +74,7 @@
         frame_buffer: ['config', 'processing', 'bufferFrames'],
         gpu_ids: ['config', 'processing', 'gpuIds'],
         vi_service_url: ['config', 'service', 'url'],
+        vi_service_api_key_secret: ['config', 'service', 'apiKeySecret'],
         model_idle_timeout_seconds: ['config', 'service', 'modelIdleTimeoutSeconds'],
         save_images: ['config', 'diagnostics', 'saveImages'],
         log_timing: ['config', 'diagnostics', 'timingLogSeconds'],
@@ -93,6 +98,15 @@
     /** Copies `value` to `target[key]` only when the source member is set. */
     function carry(target, key, value) {
         if (value !== undefined && value !== null) target[key] = value;
+    }
+
+    /**
+     * A typed value without the whitespace a paste brings along; a blank stays the blank
+     * it is, since a cleared member has to travel as one. The server trims these three
+     * the same way, so what the form shows is what the document holds.
+     */
+    function trimmed(value) {
+        return typeof value === 'string' ? value.trim() : value;
     }
 
     /** An object with no own keys reads as "not there" on both sides. */
@@ -179,6 +193,8 @@
             OVERLAY_PROPS.forEach(function (pair) { carry(properties, pair[1], listener[pair[0]]); });
         } else if (listener.type === 'webhook') {
             carry(properties, 'url', listener.url);
+            carry(properties, 'credential_secret', listener.credentialSecret);
+            carry(properties, 'credential_header', listener.credentialHeader);
         } else if (listener.type === 'log') {
             carry(properties, 'log_file_name', listener.fileName);
             carry(properties, 'log_file_path', listener.filePath);
@@ -210,7 +226,12 @@
         if (type === 'overlay') {
             OVERLAY_PROPS.forEach(function (pair) { carry(listener, pair[0], properties[pair[1]]); });
         } else if (type === 'webhook') {
-            carry(listener, 'url', properties.url);
+            carry(listener, 'url', trimmed(properties.url));
+            // A NAME, not a value: it round-trips like any ordinary member rather than
+            // through the credential tri-state, and the page emits the whole listener
+            // map on every save - dropping it here would erase it from disk.
+            carry(listener, 'credentialSecret', trimmed(properties.credential_secret));
+            carry(listener, 'credentialHeader', trimmed(properties.credential_header));
         } else if (type === 'log') {
             carry(listener, 'fileName', properties.log_file_name);
             carry(listener, 'filePath', properties.log_file_path);
@@ -303,6 +324,7 @@
         var endpoint = detector.endpoint || {};
         carry(va, 'endpoint_url', endpoint.url);
         carry(va, 'model_name', endpoint.model);
+        carry(va, 'api_key_secret', endpoint.apiKeySecret);
         carry(va, 'request_timeout_seconds', endpoint.timeoutSeconds);
         carry(va, 'max_concurrent_requests', endpoint.maxConcurrentRequests);
         // The mode is explicit in v2; flattened back, only the active mode's
@@ -329,14 +351,25 @@
         return va;
     }
 
+    function flatMotionAnalysis(detector) {
+        var ma = {};
+        carry(ma, 'sensitivity', detector.sensitivity);
+        carry(ma, 'min_displacement', detector.minDisplacement);
+        carry(ma, 'merge_distance', detector.mergeDistance);
+        carry(ma, 'suppress_global_changes', detector.suppressGlobalChanges);
+        return ma;
+    }
+
     function flatSyntheticAnalysis(detector) {
         var sy = {};
         var endpoint = detector.endpoint || {};
         carry(sy, 'endpoint', endpoint.address);
+        carry(sy, 'api_key_secret', endpoint.apiKeySecret);
         if (endpoint.tls) {
             carry(sy, 'use_tls', endpoint.tls.enabled);
             carry(sy, 'tls_ca_cert', endpoint.tls.caCert);
             carry(sy, 'tls_client_cert', endpoint.tls.clientCert);
+            carry(sy, 'tls_client_key_secret', endpoint.tls.clientKeySecret);
         }
         carry(sy, 'function_id', endpoint.functionId);
         carry(sy, 'request_timeout_seconds', endpoint.timeoutSeconds);
@@ -345,11 +378,27 @@
         return sy;
     }
 
+    /**
+     * A verify detector as the pages read it: the scoring endpoint in the synthetic
+     * block's shape, the review endpoint in the VLM block's, and the two thresholds.
+     */
+    function flatVerifyAnalysis(detector) {
+        var vf = {};
+        carry(vf, 'flag_threshold', detector.flagThreshold);
+        carry(vf, 'strong_threshold', detector.strongThreshold);
+        vf.svd = flatSyntheticAnalysis({ endpoint: detector.endpoint });
+        vf.vlm = flatVlmAnalysis({ endpoint: detector.review });
+        return vf;
+    }
+
     var FLAT_ANALYSIS = {
         object: ['object_analysis', flatObjectAnalysis],
         scene: ['scene_analysis', flatSceneAnalysis],
         vlm: ['vlm_analysis', flatVlmAnalysis],
-        synthetic: ['synthetic_analysis', flatSyntheticAnalysis]
+        motion: ['motion_analysis', flatMotionAnalysis],
+        synthetic: ['synthetic_analysis', flatSyntheticAnalysis],
+        verify: ['verify_analysis', flatVerifyAnalysis],
+        chain: ['chain_detector', function (detector) { return JSON.parse(JSON.stringify(detector)); }]
     };
 
     // ── config: v2 -> v1 flat ────────────────────────────────────────────────
@@ -365,6 +414,14 @@
             flat.detector_type = detector.type;
             var mapping = FLAT_ANALYSIS[detector.type];
             flat[mapping[0]] = mapping[1](detector);
+            if (detector.type === 'verify') {
+                // The form edits the two endpoints in the synthetic and VLM blocks it
+                // already has; the verify block keeps the thresholds alone.
+                flat.synthetic_analysis = flat.verify_analysis.svd;
+                flat.vlm_analysis = flat.verify_analysis.vlm;
+                delete flat.verify_analysis.svd;
+                delete flat.verify_analysis.vlm;
+            }
             if (detector.type === 'object' && detector.tracking) {
                 // Stream-level in v1, a tracking member in v2.
                 carry(flat, 'ignore_untracked_objects', detector.tracking.ignoreUntracked);
@@ -391,6 +448,7 @@
 
         var service = config.service || {};
         carry(flat, 'vi_service_url', service.url);
+        carry(flat, 'vi_service_api_key_secret', service.apiKeySecret);
         carry(flat, 'model_idle_timeout_seconds', service.modelIdleTimeoutSeconds);
 
         var diagnostics = config.diagnostics || {};
@@ -535,10 +593,26 @@
             carry(flat, 'nvidia_gpu_type', host.gpu.model);
             carry(flat, 'nvidia_driver_version', host.gpu.driverVersion);
             carry(flat, 'cuda_version', host.gpu.cudaVersion);
-            if (isSet(host.gpu.utilizationAvg)) flat.gpu_avg = { 0: host.gpu.utilizationAvg };
-            if (isSet(host.gpu.memoryAvg)) flat.gpu_memory_avg = { 0: host.gpu.memoryAvg };
-            if (isSet(host.gpu.encodeAvg)) flat.gpu_encode_avg = { 0: host.gpu.encodeAvg };
-            if (isSet(host.gpu.decodeAvg)) flat.gpu_decode_avg = { 0: host.gpu.decodeAvg };
+            if (Array.isArray(host.gpu.devices) && host.gpu.devices.length) {
+                flat.gpu_avg = {};
+                flat.gpu_memory_avg = {};
+                flat.gpu_encode_avg = {};
+                flat.gpu_decode_avg = {};
+                host.gpu.devices.forEach(function (device) {
+                    if (device.id == null) return;
+                    var id = String(device.id);
+                    // Keep null entries so a device with a missing metric remains a row.
+                    flat.gpu_avg[id] = isSet(device.utilizationAvg) ? device.utilizationAvg : null;
+                    flat.gpu_memory_avg[id] = isSet(device.memoryAvg) ? device.memoryAvg : null;
+                    flat.gpu_encode_avg[id] = isSet(device.encodeAvg) ? device.encodeAvg : null;
+                    flat.gpu_decode_avg[id] = isSet(device.decodeAvg) ? device.decodeAvg : null;
+                });
+            } else {
+                if (isSet(host.gpu.utilizationAvg)) flat.gpu_avg = { 0: host.gpu.utilizationAvg };
+                if (isSet(host.gpu.memoryAvg)) flat.gpu_memory_avg = { 0: host.gpu.memoryAvg };
+                if (isSet(host.gpu.encodeAvg)) flat.gpu_encode_avg = { 0: host.gpu.encodeAvg };
+                if (isSet(host.gpu.decodeAvg)) flat.gpu_decode_avg = { 0: host.gpu.decodeAvg };
+            }
         } else {
             // The v1 renderer gates its GPU cards on this exact sentinel.
             flat.nvidia_gpu_type = 'unknown';
@@ -645,6 +719,17 @@
         return detector;
     }
 
+    function writeMotionDetector(flat) {
+        var ma = flat.motion_analysis || {};
+        return {
+            type: 'motion',
+            sensitivity: orNull(ma.sensitivity),
+            minDisplacement: orNull(ma.min_displacement),
+            mergeDistance: orNull(ma.merge_distance),
+            suppressGlobalChanges: orNull(ma.suppress_global_changes)
+        };
+    }
+
     /** The analysis family the flat block describes - the same presence rule VIS and the form use. */
     function vlmModeOf(va) {
         if (isSet(va.system_prompt) || isSet(va.user_prompt) || isSet(va.response_schema)) return 'custom';
@@ -671,6 +756,9 @@
             detect: null,
             custom: null
         };
+        // A reference is an ordinary member: written when set, null when not — the null is
+        // what lets a save that switched the slot back to a literal clear the stored name.
+        detector.endpoint.apiKeySecret = orNull(va.api_key_secret);
         putSecret(detector.endpoint, 'apiKey', secrets, 'vlm_analysis.api_key', va.api_key);
         if (mode === 'detect') {
             detector.detect = {
@@ -699,11 +787,14 @@
             type: 'synthetic',
             endpoint: {
                 address: orNull(sy.endpoint),
+                // The references are ordinary members: written when set, null when not.
+                apiKeySecret: orNull(sy.api_key_secret),
                 functionId: orNull(sy.function_id),
                 tls: {
                     enabled: orNull(sy.use_tls),
                     caCert: orNull(sy.tls_ca_cert),
-                    clientCert: orNull(sy.tls_client_cert)
+                    clientCert: orNull(sy.tls_client_cert),
+                    clientKeySecret: orNull(sy.tls_client_key_secret)
                 }
             },
             classificationThreshold: orNull(sy.classification_threshold)
@@ -729,11 +820,191 @@
         if (value !== undefined) target[key] = value;
     }
 
+    function writeVerifyDetector(flat, secrets) {
+        var sy = flat.synthetic_analysis || {};
+        var va = flat.vlm_analysis || {};
+        var vf = flat.verify_analysis || {};
+        var detector = {
+            type: 'verify',
+            flagThreshold: orNull(vf.flag_threshold),
+            strongThreshold: orNull(vf.strong_threshold),
+            endpoint: {
+                address: orNull(sy.endpoint),
+                apiKeySecret: orNull(sy.api_key_secret),
+                functionId: orNull(sy.function_id),
+                tls: {
+                    enabled: orNull(sy.use_tls),
+                    caCert: orNull(sy.tls_ca_cert),
+                    clientCert: orNull(sy.tls_client_cert),
+                    clientKeySecret: orNull(sy.tls_client_key_secret)
+                }
+            },
+            review: {
+                url: orNull(va.endpoint_url),
+                model: orNull(va.model_name),
+                apiKeySecret: orNull(va.api_key_secret),
+                timeoutSeconds: orNull(va.request_timeout_seconds)
+            }
+        };
+        putSecret(detector.endpoint, 'apiKey', secrets, 'synthetic_analysis.api_key', sy.api_key);
+        putSecret(detector.endpoint.tls, 'clientKey', secrets, 'synthetic_analysis.tls_client_key', sy.tls_client_key);
+        putSecret(detector.review, 'apiKey', secrets, 'vlm_analysis.api_key', va.api_key);
+        return detector;
+    }
+
+    // Where each flat secret lands inside a chain stage's detector, by stage type.
+    var STAGE_SECRET_MEMBERS = {
+        vlm: { 'vlm_analysis.api_key': ['endpoint', 'apiKey'] },
+        synthetic: {
+            'synthetic_analysis.api_key': ['endpoint', 'apiKey'],
+            'synthetic_analysis.tls_client_key': ['endpoint', 'tls', 'clientKey']
+        }
+    };
+
+    /** The secrets-map key of a flat secret path scoped to one chain stage. */
+    function stageSecretPath(stageName, flatPath) {
+        return 'chain_stages.' + stageName + '.' + flatPath;
+    }
+
+    function stageSecrets(stageName, type, flat, touched, cleared) {
+        var out = {};
+        Object.keys(STAGE_SECRET_MEMBERS[type]).forEach(function (flatPath) {
+            var parts = flatPath.split('.');
+            var value = cleared.indexOf(flatPath) !== -1
+                ? '' : secretValue(!!touched[flatPath], ((flat || {})[parts[0]] || {})[parts[1]]);
+            if (value !== undefined) out[stageSecretPath(stageName, flatPath)] = value;
+        });
+        return out;
+    }
+
+    /**
+     * The secrets-map entries for one VLM stage's save, keyed by stageSecretPath():
+     * `flat` is the stage's flat section read, `touched` maps flat secret paths the
+     * operator typed into. secretValue()'s tri-state applies.
+     */
+    function stageSecretsForVlm(stageName, flat, touched) {
+        return stageSecrets(stageName, 'vlm', flat, touched, []);
+    }
+
+    /** As stageSecretsForVlm, for a synthetic stage on NVCF: its stored mTLS client key clears. */
+    function stageSecretsForNvcfSvd(stageName, flat, touched) {
+        return stageSecrets(stageName, 'synthetic', flat, touched, ['synthetic_analysis.tls_client_key']);
+    }
+
+    /** As stageSecretsForVlm, for a synthetic stage on a self-hosted endpoint: its stored NVCF key clears. */
+    function stageSecretsForSelfHostedSvd(stageName, flat, touched) {
+        return stageSecrets(stageName, 'synthetic', flat, touched, ['synthetic_analysis.api_key']);
+    }
+
+    function unsetPath(target, path) {
+        var node = target;
+        for (var i = 0; i < path.length - 1; i++) {
+            if (!node[path[i]] || typeof node[path[i]] !== 'object') return;
+            node = node[path[i]];
+        }
+        delete node[path[path.length - 1]];
+    }
+
+    function applyStageSecrets(stage, secrets) {
+        var members = STAGE_SECRET_MEMBERS[stage.detector && stage.detector.type] || {};
+        Object.keys(members).forEach(function (flatPath) {
+            var key = stageSecretPath(stage.name, flatPath);
+            if (!(key in secrets)) return;
+            if (secrets[key] === undefined) unsetPath(stage.detector, members[flatPath]);
+            else put(stage.detector, members[flatPath], secrets[key]);
+        });
+    }
+
+    // Maps whose keys are operator data: the patch replaces them whole, member
+    // merging would resurrect entries the form removed.
+    var DETECTOR_PATCH_OPAQUE = { classHints: 1, classSensitivity: 1, responseSchema: 1 };
+
+    function mergeDetectorMember(stored, patch) {
+        var merged = {};
+        if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+            Object.keys(stored).forEach(function (key) { merged[key] = stored[key]; });
+        }
+        Object.keys(patch).forEach(function (key) {
+            var value = patch[key];
+            if (value === null || value === undefined) { delete merged[key]; return; }
+            if (typeof value === 'object' && !Array.isArray(value) && !DETECTOR_PATCH_OPAQUE[key]) {
+                merged[key] = mergeDetectorMember(merged[key], value);
+            } else {
+                merged[key] = value;
+            }
+        });
+        return merged;
+    }
+
+    /**
+     * The next write value of a chain stage's detector. The detector writers emit
+     * single-detector merge patches - a member with a value sets, null removes, an
+     * absent member keeps what is stored - and for a standalone detector the server
+     * applies them against the stored document. A chain's stages array replaces
+     * wholesale, so the same semantics are applied here, against the detector the
+     * stage loaded. Opaque members replace whole, a patch of another detector type
+     * replaces everything, and stored secret members never ride along: a stage's
+     * keys travel the secrets map and are kept server-side by stage name.
+     */
+    function applyDetectorPatch(stored, patch) {
+        if (!stored || typeof stored !== 'object' || stored.type !== patch.type) {
+            return mergeDetectorMember(null, patch);
+        }
+        var base = JSON.parse(JSON.stringify(stored));
+        var members = STAGE_SECRET_MEMBERS[patch.type] || {};
+        Object.keys(members).forEach(function (flatPath) { unsetPath(base, members[flatPath]); });
+        return mergeDetectorMember(base, patch);
+    }
+
+    /**
+     * The chain detector a save writes: `flat.chain_detector`, already collected by the
+     * chain editor, with each stage's secrets applied from `secrets` keyed by
+     * stageSecretPath(). A secret's absent value leaves the member out; '' clears it.
+     *
+     * The write is a merge patch, so an omitted chain-level member keeps its stored value
+     * and only a null removes it. `flat.chain_detector_stored`, the detector the editor
+     * loaded or last saved, makes removals reach the wire: each chain-level member and
+     * decision-listener property it sets that the collected detector lacks rides as null.
+     * A create passes no stored base and stays null-free.
+     */
+    function writeChainDetector(flat, secrets) {
+        var detector = JSON.parse(JSON.stringify(flat.chain_detector || { type: 'chain', stages: [] }));
+        (detector.stages || []).forEach(function (stage) {
+            applyStageSecrets(stage, secrets || {});
+        });
+        if (flat.chain_detector_stored) nullChainRemovals(detector, flat.chain_detector_stored);
+        return detector;
+    }
+
+    var CHAIN_LEVEL_MEMBERS = ['resultMode', 'maxRings', 'decisionTimeoutSeconds',
+        'dispatchIntermediateRings', 'decisionListener'];
+
+    function nullChainRemovals(detector, stored) {
+        CHAIN_LEVEL_MEMBERS.forEach(function (member) {
+            if (isSet(stored[member]) && !isSet(detector[member])) detector[member] = null;
+        });
+        var listener = detector.decisionListener;
+        var storedListener = stored.decisionListener;
+        if (!isObject(listener) || !isObject(storedListener) || !isObject(storedListener.properties)) return;
+        if (!isSet(listener.properties)) {
+            listener.properties = null;
+        } else if (isObject(listener.properties)) {
+            Object.keys(storedListener.properties).forEach(function (key) {
+                if (!Object.prototype.hasOwnProperty.call(listener.properties, key)) listener.properties[key] = null;
+            });
+        }
+    }
+
+    function isObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }
+
     var WRITE_DETECTOR = {
         object: writeObjectDetector,
         scene: writeSceneDetector,
         vlm: writeVlmDetector,
-        synthetic: writeSyntheticDetector
+        motion: writeMotionDetector,
+        synthetic: writeSyntheticDetector,
+        verify: writeVerifyDetector,
+        chain: writeChainDetector
     };
 
     // ── config writes: v1 flat -> v2 patch / create body ─────────────────────
@@ -799,7 +1070,9 @@
      * for unset semantics are pruned back out.
      */
     function groupFromFlat(flat, options) {
-        var body = pruneNulls(configPatchFromFlat(flat, options));
+        var patch = configPatchFromFlat(flat, options);
+        var body = pruneNulls(patch);
+        if (flat.detector_type === 'chain') body.config.detector = patch.config.detector;
         body.name = deriveName(flat.app_name, flat.stream_name);
         body.match = {
             application: flat.app_name,
@@ -829,6 +1102,9 @@
         if (isSet(flat.vi_service_url)) put(patch, ['config', 'service', 'url'], flat.vi_service_url);
         var serviceKey = secretOf(options.secrets, 'vi_service_api_key', flat.vi_service_api_key);
         if (serviceKey !== undefined) put(patch, ['config', 'service', 'apiKey'], serviceKey);
+        if (isSet(flat.vi_service_api_key_secret)) {
+            put(patch, ['config', 'service', 'apiKeySecret'], flat.vi_service_api_key_secret);
+        }
         if (isSet(flat.use_transcoder)) {
             put(patch, ['config', 'processing', 'frameSource'], FRAME_SOURCE[flat.use_transcoder]);
         }
@@ -847,7 +1123,41 @@
                 patch.concurrentExecutions[kind] = { _default: flat.concurrent_executions[kind]['default'] };
             });
         }
+        if (flat.verify_analysis && typeof flat.verify_analysis === 'object') {
+            var verify = verifyBaselinePatch(flat.verify_analysis, options.secrets);
+            if (verify) put(patch, ['detectors', 'verify'], verify);
+        }
         return pruneEmptyObjects(patch);
+    }
+
+    function carryPatch(target, key, value) {
+        if (value !== undefined) target[key] = value;
+    }
+
+    /**
+     * The default config's verify baseline as a merge patch: a member with a value writes
+     * it, null clears the stored one, absent leaves it alone. Null when nothing is stated.
+     */
+    function verifyBaselinePatch(vf, secrets) {
+        var sy = vf.svd || {};
+        var va = vf.vlm || {};
+        var detector = { type: 'verify' };
+        carryPatch(detector, 'flagThreshold', vf.flag_threshold);
+        carryPatch(detector, 'strongThreshold', vf.strong_threshold);
+        var endpoint = {};
+        carryPatch(endpoint, 'address', sy.endpoint);
+        carryPatch(endpoint, 'functionId', sy.function_id);
+        putSecret(endpoint, 'apiKey', secrets, 'verify_analysis.svd.api_key', sy.api_key);
+        carryPatch(endpoint, 'apiKeySecret', sy.api_key_secret);
+        var review = {};
+        carryPatch(review, 'url', va.endpoint_url);
+        carryPatch(review, 'model', va.model_name);
+        carryPatch(review, 'timeoutSeconds', va.request_timeout_seconds);
+        putSecret(review, 'apiKey', secrets, 'verify_analysis.vlm.api_key', va.api_key);
+        carryPatch(review, 'apiKeySecret', va.api_key_secret);
+        if (Object.keys(endpoint).length) detector.endpoint = endpoint;
+        if (Object.keys(review).length) detector.review = review;
+        return Object.keys(detector).length > 1 ? detector : null;
     }
 
     function pruneEmptyObjects(value) {
@@ -870,15 +1180,99 @@
      * effective endpoint by reference, so the stored key applies server-side
      * without ever reaching the browser.
      */
-    function probeRequestFromV1(flat, fallbackGroupName) {
+    function nonBlank(value) {
+        if (!isSet(value)) return undefined;
+        var text = String(value).trim();
+        return text === '' ? undefined : text;
+    }
+
+    /**
+     * A probe of an SVD endpoint by value: the address, transport and credentials as
+     * typed, blanks left out. Probing a stored config or the default baseline by
+     * reference is the caller's own request.
+     */
+    function svdProbeRequestFromV1(flat) {
+        var request = {};
+        carry(request, 'address', nonBlank(flat.endpoint));
+        var tls = {};
+        carry(tls, 'enabled', flat.use_tls);
+        carry(tls, 'caCert', nonBlank(flat.tls_ca_cert));
+        carry(tls, 'clientCert', nonBlank(flat.tls_client_cert));
+        carry(tls, 'clientKey', nonBlank(flat.tls_client_key));
+        if (Object.keys(tls).length) request.tls = tls;
+        carry(request, 'apiKey', nonBlank(flat.api_key));
+        carry(request, 'functionId', nonBlank(flat.function_id));
+        return request;
+    }
+
+    function probeRequestFromV1(flat, fallbackGroupName, detectorType) {
         var request = {};
         if (isSet(flat.endpoint_url) && String(flat.endpoint_url).trim() !== '') {
             request.url = flat.endpoint_url;
         } else {
             request.streamGroupConfig = fallbackGroupName || 'default';
+            if (nonBlank(detectorType)) request.detectorType = String(detectorType).trim();
         }
         if (isSet(flat.api_key) && flat.api_key !== '') request.apiKey = flat.api_key;
         return request;
+    }
+
+    /**
+     * The VLM Verify request for one endpoint slot. A picked secret that is the saved one,
+     * against the saved URL, probes by reference, exactly as the stream would connect; any
+     * other picked name rides along by name with the URL the form shows; the server accepts it
+     * only for an endpoint a stored config already uses that secret with.
+     *
+     * slot.config names a stream group config, slot.override an {application, stream} override;
+     * slot.urlAsStored compares the field with the stored URL (blank equals unset), while
+     * slot.untouchedUrl is the stricter test a typed-value slot goes by reference on.
+     */
+    function vlmProbePlan(slot) {
+        var hasReference = !!slot.config || !!slot.override;
+        if (slot.named && slot.picked) {
+            if (hasReference && slot.urlAsStored && slot.picked === (slot.storedKeySecret || '')) {
+                return { request: vlmReferenceRequest(slot) };
+            }
+            var byName = probeRequestFromV1({ endpoint_url: slot.endpoint }, slot.config || 'default');
+            byName.apiKeySecret = slot.picked;
+            return { request: byName };
+        }
+        if (!slot.named && !slot.typedKey && hasReference && slot.untouchedUrl) {
+            return { request: vlmReferenceRequest(slot) };
+        }
+        if (!slot.named && !slot.typedKey && !slot.inheritedKey && hasReference) {
+            return { request: vlmReferenceAt(slot, slot.endpoint) };
+        }
+        if (slot.named) {
+            // Nothing picked: the slot inherits, so the stored config's own effective key is
+            // the honest one, at whatever URL the form shows.
+            if (hasReference) {
+                return { request: slot.urlAsStored ? vlmReferenceRequest(slot) : vlmReferenceAt(slot, slot.endpoint) };
+            }
+            return { request: probeRequestFromV1(
+                { endpoint_url: slot.typedUrl ? slot.endpoint : '', api_key: '' }, slot.config || 'default') };
+        }
+        return { request: probeRequestFromV1(
+            { endpoint_url: slot.endpoint, api_key: slot.typedKey || slot.inheritedKey || '' },
+            slot.config || 'default') };
+    }
+
+    /** The reference's stored key, sent to {@code url} instead of the reference's own. */
+    function vlmReferenceAt(slot, url) {
+        var request = vlmReferenceRequest(slot);
+        request.url = url;
+        return request;
+    }
+
+    function vlmReferenceRequest(slot) {
+        if (!slot.config) {
+            var request = { application: slot.override.application, stream: slot.override.stream };
+            if (nonBlank(slot.detectorType)) request.detectorType = String(slot.detectorType).trim();
+            return request;
+        }
+        var byConfig = probeRequestFromV1({}, slot.config, slot.detectorType);
+        if (slot.stage) byConfig.stage = slot.stage;
+        return byConfig;
     }
 
     /** v1 thumbnail query names -> the v2 route's. */
@@ -922,7 +1316,26 @@
         defaultPatchFromV1: defaultPatchFromV1,
         listenerFromV1: listenerFromV1,
         listenersPatchFromV1: listenersPatchFromV1,
+        writeChainDetector: writeChainDetector,
+        applyDetectorPatch: applyDetectorPatch,
+        stageSecretPath: stageSecretPath,
+        stageSecretsForVlm: stageSecretsForVlm,
+        stageSecretsForNvcfSvd: stageSecretsForNvcfSvd,
+        stageSecretsForSelfHostedSvd: stageSecretsForSelfHostedSvd,
+        // per-type detector blocks, for stage-scoped reuse
+        flatObjectAnalysis: flatObjectAnalysis,
+        flatSceneAnalysis: flatSceneAnalysis,
+        flatVlmAnalysis: flatVlmAnalysis,
+        flatMotionAnalysis: flatMotionAnalysis,
+        flatSyntheticAnalysis: flatSyntheticAnalysis,
+        writeObjectDetector: writeObjectDetector,
+        writeSceneDetector: writeSceneDetector,
+        writeVlmDetector: writeVlmDetector,
+        writeMotionDetector: writeMotionDetector,
+        writeSyntheticDetector: writeSyntheticDetector,
         probeRequestFromV1: probeRequestFromV1,
+        vlmProbePlan: vlmProbePlan,
+        svdProbeRequestFromV1: svdProbeRequestFromV1,
         thumbnailParamsFromV1: thumbnailParamsFromV1,
         secretValue: secretValue
     };

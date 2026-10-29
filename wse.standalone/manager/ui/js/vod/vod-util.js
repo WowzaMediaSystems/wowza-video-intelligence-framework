@@ -106,6 +106,16 @@ VIF.vod = VIF.vod || {};
 		return localDay(d) === localDay(new Date()) ? hms : localDay(d) + ' ' + hms;
 	}
 
+	/** Date and clock, always dated: today's date reads "today". For lists that
+	    mix ages, where a bare clock time would leave the day ambiguous. */
+	function fmtDayClock(instant) {
+		const ms = instant instanceof Date ? instant.getTime() : instant;
+		if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '';
+		const d = new Date(ms);
+		const hms = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+		return (localDay(d) === localDay(new Date()) ? 'today' : localDay(d)) + ' ' + hms;
+	}
+
 	function localDay(d) {
 		return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
 	}
@@ -183,6 +193,7 @@ VIF.vod = VIF.vod || {};
 		not_connected: 'the endpoint is down or loading: auto-resume retries patiently',
 		connect_failed: 'the endpoint is down or loading: auto-resume retries patiently',
 		detector_error: 'service error: auto-resume retries patiently',
+		endpoint_rejected: 'won’t retry: fix the endpoint credentials, then resume manually',
 		config_drift: 'won’t retry: fix the config, then resume manually',
 		coverage_shortfall: 'won’t retry: the source decodes short',
 		source_error: 'won’t retry: the source can’t be opened',
@@ -221,12 +232,37 @@ VIF.vod = VIF.vod || {};
 			desc: 'Scores keyframe-aligned clips of the file for AI-generated content.',
 			outs: 'outputs → synthetic_score, synthetic_logit, verdict, per_clip_scores[]',
 		},
+		chain: {
+			badge: 'CHN', name: 'Chain Analysis',
+			desc: 'Runs named stages over the same captured video window.',
+			outs: 'Results show every retained stage in execution order.',
+		},
+		verify: {
+			badge: 'VFY', name: 'Verify',
+			desc: 'Scores every window for AI-generated content; a vision-language model reviews what crosses the threshold.',
+			outs: 'outputs → verdict, windows[]{score, verdict}, review{verdict, confidence, attributes}',
+		},
 	};
 
+	/** The state as the UI speaks it: the wire's "pending" reads "queued", the word
+	    every other surface (sub-line, thumb, timing verb, state filter) already uses. */
+	function stateLabel(state) {
+		return state === 'pending' ? 'queued' : state;
+	}
+
 	function toast(msg, kind) {
-		const el = h('div', { class: 'toast' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '') }, msg);
-		document.getElementById('vod-toasts').appendChild(el);
-		setTimeout(() => el.remove(), kind === 'err' ? 9000 : kind === 'warn' ? 7000 : 4500);
+		VIF.core.toast(msg, kind, 'vod-toasts');
+	}
+
+	/* The Loop setting for the VOD players: one sticky flag for every playback
+	   page (report and verify report), host-scoped like the dashboard's
+	   thumbnail preference. Storage failing just means non-sticky. */
+	const PLAYER_LOOP_KEY = 'vif.vod.player-loop.' + window.location.host;
+	function playerLoopOn() {
+		try { return window.localStorage.getItem(PLAYER_LOOP_KEY) === '1'; } catch (e) { return false; }
+	}
+	function setPlayerLoop(on) {
+		try { window.localStorage.setItem(PLAYER_LOOP_KEY, on ? '1' : '0'); } catch (e) { /* non-sticky */ }
 	}
 
 	/**
@@ -240,6 +276,15 @@ VIF.vod = VIF.vod || {};
 		try {
 			window.localStorage.setItem('vif.stream-config.selected-stream.' + window.location.host,
 				(match.application || '') + '::' + (match.streamPattern || ''));
+		} catch (e) { /* fall through to the plain page open */ }
+		window.loadAjaxPluginContent('server', 'vif', 'stream-config.html', '');
+	}
+
+	/** Opens the Stream Configs editor on "+ New Stream Config" with the detector type preselected. */
+	function openNewStreamConfig(detectorType) {
+		try {
+			window.localStorage.setItem('vif.stream-config.selected-stream.' + window.location.host, '__new__');
+			window.localStorage.setItem('vif.stream-config.new-detector-type.' + window.location.host, detectorType);
 		} catch (e) { /* fall through to the plain page open */ }
 		window.loadAjaxPluginContent('server', 'vif', 'stream-config.html', '');
 	}
@@ -268,6 +313,7 @@ VIF.vod = VIF.vod || {};
 	V.fmtBytes = fmtBytes;
 	V.fmtMediaMs = fmtMediaMs;
 	V.fmtClock = fmtClock;
+	V.fmtDayClock = fmtDayClock;
 	V.fmtAgo = fmtAgo;
 	V.jobTimingTip = jobTimingTip;
 	V.fmtDurationMs = fmtDurationMs;
@@ -277,7 +323,11 @@ VIF.vod = VIF.vod || {};
 	V.causeLabel = causeLabel;
 	V.humanizeMs = humanizeMs;
 	V.DETECTOR_META = DETECTOR_META;
+	V.stateLabel = stateLabel;
 	V.toast = toast;
+	V.playerLoopOn = playerLoopOn;
+	V.setPlayerLoop = setPlayerLoop;
 	V.modal = modal;
 	V.openStreamConfig = openStreamConfig;
+	V.openNewStreamConfig = openNewStreamConfig;
 })(window.VIF.vod);

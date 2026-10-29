@@ -2,6 +2,7 @@ window.VIF_LISTENER_PROPERTIES = window.VIF_LISTENER_PROPERTIES || {};
 window.VIF_LISTENER_PROPERTIES['LogFileEvent'] = [
     { object_methods: ['batch'] },
     { scene_methods: ['immediate'] },
+    { motion_methods: ['batch'] },
     { vlm_methods: ['immediate'] },
     { synthetic_methods: ['immediate'] },
     { requires: [] },

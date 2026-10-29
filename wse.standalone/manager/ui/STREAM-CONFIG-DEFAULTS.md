@@ -73,6 +73,31 @@ These are defined inline under `window.VIF_LISTENER_PROPERTIES`:
 - `ObjectTracking` property defaults
 - all `regions_of_interest` item defaults
 
+**A `default` is also the field's placeholder, and a placeholder is a stored value.**
+`renderScalarField()` sets `input.placeholder` from `default`, and `syncPropertyFields()`
+stores `input.value !== '' ? input.value : (input.placeholder || '')` — so a field left
+blank saves its own example. That is harmless for a log file name and not for a
+destination, which is why `WebhookEvent2`'s `url`, `credential_secret` and `credential_header` carry no
+default. `src/test/js/vif-listener-fields.test.js` is the gate.
+
+### Listener Field Types
+
+`renderScalarField()` handles `boolean`, `number`, `select`, `string_list`, `text`
+(the fall-through), `separator`, and `secret`. `secret` is a name picker filled from
+`persist.secrets().get()`, cached for the page; a stored name that has since left the
+secrets document still shows, labelled `(not configured)`, so selecting the listener
+cannot silently drop it. It has its own branch in `syncPropertyFields()`, which stores
+`""` when nothing is picked rather than omitting the key — the save is a merge patch, so
+a member it leaves out keeps whatever the document already had, and `""` is what every
+reader treats as no reference. There is no literal counterpart and no "save as secret"
+flow here, because the field holds only a name.
+
+`WebhookEvent2` also gets a **Send test event** row under its fields, rendered by
+`renderWebhookTestRow()` rather than by the descriptor: it fires the listener whole
+(destination and credential together) through `POST /v2/vif/probes/webhook`. An
+untouched destination is tested by reference so the Engine resolves the stored
+credential; a URL edited in the field is tested without one.
+
 #### Examples include:
 
 - `OverlayEvent.fade_step`
