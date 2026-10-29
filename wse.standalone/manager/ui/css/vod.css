@@ -28,6 +28,7 @@
 .vif-vod a{color:var(--accent)}
 .vif-vod button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
 .vif-vod input,.vif-vod select,.vif-vod textarea{font:inherit;color:var(--ink)}
+.vif-vod input[type=checkbox]{accent-color:var(--accent)}
 .vif-vod :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .vif-vod .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .vif-vod .eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-52)}
@@ -36,7 +37,8 @@
 
 /* ---- page scaffolding ---- */
 .vif-vod .phead{display:flex;align-items:flex-end;padding:16px 0 10px;gap:16px;flex-wrap:wrap}
-.vif-vod .phead .crumb{font-size:11.5px;text-decoration:none;display:block;margin-bottom:2px;cursor:pointer}
+.vif-vod .phead .crumb{font-size:12.5px;font-weight:600;text-decoration:none;display:inline-block;margin-bottom:3px;cursor:pointer}
+.vif-vod .phead .crumb:hover{text-decoration:underline}
 .vif-vod .phead h2{margin:0;font-size:20px;font-weight:700}
 .vif-vod .phead h2.file{font-family:var(--mono);font-weight:600;font-size:16px;word-break:break-all}
 .vif-vod .phead .sp{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -54,7 +56,7 @@
 .vif-vod .btn-danger{border-color:var(--alert-color);color:var(--alert-color)}
 .vif-vod .btn-danger:hover{background:var(--alert-bg)}
 .vif-vod .btn[disabled]{opacity:.45;cursor:default;pointer-events:none}
-.vif-vod .seg{display:inline-flex;border:1px solid var(--accent);border-radius:3px;overflow:hidden}
+.vif-vod .seg{display:inline-flex;align-self:flex-start;border:1px solid var(--accent);border-radius:3px;overflow:hidden}
 .vif-vod .seg .opt{padding:5px 14px;font-size:12.5px;font-weight:600;white-space:nowrap;color:var(--ink-60);border-right:1px solid var(--accent);background:var(--bg);cursor:pointer}
 .vif-vod .seg .opt:last-child{border-right:none}
 .vif-vod .seg .opt.on{background:var(--accent);color:#fff}
@@ -77,11 +79,18 @@
 /* ---- tags & state chips ---- */
 .vif-vod .tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:3px;white-space:nowrap}
 .vif-vod .tag-n{background:var(--n200);color:var(--ink-78)}
+/* User-entered text on a chip is never case-transformed: uppercasing falsifies
+   it (ß becomes SS) and breaks searching for the tag as displayed. */
+.vif-vod .tag.verbatim{text-transform:none;letter-spacing:.02em;font-size:10.5px}
 .vif-vod .tag-a{background:var(--accent);color:#fff}
 .vif-vod .tag-o{border:1px solid var(--accent-600);color:var(--accent-600)}
 .vif-vod .tag-e{border:1px solid var(--alert-color);color:var(--alert-color)}
 .vif-vod .st{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;padding:3px 8px;border-radius:3px;text-transform:uppercase}
 .vif-vod .st-running{background:var(--accent);color:#fff}
+/* A live job's chip carries a small spinner; it leaves with the state. */
+.vif-vod .st-running::after{content:'';display:inline-block;width:8px;height:8px;margin-left:6px;border:1.5px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;vertical-align:-1px;animation:vif-spin .8s linear infinite}
+@keyframes vif-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.vif-vod .st-running::after{animation:none;border-top-color:rgba(255,255,255,.45)}}
 .vif-vod .st-pending{background:var(--n200);color:var(--ink-78)}
 .vif-vod .st-connecting{background:var(--warn-bg);color:var(--warn-color)}
 .vif-vod .st-completed{background:var(--good-bg);color:var(--good-color)}
@@ -95,9 +104,19 @@
 .vif-vod table.jobs{border-collapse:collapse;width:100%}
 .vif-vod table.jobs th{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-52);text-align:left;padding:10px 12px;border-bottom:1px solid var(--divider-strong)}
 .vif-vod table.jobs td{padding:11px 12px;border-bottom:1px solid var(--divider);vertical-align:middle;font-size:12.5px}
-.vif-vod .thumb{width:74px;height:42px;background:var(--n900);color:var(--n500);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;letter-spacing:.05em;text-transform:uppercase;text-align:center;line-height:1.3;overflow:hidden;flex-shrink:0}
+.vif-vod .thumb{width:128px;height:72px;background:var(--n900);color:var(--n500);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px;letter-spacing:.05em;text-transform:uppercase;text-align:center;line-height:1.3;overflow:hidden;flex-shrink:0}
 .vif-vod .thumb img{width:100%;height:100%;object-fit:cover}
+.vif-vod .thumb.thumb-glyph{flex-direction:column;gap:3px}
+.vif-vod .thumb.thumb-glyph img.tg{width:22px;height:22px;object-fit:contain;filter:brightness(0) invert(.75)}
 .vif-vod .fcell{display:flex;gap:11px;align-items:center}
+/* Narrow screens: the thumb gives ground first and the cells tighten, so the
+   text columns keep their shape instead of wrapping word by word. */
+@media (max-width:980px){
+	.vif-vod .thumb{width:96px;height:54px}
+	.vif-vod .thumb.thumb-glyph img.tg{width:18px;height:18px}
+	.vif-vod table.jobs td{padding:9px 8px}
+	.vif-vod table.jobs th{padding:8px 8px}
+}
 .vif-vod .fclick{cursor:pointer;border-radius:3px}
 .vif-vod .fclick:hover .fname,.vif-vod .fclick:focus-visible .fname{color:var(--accent);text-decoration:underline}
 .vif-vod .cfglink{color:var(--accent);text-decoration:none;cursor:pointer}
@@ -159,7 +178,15 @@
 .vif-vod .warnbanner{border:1px solid var(--warn-color);border-radius:3px;background:var(--warn-bg);padding:11px 15px;font-size:12.5px;color:var(--warn-color);word-break:break-word}
 
 /* ---- report ---- */
-.vif-vod .jgrid{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content minmax(0,1fr);gap:8px 12px;align-items:center;font-size:12.5px;color:var(--ink-52);margin-top:8px;max-width:760px}
+/* The detection-type line: the report's headline fact, above the labeled
+   grid and a step larger than it. */
+.vif-vod .dtline{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--ink);margin-top:10px;min-width:0}
+.vif-vod .dtline .dtlabel{color:var(--ink-40);font-weight:400}
+.vif-vod .dtline .dticon{width:18px;height:18px}
+.vif-vod .dtline .jmodel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-60);font-weight:500}
+.vif-vod .dtline .nvlogo{height:12px;flex-shrink:0;margin-left:2px}
+/* The facts grid rides in a quiet card under the detection-type line. */
+.vif-vod .jgrid{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content minmax(0,1fr);gap:8px 12px;align-items:center;font-size:12.5px;color:var(--ink-52);margin-top:8px;max-width:760px;background:var(--surface);border:1px solid var(--divider);border-radius:3px;padding:12px 16px}
 .vif-vod .jgrid .jlabel{color:var(--ink-40)}
 .vif-vod .jgrid .jvcell{min-width:0}
 .vif-vod .jgrid .jval,.vif-vod .jgrid .cfglink,.vif-vod .jgrid .jid{font-family:var(--mono);font-weight:600;font-size:12px}
@@ -195,10 +222,13 @@
 .vif-vod .wrow .wt{font-family:var(--mono);color:var(--ink-60);min-width:150px}
 .vif-vod .wrow .ws{font-family:var(--mono);font-weight:700;width:52px}
 .vif-vod .wrow.low{background:var(--n100)}
+.vif-vod .wlist .wrow[role="button"],.vif-vod .wlist .wblock[role="button"]{cursor:pointer}
+.vif-vod .wlist .wrow[role="button"]:hover,.vif-vod .wlist .wblock[role="button"]:hover{outline:1px solid var(--accent);outline-offset:-1px}
 .vif-vod .wrow.low .ws,.vif-vod .wrow.low .wv{color:var(--ink-52)}
 .vif-vod .strip{display:flex;gap:1px;height:34px;background:var(--n200);border-radius:3px;overflow:hidden}
 .vif-vod .strip>i{flex:1;background:var(--accent);min-width:1px}
 .vif-vod .strip>i.low{background:var(--n300)}
+.vif-vod .strip>i.pend{background:var(--n200)}
 .vif-vod .strip.syn>i:not(.low){background:var(--alert-color)}
 .vif-vod .axis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-40);margin-top:4px}
 .vif-vod .noframe{aspect-ratio:16/9;background:var(--n900);color:var(--n500);border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:20px;font-size:11.5px;line-height:1.5}
@@ -235,14 +265,13 @@
 .vif-vod .rbrow:hover summary .rawlink,.vif-vod .rbrow[open] summary .rawlink{opacity:1}
 .vif-vod .failband{margin:16px 0;border:1px solid var(--alert-color);border-radius:3px;background:var(--alert-bg);padding:13px 16px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
 .vif-vod .failband .fx{font-family:var(--mono);font-size:12px;color:var(--alert-color);word-break:break-word}
-.vif-vod .reason-lead{font-size:15px;line-height:1.6}
 .vif-vod .reason{font-size:13px;line-height:1.6;color:var(--ink-78)}
 
 /* ---- settings ---- */
 .vif-vod .setgrid{display:grid;grid-template-columns:1fr 1fr;gap:34px;padding:20px 0 30px}
 @media (max-width:980px){.vif-vod .setgrid{grid-template-columns:1fr}}
 .vif-vod .setgrid.one{grid-template-columns:1fr;max-width:720px}
-.vif-vod .setcard{display:flex;flex-direction:column;gap:13px}
+.vif-vod .setcard{display:flex;flex-direction:column;gap:13px;background:var(--bg);border:1px solid var(--divider-strong);border-radius:3px;padding:16px 18px}
 .vif-vod .lockrow{display:flex;gap:8px;font-size:12px;align-items:baseline}
 .vif-vod .lockrow .k{color:var(--ink-52);min-width:110px}
 .vif-vod .lockrow .v{font-family:var(--mono);word-break:break-all}
@@ -284,6 +313,8 @@
 .vif-vod .stripwrap .pcell{position:absolute;top:-3px;bottom:-3px;border:2px solid var(--ink);border-radius:2px;pointer-events:none;box-shadow:0 0 0 1px rgba(255,255,255,.55)}
 .vif-vod .stripwrap .strip i{cursor:pointer}
 .vif-vod .stripwrap .strip i:hover{outline:1px solid var(--accent);outline-offset:-1px}
+.vif-vod .stripwrap .strip i.pend{cursor:default}
+.vif-vod .stripwrap .strip i.pend:hover{outline:none}
 .vif-vod .stripcard{position:absolute;top:calc(100% + 8px);left:0;z-index:40;min-width:170px;max-width:320px;background:var(--n900);color:#fff;border-radius:6px;padding:8px 12px;font-size:11.5px;line-height:1.5;box-shadow:0 3px 14px rgba(0,0,0,.3);pointer-events:none}
 .vif-vod .stripcard .sch{font-family:var(--mono);font-size:10.5px;color:var(--n400);margin-bottom:3px}
 .vif-vod .stripcard .scb{word-break:break-word}
@@ -305,3 +336,110 @@
 .vif-vod .playbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .vif-vod .frame.vframe{padding:0;background:#000}
 .vif-vod .frame.vframe video{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#000}
+
+/* ---- verify report ---- */
+/* The verdict rides the SVD page's stat-card band (.rband/.rcell). */
+.vif-vod .nvline{display:flex;align-items:center;gap:10px;font-size:12px;margin:10px 0 8px;flex-wrap:wrap}
+.vif-vod .nvline .nvlogo{height:13px}
+.vif-vod .nvline .nvprog{margin-left:auto;font-size:11px}
+/* The verdict strip: one cell per window, its width the window's share of the media time. */
+.vif-vod .vstripblock{margin-bottom:2px}
+.vif-vod .strip.vstrip{height:14px;gap:1px;background:var(--n200)}
+.vif-vod .strip.vstrip.empty{background:var(--n200)}
+.vif-vod .vw{background:var(--n200)}
+.vif-vod .vw.vw-syn{background:var(--alert-color);opacity:.72}
+.vif-vod .vw.vw-syn.vw-strong{opacity:1}
+.vif-vod .vw.vw-real{background:var(--n300)}
+/* Flagged stays in the red family whatever the review said: hatched light red
+   means the model reviewed it, never a hue that could read as real. */
+.vif-vod .vw.vw-clr{background:repeating-linear-gradient(135deg,var(--alert-color) 0 3px,var(--alert-bg) 3px 6px);opacity:.8}
+.vif-vod .vw.vw-und{background:repeating-linear-gradient(135deg,var(--alert-color) 0 3px,var(--n200) 3px 6px);opacity:.55}
+.vif-vod .vw.vw-unk{background:repeating-linear-gradient(135deg,var(--n400) 0 3px,var(--n200) 3px 6px)}
+.vif-vod .vw.vw-pend{background:var(--n200)}
+.vif-vod .vstrip .vw.sel{box-shadow:inset 0 0 0 2px var(--ink);opacity:1}
+.vif-vod .vstripwrap .strip i.vw-pend{cursor:default}
+.vif-vod .vstripwrap .strip i.vw-pend:hover{outline:none}
+.vif-vod .vstriplegend{display:flex;margin:6px 0 0;font-size:10.5px;flex-wrap:wrap}
+.vif-vod .vstriplegend .vw{width:11px;height:11px;display:inline-block;border-radius:2px;flex-shrink:0}
+.vif-vod .vstriplegend .lc{color:var(--ink-40)}
+.vif-vod .vreviewhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.vif-vod .vreviewhead .vscope{font-size:11.5px;font-weight:600;color:var(--ink)}
+.vif-vod .vreviewhead .vrollup{margin-left:auto;font-family:var(--mono)}
+/* The player | Stage 2 grid follows the window width the way the generic
+   report's .rbody does: an even split that stacks below 980px. */
+.vif-vod .vgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;margin-top:18px;align-items:start}
+@media (max-width:980px){.vif-vod .vgrid{grid-template-columns:minmax(0,1fr)}}
+.vif-vod .vtl{width:100%;height:auto;display:block}
+.vif-vod .vtl .vpt.seek{cursor:pointer}
+.vif-vod .vtl .vpt:hover{stroke-width:4}
+.vif-vod .vlegend{display:inline-flex;gap:14px;margin-left:auto;font-size:10.5px;color:var(--ink-60)}
+.vif-vod .vlegend>span{display:inline-flex;align-items:center;gap:5px}
+.vif-vod .vlegend .lw{width:12px;height:0;border-top:2px solid var(--ink-52);display:inline-block}
+.vif-vod .vlegend .lw.syn{border-color:var(--alert-color)}
+.vif-vod .vlegend .lw.ok{border-color:var(--ink-52)}
+.vif-vod .vlegend .lw.clr{border-color:var(--alert-color);border-top-style:dashed}
+.vif-vod .vlegend .lw.thr{border-top-style:dashed}
+.vif-vod .vlegend .lw.ph{width:2px;height:11px;border:0;background:var(--ink)}
+.vif-vod .vselline{font-size:11px;color:var(--ink-60);margin-top:4px}
+/* Stage 2 lives in a column now, so the reasoning|rubric split follows the
+   column's own width (a viewport query can't see it), stacked when narrow. */
+/* Stage 2 rides in the same quiet card as the header facts grid. */
+.vif-vod .vreviewsec{container-type:inline-size;background:var(--surface);border:1px solid var(--divider);border-radius:3px;padding:14px 16px}
+.vif-vod .vreview{display:grid;grid-template-columns:minmax(0,1fr);gap:22px}
+.vif-vod .vmeta{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--ink-52);margin-top:10px;align-items:center}
+.vif-vod .vmeta b{font-weight:600;color:var(--ink)}
+.vif-vod .vattrs{border-top:1px solid var(--divider);padding-top:14px}
+@container (min-width:640px){
+  .vif-vod .vreview{grid-template-columns:minmax(0,1fr) 270px}
+  .vif-vod .vattrs{border-top:0;padding-top:0;border-left:1px solid var(--divider);padding-left:16px}
+}
+.vif-vod .vattr{margin-bottom:10px}
+.vif-vod .vattrh{display:flex;align-items:center;gap:7px}
+.vif-vod .sq{width:8px;height:8px;flex-shrink:0;border:1.5px solid var(--n400);box-sizing:border-box;display:inline-block}
+.vif-vod .sq.adv{background:var(--alert-color);border-color:var(--alert-color)}
+.vif-vod .sq.clr{border-color:var(--ink-52)}
+.vif-vod .vattrname{font-size:12.5px;font-weight:700}
+.vif-vod .vattrname.off{color:var(--ink-40);font-weight:600}
+.vif-vod .vattrnote{font-size:11.5px;line-height:1.5;color:var(--ink-60);margin-left:15px}
+.vif-vod .vrail{border-top:2px solid var(--divider);margin-top:26px;padding-top:12px}
+.vif-vod .vrailhead{margin-bottom:12px}
+.vif-vod .vband{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 32px}
+.vif-vod .vband .vstagekv{margin:8px 0 0;border-left:0;padding-left:0}
+.vif-vod .vband .gatechip{margin:8px 0 0}
+.vif-vod .vpage .rowbrowser{margin-top:24px}
+.vif-vod .vstagehead{display:flex;gap:10px;align-items:flex-start;margin-top:4px}
+.vif-vod .vstagekv{margin:8px 0 12px 12px;padding-left:14px;border-left:2px solid var(--n300);display:flex;flex-direction:column;gap:5px}
+.vif-vod .vkv{display:flex;justify-content:space-between;font-size:11.5px}
+.vif-vod .vkv>span:first-child{color:var(--ink-60)}
+.vif-vod .vkv .mono{font-weight:600}
+.vif-vod .gatechip{display:flex;flex-direction:column;gap:1px;padding:7px 11px;margin:10px 0 12px;background:var(--surface);border-top:1px solid var(--divider);border-bottom:1px solid var(--divider)}
+.vif-vod .gatechip.on{background:var(--accent-100);border-color:var(--accent-200)}
+.vif-vod .gatechip .gcl{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-52)}
+.vif-vod .gatechip.on .gcl{color:var(--accent-700)}
+.vif-vod .gatechip .gcx{font-size:11px;color:var(--ink-60)}
+.vif-vod .gatechip.on .gcx{color:var(--accent-700)}
+.vif-vod .vdel{display:flex;align-items:baseline;gap:8px;font-size:12px}
+.vif-vod .vdel .sq{align-self:center}
+.vif-vod .vdel .muted{color:var(--ink-52)}
+
+.vif-vod .chain-definition { padding: 4px 16px 12px; }
+.vif-vod .chain-stages { margin: 4px 0 12px; padding-left: 24px; }
+.vif-vod .chain-stages li { padding: 5px 0; }
+.vif-vod .chain-stages .tag { margin-left: 6px; }
+.vif-vod .chain-definition pre { max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vif-vod .chain-window { display: block; padding: 10px 12px; }
+.vif-vod .chain-window > summary { cursor: pointer; line-height: 1.5; list-style: none; }
+.vif-vod .chain-window > summary::-webkit-details-marker { display: none; }
+.vif-vod .chain-window > summary::before { content: '▸'; display: inline-block; width: 14px; }
+.vif-vod .chain-window[open] > summary::before { content: '▾'; }
+.vif-vod .chain-window > summary .tag { margin-left: 6px; }
+.vif-vod .chain-window > summary .wt { margin-right: 8px; }
+.vif-vod .chain-path { overflow-wrap: anywhere; }
+.vif-vod .chain-window-results { padding: 8px 4px; }
+.vif-vod .chain-executions { margin: 4px 0; padding-left: 24px; }
+.vif-vod .chain-executions > li { padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.vif-vod .chain-stage-heading { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.vif-vod .chain-content { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; max-height: 280px; overflow: auto; }
+.vif-vod .chain-detections { margin: 8px 0; padding-left: 18px; }
+.vif-vod .chain-detections > li { margin-bottom: 8px; overflow-wrap: anywhere; }
+.vif-vod .chain-skipped { padding: 6px 0; }

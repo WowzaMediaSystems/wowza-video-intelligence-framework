@@ -2,6 +2,7 @@ window.VIF_LISTENER_PROPERTIES = window.VIF_LISTENER_PROPERTIES || {};
 window.VIF_LISTENER_PROPERTIES['ObjectTracking'] = [
     { object_methods: ['immediate'] },
     { scene_methods: [] },
+    { motion_methods: [] },
     { vlm_methods: [] },
     { synthetic_methods: [] },
     { requires: ['LIVE_STREAM'] },

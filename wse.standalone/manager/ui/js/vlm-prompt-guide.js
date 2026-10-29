@@ -39,135 +39,158 @@
         return h;
     }
 
-    function templateButton(label, mode) {
-        var b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn-secondary';
-        b.textContent = label;
-        b.style.cssText = 'margin:0 0 8px;';
-        b.onclick = function () { useVlmPromptTemplate(mode); };
-        return b;
-    }
+    /** The prompt guide mounted in `root` (the page document, or a prefixed detector-section root). */
+    function guideIn(root) {
+        var prefix = (root.dataset && root.dataset.vifPrefix) || '';
+        var escHandler = null;
 
-    function renderGuide() {
-        var host = document.getElementById('vlm-prompt-guide');
-        if (!host) return;
-        host.innerHTML = '';
+        function el(id) {
+            return root.querySelector('#' + CSS.escape(prefix + id));
+        }
 
-        var tip = document.createElement('div');
-        tip.style.cssText = 'margin:0 0 12px; padding:8px 12px; background:#eef6ff; '
-            + 'border:1px solid #bcdcff; border-radius:6px; font-size:0.9em; color:#1a3a5a;';
-        tip.innerHTML = '💡 <strong>Tip:</strong> press a <strong>Use … defaults</strong> button below to '
-            + 'load that default into the System &amp; User Prompt fields, then edit it to fit your needs.';
-        host.appendChild(tip);
+        function templateButton(label, mode) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn-secondary';
+            b.textContent = label;
+            b.style.cssText = 'margin:0 0 8px;';
+            b.onclick = function () { useTemplate(mode); };
+            return b;
+        }
 
-        host.appendChild(prose(
-            'Every mode issues <strong>one VLM call per window</strong>. In Custom mode you write the '
-            + 'prompts yourself. The <strong>system prompt</strong> sets the model\'s role and standing '
-            + 'rules (persona, what to do / avoid); the <strong>user prompt</strong> is the per-window '
-            + 'request. Placeholders <code>' + PLACEHOLDERS + '</code> are substituted in <em>both</em> '
-            + 'prompts (<code>{class_list}</code> only when you set Classes).'
-        ));
+        function renderGuide() {
+            var host = el('vlm-prompt-guide');
+            if (!host) return;
+            host.innerHTML = '';
 
-        host.appendChild(prose(
-            '<strong>If you leave the Output Schema empty:</strong> with <em>no</em> Classes set, output is '
-            + 'free-form text (delivered as a single <code>description</code>). If you <em>do</em> set Classes, '
-            + 'the service automatically applies the default per-class schema below — you get structured '
-            + '<code>{class_name, reasoning}</code> results even without defining a schema.'
-        ));
+            var tip = document.createElement('div');
+            tip.style.cssText = 'margin:0 0 12px; padding:8px 12px; background:#eef6ff; '
+                + 'border:1px solid #bcdcff; border-radius:6px; font-size:0.9em; color:#1a3a5a;';
+            tip.innerHTML = '💡 <strong>Tip:</strong> press a <strong>Use … defaults</strong> button below to '
+                + 'load that default into the System &amp; User Prompt fields, then edit it to fit your needs.';
+            host.appendChild(tip);
 
-        var d = vlmDefaults();
-        if (!d) {
             host.appendChild(prose(
-                '<em>Live default prompts are unavailable (the VI service could not be reached). They are '
-                + 'used automatically when you leave a prompt blank; reload once the service is up to view them.</em>'
+                'Every mode issues <strong>one VLM call per window</strong>. In Custom mode you write the '
+                + 'prompts yourself. The <strong>system prompt</strong> sets the model\'s role and standing '
+                + 'rules (persona, what to do / avoid); the <strong>user prompt</strong> is the per-window '
+                + 'request. Placeholders <code>' + PLACEHOLDERS + '</code> are substituted in <em>both</em> '
+                + 'prompts (<code>{class_list}</code> only when you set Classes).'
             ));
-        } else {
-            if (d.detect) {
-                host.appendChild(heading('Detect defaults (class-aware — produce the default schema)'));
+
+            host.appendChild(prose(
+                '<strong>If you leave the Output Schema empty:</strong> with <em>no</em> Classes set, output is '
+                + 'free-form text (delivered as a single <code>description</code>). If you <em>do</em> set Classes, '
+                + 'the service automatically applies the default per-class schema below — you get structured '
+                + '<code>{class_name, reasoning}</code> results even without defining a schema.'
+            ));
+
+            var d = vlmDefaults();
+            if (!d) {
                 host.appendChild(prose(
-                    'Used when Classes are set and you don\'t override them. Model these to get the default '
-                    + '<code>{results: [{class_name, reasoning}]}</code> output without writing a schema.'
+                    '<em>Live default prompts are unavailable (the VI service could not be reached). They are '
+                    + 'used automatically when you leave a prompt blank; reload once the service is up to view them.</em>'
                 ));
-                host.appendChild(templateButton('Use Detect defaults', 'detect'));
-                if (d.detect.system_prompt) host.appendChild(block('System prompt', d.detect.system_prompt));
-                if (d.detect.user_prompt) host.appendChild(block('User prompt', d.detect.user_prompt));
-                if (d.detect.response_schema) {
-                    host.appendChild(block('Default Output Schema', JSON.stringify(d.detect.response_schema, null, 2)));
+            } else {
+                if (d.detect) {
+                    host.appendChild(heading('Detect defaults (class-aware — produce the default schema)'));
+                    host.appendChild(prose(
+                        'Used when Classes are set and you don\'t override them. Model these to get the default '
+                        + '<code>{results: [{class_name, reasoning}]}</code> output without writing a schema.'
+                    ));
+                    host.appendChild(templateButton('Use Detect defaults', 'detect'));
+                    if (d.detect.system_prompt) host.appendChild(block('System prompt', d.detect.system_prompt));
+                    if (d.detect.user_prompt) host.appendChild(block('User prompt', d.detect.user_prompt));
+                    if (d.detect.response_schema) {
+                        host.appendChild(block('Default Output Schema', JSON.stringify(d.detect.response_schema, null, 2)));
+                    }
+                }
+                if (d.detect_low || d.detect_medium) {
+                    host.appendChild(heading('Detect reasoning levels (Low / Medium — you send only the level)'));
+                    host.appendChild(prose(
+                        'Applied server-side when you pick <strong>Low</strong> or <strong>Medium</strong> in '
+                        + 'Detect mode. You send only the level — the service builds these prompts plus a per-class '
+                        + 'boolean schema and folds the result back into the standard <code>{class_name}</code> shape. '
+                        + 'Shown for reference; they are not editable and there is no template to load.'
+                    ));
+                    if (d.detect_low) {
+                        if (d.detect_low.system_prompt) host.appendChild(block('Low — System prompt', d.detect_low.system_prompt));
+                        if (d.detect_low.user_prompt) host.appendChild(block('Low — User prompt', d.detect_low.user_prompt));
+                    }
+                    if (d.detect_medium) {
+                        if (d.detect_medium.system_prompt) host.appendChild(block('Medium — System prompt', d.detect_medium.system_prompt));
+                        if (d.detect_medium.user_prompt) host.appendChild(block('Medium — User prompt', d.detect_medium.user_prompt));
+                    }
+                }
+                if (d.describe) {
+                    host.appendChild(heading('Describe defaults (free-form, no schema)'));
+                    host.appendChild(prose('Used when no Classes and no prompts are set. Free-form prose, no structured schema.'));
+                    host.appendChild(templateButton('Use Describe defaults', 'describe'));
+                    if (d.describe.system_prompt) host.appendChild(block('System prompt', d.describe.system_prompt));
+                    if (d.describe.user_prompt) host.appendChild(block('User prompt', d.describe.user_prompt));
                 }
             }
-            if (d.detect_low || d.detect_medium) {
-                host.appendChild(heading('Detect reasoning levels (Low / Medium — you send only the level)'));
-                host.appendChild(prose(
-                    'Applied server-side when you pick <strong>Low</strong> or <strong>Medium</strong> in '
-                    + 'Detect mode. You send only the level — the service builds these prompts plus a per-class '
-                    + 'boolean schema and folds the result back into the standard <code>{class_name}</code> shape. '
-                    + 'Shown for reference; they are not editable and there is no template to load.'
-                ));
-                if (d.detect_low) {
-                    if (d.detect_low.system_prompt) host.appendChild(block('Low — System prompt', d.detect_low.system_prompt));
-                    if (d.detect_low.user_prompt) host.appendChild(block('Low — User prompt', d.detect_low.user_prompt));
-                }
-                if (d.detect_medium) {
-                    if (d.detect_medium.system_prompt) host.appendChild(block('Medium — System prompt', d.detect_medium.system_prompt));
-                    if (d.detect_medium.user_prompt) host.appendChild(block('Medium — User prompt', d.detect_medium.user_prompt));
-                }
-            }
-            if (d.describe) {
-                host.appendChild(heading('Describe defaults (free-form, no schema)'));
-                host.appendChild(prose('Used when no Classes and no prompts are set. Free-form prose, no structured schema.'));
-                host.appendChild(templateButton('Use Describe defaults', 'describe'));
-                if (d.describe.system_prompt) host.appendChild(block('System prompt', d.describe.system_prompt));
-                if (d.describe.user_prompt) host.appendChild(block('User prompt', d.describe.user_prompt));
+
+            host.appendChild(heading('Using your own schema'));
+            host.appendChild(prose(
+                'Define an Output Schema (Fields or Raw JSON) and write a user prompt that asks for exactly those '
+                + 'fields — the model is constrained to your schema via guided decoding. Keep prompt and schema '
+                + 'consistent: name the fields and say what each should contain.'
+            ));
+        }
+
+        function openGuide() {
+            var modal = el('vlm-guide-modal');
+            if (!modal) return;
+            renderGuide(); // (re-)render on open so it reflects the latest loaded defaults
+            modal.classList.add('open');
+            if (escHandler) document.removeEventListener('keydown', escHandler);
+            escHandler = function (e) { if (e.key === 'Escape') closeGuide(); };
+            document.addEventListener('keydown', escHandler);
+        }
+
+        function closeGuide() {
+            var modal = el('vlm-guide-modal');
+            if (modal) modal.classList.remove('open');
+            if (escHandler) {
+                document.removeEventListener('keydown', escHandler);
+                escHandler = null;
             }
         }
 
-        host.appendChild(heading('Using your own schema'));
-        host.appendChild(prose(
-            'Define an Output Schema (Fields or Raw JSON) and write a user prompt that asks for exactly those '
-            + 'fields — the model is constrained to your schema via guided decoding. Keep prompt and schema '
-            + 'consistent: name the fields and say what each should contain.'
-        ));
-    }
-
-    var escHandler = null;
-
-    function openGuide() {
-        var modal = document.getElementById('vlm-guide-modal');
-        if (!modal) return;
-        renderGuide(); // (re-)render on open so it reflects the latest loaded defaults
-        modal.classList.add('open');
-        escHandler = function (e) { if (e.key === 'Escape') closeGuide(); };
-        document.addEventListener('keydown', escHandler);
-    }
-
-    function closeGuide() {
-        var modal = document.getElementById('vlm-guide-modal');
-        if (modal) modal.classList.remove('open');
-        if (escHandler) {
-            document.removeEventListener('keydown', escHandler);
-            escHandler = null;
+        function useTemplate(mode) {
+            var d = vlmDefaults();
+            var modeDefaults = d ? d[mode] : null;
+            if (!modeDefaults) return;
+            var sys = el('cfg-vlm-system-prompt');
+            var usr = el('cfg-vlm-user-prompt');
+            if (sys && modeDefaults.system_prompt) sys.value = modeDefaults.system_prompt;
+            if (usr && modeDefaults.user_prompt) usr.value = modeDefaults.user_prompt;
+            [sys, usr].forEach(function (area) {
+                if (area) area.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            // Dismiss the guide and bring the freshly-filled prompts into view, focusing
+            // the (required) user prompt so the operator can edit it immediately.
+            closeGuide();
+            if (sys) sys.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (usr) usr.focus({ preventScroll: true });
         }
+
+        return { open: openGuide, close: closeGuide, useTemplate: useTemplate };
     }
 
-    function useTemplate(mode) {
-        var d = vlmDefaults();
-        var modeDefaults = d ? d[mode] : null;
-        if (!modeDefaults) return;
-        var sys = document.getElementById('cfg-vlm-system-prompt');
-        var usr = document.getElementById('cfg-vlm-user-prompt');
-        if (sys && modeDefaults.system_prompt) sys.value = modeDefaults.system_prompt;
-        if (usr && modeDefaults.user_prompt) usr.value = modeDefaults.user_prompt;
-        if (typeof updateVlmCustomLint === 'function') updateVlmCustomLint();
-        if (typeof markDirty === 'function') markDirty();
-        // Dismiss the guide and bring the freshly-filled prompts into view, focusing
-        // the (required) user prompt so the operator can edit it immediately.
-        closeGuide();
-        if (sys) sys.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        if (usr) usr.focus({ preventScroll: true });
+    var guides = new WeakMap();
+
+    function vlmPromptGuide(root) {
+        root = root || document;
+        if (!guides.has(root)) guides.set(root, guideIn(root));
+        return guides.get(root);
     }
 
-    window.openVlmPromptGuide = openGuide;
-    window.closeVlmPromptGuide = closeGuide;
-    window.useVlmPromptTemplate = useTemplate;
+    var page = vlmPromptGuide(document);
+
+    window.vlmPromptGuide = vlmPromptGuide;
+    window.openVlmPromptGuide = page.open;
+    window.closeVlmPromptGuide = page.close;
+    window.useVlmPromptTemplate = page.useTemplate;
 })();

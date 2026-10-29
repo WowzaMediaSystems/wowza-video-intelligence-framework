@@ -1,9 +1,74 @@
-/* VOD settings — the /persist/vod-settings document and the /persist/secrets document beside
-   it. Both are revisioned: a save sends a merge patch of the fields the form changed, quoting
-   the revision it read them at. The standalone experiment's connection panel is gone: in the
-   Manager the connection comes from the chrome via VIF.core.resolveServer(). */
+/* VOD settings — the /persist/vod-settings document. Revisioned: a save sends a merge patch of
+   the fields the form changed, quoting the revision it read them at. The secrets document is
+   global now (it holds endpoint and service credentials too) and is edited on the chrome's own
+   Secrets page; this view only reads the names for the webhook-secret picker. The standalone
+   experiment's connection panel is gone: in the Manager the connection comes from the chrome
+   via VIF.core.resolveServer(). */
 window.VIF = window.VIF || {};
 VIF.vod = VIF.vod || {};
+
+/**
+ * The lifecycle test-fire request for what the form shows, or a reason it cannot be sent.
+ * Unchanged settings go without a url, so the Engine tests what it actually sends to:
+ * the saved destination with its ${ENV} placeholder resolved. An edited destination goes as
+ * typed with the credential beside it — except one still carrying a placeholder, which only
+ * the saved settings resolve.
+ *
+ * @returns {{request?: object, refusal?: string}}
+ */
+VIF.vod.lifecycleTestRequest = function (form, stored) {
+    const trim = (value) => (value == null ? '' : String(value).trim());
+    const shown = { url: trim(form.url), secret: trim(form.secret), header: trim(form.header) };
+    if (!shown.url) {
+        return { refusal: 'Set a Destination URL first.' };
+    }
+    const saved = { url: trim(stored.url), secret: trim(stored.secret), header: trim(stored.header) };
+    if (shown.url === saved.url && shown.secret === saved.secret && shown.header === saved.header) {
+        return { request: {} };
+    }
+    if (shown.url.indexOf('${') !== -1) {
+        return { refusal: 'Save first to test this destination: a ${…} placeholder is resolved only from saved settings.' };
+    }
+    const request = { url: shown.url };
+    if (shown.secret) request.credentialSecret = shown.secret;
+    if (shown.header) request.credentialHeader = shown.header;
+    return { request: request };
+};
+
+/**
+ * Saves the edits through the loaded settings document, which the SDK saves from its own
+ * members. A refused save puts them back, so the page never takes unsaved values for saved
+ * ones; the form keeps showing what was typed.
+ */
+VIF.vod.saveEdits = async function (loaded, changed) {
+    const before = {};
+    const absent = [];
+    for (const key of Object.keys(changed)) {
+        if (Object.prototype.hasOwnProperty.call(loaded, key)) before[key] = loaded[key];
+        else absent.push(key);
+    }
+    Object.assign(loaded, changed);
+    try {
+        await loaded.save();
+    } catch (err) {
+        Object.assign(loaded, before);
+        for (const key of absent) delete loaded[key];
+        throw err;
+    }
+};
+
+/** What the operator reads after a lifecycle test fire, including whether the credential went. */
+VIF.vod.lifecycleTestOutcome = function (result, header) {
+    let credential;
+    if (result.credential === 'sent') credential = 'with the credential under ' + (header || 'Authorization');
+    else credential = 'without a credential';
+    if (result.delivered) {
+        return { ok: true, message: '\u2713 Delivered' + (result.status ? ' (HTTP ' + result.status + ')' : '') + ', ' + credential };
+    }
+    const reason = result.error || 'the destination did not accept it';
+    return { ok: false, message: '\u2717 ' + (result.credential === 'unresolved' ? reason : reason + ' (sent ' + credential + ')') };
+};
+
 (function (V) {
 	'use strict';
 	const { h, clear, api, toast } = V;
@@ -15,7 +80,6 @@ VIF.vod = VIF.vod || {};
 			this.loaded = null;
 			this.secretNames = null;
 			this.error = null;
-			this.secretsState = null;
 			this.render();
 			try {
 				const [settings, names] = await Promise.all([api.vodSettings(), api.secretNames()]);
@@ -32,81 +96,14 @@ VIF.vod = VIF.vod || {};
 
 		render() {
 			const root = clear(this.root);
+			// Back navigation is a top-left crumb, the same as every other sub-view.
 			root.appendChild(h('div', { class: 'phead' },
-				h('div', null, h('h2', null, 'On-Demand Configs')),
-				h('div', { class: 'sp' },
-					h('button', { class: 'btn', onclick: () => V.nav('jobs') }, '← On-Demand Jobs'))));
+				h('div', null,
+					h('a', { class: 'crumb', href: '#',
+						onclick: (e) => { e.preventDefault(); V.nav('jobs'); } }, '← On-Demand Jobs'),
+					h('h2', null, 'On-Demand Configs'))));
 			root.appendChild(h('div', { class: 'rule2' }));
-			root.appendChild(h('div', { class: 'setgrid one' }, this.renderVod(), this.renderSecrets()));
-		},
-
-		/* Webhook secrets — named Authorization values a submit references by name. Values are
-		   never redisplayed here: an input is a rotation, blank means keep, and a deletion sends
-		   the name as null, which is how a merge patch removes it. */
-		renderSecrets() {
-			if (this.error || !this.loaded) return null;
-			const stored = this.secretNames || [];
-			const st = this.secretsState || (this.secretsState = { edits: {}, removed: {}, adds: [] });
-			const redraw = () => this.render();
-
-			const existingRow = (name) => {
-				const gone = !!st.removed[name];
-				return h('div', { style: 'display:flex;gap:7px;align-items:center' },
-					h('span', { class: 'k', style: 'min-width:150px;overflow-wrap:anywhere' + (gone ? ';text-decoration:line-through;opacity:.55' : '') }, name),
-					gone ? h('span', { class: 'hint', style: 'flex:1;margin:0' }, 'deleted on save')
-						: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', style: 'flex:1',
-							placeholder: '(unchanged — type to rotate)', value: st.edits[name] || '',
-							oninput: (e) => { st.edits[name] = e.target.value; } }),
-					h('button', { class: 'btn', onclick: () => { st.removed[name] = !gone; if (!gone) delete st.edits[name]; redraw(); } }, gone ? 'Keep' : 'Delete'));
-			};
-			const addRow = (row, i) => h('div', { style: 'display:flex;gap:7px;align-items:center' },
-				h('input', { class: 'input', style: 'min-width:150px;max-width:150px', placeholder: 'name', value: row.name, oninput: (e) => { row.name = e.target.value; } }),
-				h('input', { class: 'input', type: 'password', autocomplete: 'new-password', style: 'flex:1', placeholder: 'Authorization value — "Bearer …" or an ${ENV_VAR} placeholder', value: row.value, oninput: (e) => { row.value = e.target.value; } }),
-				h('button', { class: 'btn', onclick: () => { st.adds.splice(i, 1); redraw(); } }, 'Drop'));
-
-			return h('div', { class: 'setcard' },
-				h('div', { class: 'eyebrow' }, 'Webhook secrets — the secrets document'),
-				h('p', { class: 'hint', style: 'margin:0 0 8px' },
-					'Named Authorization values a job references at submit (lifecycle_webhook_secret) to authenticate its own webhook destination — the job record keeps the name only. Any client that can submit jobs can direct any named secret at a URL of its choosing, so file webhook credentials here and nothing else.'),
-				stored.length ? h('div', { style: 'display:flex;flex-direction:column;gap:7px' }, stored.map(existingRow))
-					: h('p', { class: 'hint', style: 'margin:0' }, 'No secrets configured.'),
-				st.adds.length ? h('div', { style: 'display:flex;flex-direction:column;gap:7px;margin-top:7px' }, st.adds.map(addRow)) : null,
-				h('div', { style: 'display:flex;gap:7px;margin-top:8px' },
-					h('button', { class: 'btn', onclick: () => { st.adds.push({ name: '', value: '' }); redraw(); } }, 'Add secret'),
-					h('button', { class: 'btn btn-pri', onclick: () => this.saveSecrets() }, 'Save secrets')));
-		},
-
-		async saveSecrets() {
-			const st = this.secretsState;
-			if (!st) return;
-			const stored = this.secretNames || [];
-			const values = {};
-			const referenced = this.loaded.lifecycleWebhookSecret;
-			for (const name of Object.keys(st.removed)) {
-				if (!st.removed[name]) continue;
-				// The server refuses this save too (a dangling global reference is a 400);
-				// catching it here just gives the reason a face.
-				if (name === referenced) { toast('"' + name + '" is the global webhook secret — clear that setting first.', 'err'); return; }
-				values[name] = null;
-			}
-			for (const [name, value] of Object.entries(st.edits)) {
-				if (st.removed[name]) continue;
-				if (value.trim()) values[name] = value.trim();
-			}
-			for (const row of st.adds) {
-				const name = row.name.trim();
-				if (!name && !row.value.trim()) continue;
-				if (!name || !row.value.trim()) { toast('A new secret needs both a name and a value.', 'err'); return; }
-				if (stored.includes(name) || Object.prototype.hasOwnProperty.call(values, name)) { toast('Secret "' + name + '" is already defined — rotate it on its own row.', 'err'); return; }
-				values[name] = row.value.trim();
-			}
-			if (!Object.keys(values).length) { toast('Nothing changed.'); return; }
-			try {
-				this.secretNames = V.store.secretNames = (await api.secrets().update({ values })).names;
-				this.secretsState = null;
-				toast('Secrets saved.');
-				this.render();
-			} catch (e) { toast(e.message, 'err'); }
+			root.appendChild(h('div', { class: 'setgrid one' }, this.renderVod()));
 		},
 
 		renderVod() {
@@ -120,32 +117,96 @@ VIF.vod = VIF.vod || {};
 				h('input', { class: 'input', value: vod[key] ?? '', placeholder: defaultValue,
 					oninput: (e) => { edited[key] = e.target.value; } }),
 				hint ? h('span', { class: 'hint' }, hint) : null);
-			const str = (key, label, hint, type) => h('div', { class: 'field' }, h('label', null, label),
-				h('input', { class: 'input', type: type || 'text', value: vod[key] ?? '', autocomplete: 'off',
+			const str = (key, label, hint, placeholder) => h('div', { class: 'field' }, h('label', null, label),
+				h('input', { class: 'input', type: 'text', value: vod[key] ?? '', autocomplete: 'off', placeholder: placeholder || null,
 					oninput: (e) => { edited[key] = e.target.value; } }),
 				hint ? h('span', { class: 'hint' }, hint) : null);
-			// A name from the secrets document below, not a value: the picker offers what is
-			// saved there, and clearing sends "" (the document's usual off switch).
+			// Bytes are the document's unit, but nobody reads 10737418240: the value
+			// speaks for itself through a live gloss, and the placeholder leads human.
+			const uploadGloss = h('span', { class: 'hint mono' },
+				vod.maxUploadBytes ? '= ' + V.fmtBytes(vod.maxUploadBytes) : '');
+			const uploadField = h('div', { class: 'field' }, h('label', null, 'Max upload size (bytes)'),
+				h('input', { class: 'input', value: vod.maxUploadBytes ?? '', placeholder: '10 GB (10737418240 bytes)',
+					oninput: (e) => {
+						edited.maxUploadBytes = e.target.value;
+						const raw = String(e.target.value).trim();
+						const n = parseInt(raw, 10);
+						uploadGloss.textContent = raw !== '' && Number.isFinite(n) && n >= 0 ? '= ' + V.fmtBytes(n) : '';
+					} }),
+				h('span', { class: 'hint' }, 'Bigger uploads are refused before a byte is written. Blank keeps the current value.'),
+				uploadGloss);
+			// The credential reads as the sentence it is: [secret] sent as [header]. The
+			// picker offers names from the secrets document below, never a value; clearing
+			// sends "" (the document's usual off switch).
 			const secretNames = this.secretNames || [];
-			const sel = (key, label, hint) => h('div', { class: 'field' }, h('label', null, label),
-				h('select', { class: 'input', onchange: (e) => { edited[key] = e.target.value; } },
-					h('option', { value: '' }, secretNames.length ? '(none)' : '(none — add a webhook secret below first)'),
-					secretNames.map((n) => h('option', { value: n, selected: (vod[key] || '') === n ? 'selected' : null }, n))),
-				hint ? h('span', { class: 'hint' }, hint) : null);
+			const credentialRow = h('div', { class: 'field' }, h('label', null, 'Credential'),
+				h('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' },
+					h('select', { class: 'input', style: 'max-width:280px',
+						onchange: (e) => { edited.lifecycleWebhookSecret = e.target.value; } },
+						h('option', { value: '' }, secretNames.length ? '(no credential)' : '(none — add a secret on the Secrets page first)'),
+						secretNames.map((n) => h('option', { value: n, selected: (vod.lifecycleWebhookSecret || '') === n ? 'selected' : null }, n))),
+					h('span', { class: 'hint', style: 'white-space:nowrap' }, 'sent as'),
+					h('input', { class: 'input', style: 'max-width:200px', type: 'text', autocomplete: 'off',
+						value: vod.lifecycleWebhookHeader ?? '', placeholder: 'Authorization',
+						oninput: (e) => { edited.lifecycleWebhookHeader = e.target.value; } })),
+				h('span', { class: 'hint' },
+					'The picked secret’s value rides each delivery under this header. Most services read Authorization; '
+					+ 'some want a name of their own, like X-Api-Key. Blank sends Authorization. The secret is only ever '
+					+ 'sent to the URL above — a job that sets its own webhook URL picks its own secret at submit. '
+					+ 'The secrets themselves live on the Secrets page.'));
+			// What a test fire reads: the form as it stands, against the settings as loaded.
+			const shownLifecycle = () => ({
+				url: edited.lifecycleWebhook ?? vod.lifecycleWebhook,
+				secret: edited.lifecycleWebhookSecret ?? vod.lifecycleWebhookSecret,
+				header: edited.lifecycleWebhookHeader ?? vod.lifecycleWebhookHeader,
+			});
+			const testOutcome = h('div', { class: 'vlmtest', style: 'display:none' });
+			const showTest = (cls, text) => {
+				testOutcome.className = 'vlmtest ' + cls;
+				testOutcome.textContent = text;
+				testOutcome.style.display = '';
+			};
+			const testRow = h('div', { class: 'field' },
+				h('div', null, h('button', { class: 'btn', onclick: async (e) => {
+					const button = e.currentTarget;
+					const shown = shownLifecycle();
+					const plan = VIF.vod.lifecycleTestRequest(shown, {
+						url: vod.lifecycleWebhook, secret: vod.lifecycleWebhookSecret, header: vod.lifecycleWebhookHeader });
+					if (plan.refusal) { showTest('err', plan.refusal); return; }
+					button.disabled = true;
+					showTest('busy', 'Sending…');
+					try {
+						const result = await api.probeLifecycleWebhook(plan.request);
+						const outcome = VIF.vod.lifecycleTestOutcome(result, String(shown.header || '').trim());
+						showTest(outcome.ok ? 'ok' : 'err', outcome.message);
+					} catch (err) {
+						showTest('err', '\u2717 ' + err.message);
+					} finally {
+						button.disabled = false;
+					}
+				} }, 'Send test event')),
+				h('span', { class: 'hint' }, 'Posts one status event marked as a test — no job is involved — to the destination and credential shown above, saved or not.'),
+				testOutcome);
 			const autoResume = h('label', { class: 'hint', style: 'display:flex;gap:7px;align-items:center' },
 				h('input', { type: 'checkbox', checked: vod.autoResume === false ? null : 'checked',
 					onchange: (e) => { edited.autoResume = e.target.checked; } }),
-				'Auto-resume transiently failed jobs (up to 3 attempts, counter resets on progress)');
+				'Auto-resume jobs that failed for temporary reasons (up to 3 attempts; the counter resets when a retry makes progress)');
 
 			return h('div', { class: 'setcard' },
-				h('div', { class: 'eyebrow' }, 'VOD settings — the vod-settings document'),
+				h('div', { class: 'eyebrow' }, 'On-Demand job settings'),
 				h('div', { class: 'grid2' },
-					num('maxConcurrentJobs', 'Concurrent jobs', 'worker pool; applies immediately; blank keeps the current value', '1'),
-					num('maxJobs', 'Jobs kept', 'oldest finished evicted past the cap; blank keeps the current value', '25')),
-				num('jobTtlSeconds', 'Job TTL (seconds)', 'forget finished jobs this long after they end; empty or 0 = off', '0 (off)'),
-				num('maxUploadBytes', 'Max upload size (bytes)', 'a larger upload is refused with 413; blank keeps the current value', '10737418240 (10 GiB)'),
-				str('lifecycleWebhook', 'Global lifecycle webhook', 'default status-webhook destination for every job'),
-				sel('lifecycleWebhookSecret', 'Webhook Authorization secret', 'a webhook secret (below) sent only to the global destination above — per-job URLs name their own at submit'),
+					num('maxConcurrentJobs', 'Concurrent jobs', 'How many jobs run at once; the rest wait their turn. Applies immediately; blank keeps the current value.', '1'),
+					num('maxJobs', 'Jobs kept', 'Past this cap, the oldest finished jobs are removed along with their stored results. Blank keeps the current value.', '25')),
+				num('jobTtlSeconds', 'Job expiry (seconds)', 'Forget finished jobs this many seconds after they end, results and all. Empty or 0 switches this off.', '0 (off)'),
+				uploadField,
+				h('div', { class: 'eyebrow', style: 'margin-top:8px' }, 'Lifecycle webhook'),
+				h('p', { class: 'hint', style: 'margin:0' },
+					'Every job posts its status changes here, unless it names its own destination at submit.'),
+				str('lifecycleWebhook', 'Destination URL',
+					'An http(s) URL, or an ${ENV_VAR} placeholder resolved when Streaming Engine reads it. Blank sends no updates.',
+					'https://your-service.example/vif/status'),
+				credentialRow,
+				testRow,
 				autoResume,
 				h('div', null, h('button', { class: 'btn btn-pri', onclick: async () => {
 					const NUMERIC = ['maxConcurrentJobs', 'maxJobs', 'jobTtlSeconds', 'maxUploadBytes'];
@@ -165,17 +226,20 @@ VIF.vod = VIF.vod || {};
 					}
 					if (!Object.keys(changed).length) { toast('Nothing changed.'); return; }
 					try {
-						Object.assign(this.loaded, changed);
-						await this.loaded.save();
-						toast('Saved. Caps apply immediately; directories wait for a restart.');
+						await VIF.vod.saveEdits(this.loaded, changed);
+						toast('Settings saved. They apply immediately.');
 						this.render();
 					} catch (e) { toast(e.message, 'err'); }
 				} }, 'Save vod settings')),
 				h('div', { style: 'margin-top:6px;display:flex;flex-direction:column;gap:5px' },
-					h('div', { class: 'eyebrow' }, 'Restart-only'),
-					h('div', { class: 'lockrow' }, h('span', { class: 'k' }, 'content_dir'), h('span', { class: 'v' }, vod.contentDir || '(default: Engine content/)')),
-					h('div', { class: 'lockrow' }, h('span', { class: 'k' }, 'jobs_dir'), h('span', { class: 'v' }, vod.jobsDir || '(default: Engine vif-vod-jobs/)')),
-					h('p', { class: 'hint', style: 'margin:2px 0 0' }, 'Moving either under running jobs would strand them, so the Engine applies directory changes at the next start. Edit them by patching the settings document, or in its file.')));
+					h('div', { class: 'eyebrow' }, 'Storage directories'),
+					h('div', { class: 'lockrow' }, h('span', { class: 'k' }, 'content_dir'), h('span', { class: 'v' }, vod.contentDir || '(default: Streaming Engine content/)')),
+					h('div', { class: 'lockrow' }, h('span', { class: 'k' }, 'jobs_dir'), h('span', { class: 'v' }, vod.jobsDir || '(default: Streaming Engine vif-vod-jobs/)')),
+					h('p', { class: 'hint', style: 'margin:2px 0 0' },
+						'Where uploaded videos live (content_dir) and where job records and results are kept (jobs_dir). '
+						+ 'They cannot be edited on this page: change them in the settings file or over the REST API, and the '
+						+ 'change takes effect at the next Streaming Engine restart. The wait is deliberate, since moving the directories '
+						+ 'while jobs are running would separate those jobs from their files.')));
 		},
 	};
 

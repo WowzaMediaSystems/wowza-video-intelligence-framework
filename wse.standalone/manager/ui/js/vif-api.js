@@ -292,6 +292,46 @@
     BaselineConfigFromJSONTyped: () => BaselineConfigFromJSONTyped,
     BaselineConfigToJSON: () => BaselineConfigToJSON,
     BaselineConfigToJSONTyped: () => BaselineConfigToJSONTyped,
+    ChainCropFromJSON: () => ChainCropFromJSON,
+    ChainCropFromJSONTyped: () => ChainCropFromJSONTyped,
+    ChainCropToJSON: () => ChainCropToJSON,
+    ChainCropToJSONTyped: () => ChainCropToJSONTyped,
+    ChainDecisionListenerFromJSON: () => ChainDecisionListenerFromJSON,
+    ChainDecisionListenerFromJSONTyped: () => ChainDecisionListenerFromJSONTyped,
+    ChainDecisionListenerToJSON: () => ChainDecisionListenerToJSON,
+    ChainDecisionListenerToJSONTyped: () => ChainDecisionListenerToJSONTyped,
+    ChainDetectorFromJSON: () => ChainDetectorFromJSON,
+    ChainDetectorFromJSONTyped: () => ChainDetectorFromJSONTyped,
+    ChainDetectorModeEnum: () => ChainDetectorModeEnum,
+    ChainDetectorResultModeEnum: () => ChainDetectorResultModeEnum,
+    ChainDetectorToJSON: () => ChainDetectorToJSON,
+    ChainDetectorToJSONTyped: () => ChainDetectorToJSONTyped,
+    ChainFrameSelectionFromJSON: () => ChainFrameSelectionFromJSON,
+    ChainFrameSelectionFromJSONTyped: () => ChainFrameSelectionFromJSONTyped,
+    ChainFrameSelectionModeEnum: () => ChainFrameSelectionModeEnum,
+    ChainFrameSelectionToJSON: () => ChainFrameSelectionToJSON,
+    ChainFrameSelectionToJSONTyped: () => ChainFrameSelectionToJSONTyped,
+    ChainRoutingFromJSON: () => ChainRoutingFromJSON,
+    ChainRoutingFromJSONTyped: () => ChainRoutingFromJSONTyped,
+    ChainRoutingMatchEnum: () => ChainRoutingMatchEnum,
+    ChainRoutingToJSON: () => ChainRoutingToJSON,
+    ChainRoutingToJSONTyped: () => ChainRoutingToJSONTyped,
+    ChainRuleFromJSON: () => ChainRuleFromJSON,
+    ChainRuleFromJSONTyped: () => ChainRuleFromJSONTyped,
+    ChainRuleToJSON: () => ChainRuleToJSON,
+    ChainRuleToJSONTyped: () => ChainRuleToJSONTyped,
+    ChainStageDetectorFromJSON: () => ChainStageDetectorFromJSON,
+    ChainStageDetectorFromJSONTyped: () => ChainStageDetectorFromJSONTyped,
+    ChainStageDetectorToJSON: () => ChainStageDetectorToJSON,
+    ChainStageDetectorToJSONTyped: () => ChainStageDetectorToJSONTyped,
+    ChainStageFromJSON: () => ChainStageFromJSON,
+    ChainStageFromJSONTyped: () => ChainStageFromJSONTyped,
+    ChainStageToJSON: () => ChainStageToJSON,
+    ChainStageToJSONTyped: () => ChainStageToJSONTyped,
+    ChainTargetFromJSON: () => ChainTargetFromJSON,
+    ChainTargetFromJSONTyped: () => ChainTargetFromJSONTyped,
+    ChainTargetToJSON: () => ChainTargetToJSON,
+    ChainTargetToJSONTyped: () => ChainTargetToJSONTyped,
     ConfigFromJSON: () => ConfigFromJSON,
     ConfigFromJSONTyped: () => ConfigFromJSONTyped,
     ConfigToJSON: () => ConfigToJSON,
@@ -337,6 +377,10 @@
     GridFromJSONTyped: () => GridFromJSONTyped,
     GridToJSON: () => GridToJSON,
     GridToJSONTyped: () => GridToJSONTyped,
+    HostGpuDeviceFromJSON: () => HostGpuDeviceFromJSON,
+    HostGpuDeviceFromJSONTyped: () => HostGpuDeviceFromJSONTyped,
+    HostGpuDeviceToJSON: () => HostGpuDeviceToJSON,
+    HostGpuDeviceToJSONTyped: () => HostGpuDeviceToJSONTyped,
     HostStatsFromJSON: () => HostStatsFromJSON,
     HostStatsFromJSONTyped: () => HostStatsFromJSONTyped,
     HostStatsGpuFromJSON: () => HostStatsGpuFromJSON,
@@ -349,6 +393,10 @@
     Id3ListenerFromJSONTyped: () => Id3ListenerFromJSONTyped,
     Id3ListenerToJSON: () => Id3ListenerToJSON,
     Id3ListenerToJSONTyped: () => Id3ListenerToJSONTyped,
+    LifecycleWebhookProbeRequestFromJSON: () => LifecycleWebhookProbeRequestFromJSON,
+    LifecycleWebhookProbeRequestFromJSONTyped: () => LifecycleWebhookProbeRequestFromJSONTyped,
+    LifecycleWebhookProbeRequestToJSON: () => LifecycleWebhookProbeRequestToJSON,
+    LifecycleWebhookProbeRequestToJSONTyped: () => LifecycleWebhookProbeRequestToJSONTyped,
     ListenerFromJSON: () => ListenerFromJSON,
     ListenerFromJSONTyped: () => ListenerFromJSONTyped,
     ListenerToJSON: () => ListenerToJSON,
@@ -367,6 +415,10 @@
     ModelCatalogFromJSONTyped: () => ModelCatalogFromJSONTyped,
     ModelCatalogToJSON: () => ModelCatalogToJSON,
     ModelCatalogToJSONTyped: () => ModelCatalogToJSONTyped,
+    MotionDetectorFromJSON: () => MotionDetectorFromJSON,
+    MotionDetectorFromJSONTyped: () => MotionDetectorFromJSONTyped,
+    MotionDetectorToJSON: () => MotionDetectorToJSON,
+    MotionDetectorToJSONTyped: () => MotionDetectorToJSONTyped,
     ObjectDetectorFromJSON: () => ObjectDetectorFromJSON,
     ObjectDetectorFromJSONTyped: () => ObjectDetectorFromJSONTyped,
     ObjectDetectorModelEnum: () => ObjectDetectorModelEnum,
@@ -380,6 +432,7 @@
     PerformanceFromJSONTyped: () => PerformanceFromJSONTyped,
     PerformanceToJSON: () => PerformanceToJSON,
     PerformanceToJSONTyped: () => PerformanceToJSONTyped,
+    ProblemCauseEnum: () => ProblemCauseEnum,
     ProblemFromJSON: () => ProblemFromJSON,
     ProblemFromJSONTyped: () => ProblemFromJSONTyped,
     ProblemToJSON: () => ProblemToJSON,
@@ -444,6 +497,14 @@
     StreamToJSONTyped: () => StreamToJSONTyped,
     SvdEndpointFromJSON: () => SvdEndpointFromJSON,
     SvdEndpointFromJSONTyped: () => SvdEndpointFromJSONTyped,
+    SvdEndpointProbeRequestFromJSON: () => SvdEndpointProbeRequestFromJSON,
+    SvdEndpointProbeRequestFromJSONTyped: () => SvdEndpointProbeRequestFromJSONTyped,
+    SvdEndpointProbeRequestToJSON: () => SvdEndpointProbeRequestToJSON,
+    SvdEndpointProbeRequestToJSONTyped: () => SvdEndpointProbeRequestToJSONTyped,
+    SvdEndpointProbeResultFromJSON: () => SvdEndpointProbeResultFromJSON,
+    SvdEndpointProbeResultFromJSONTyped: () => SvdEndpointProbeResultFromJSONTyped,
+    SvdEndpointProbeResultToJSON: () => SvdEndpointProbeResultToJSON,
+    SvdEndpointProbeResultToJSONTyped: () => SvdEndpointProbeResultToJSONTyped,
     SvdEndpointTlsFromJSON: () => SvdEndpointTlsFromJSON,
     SvdEndpointTlsFromJSONTyped: () => SvdEndpointTlsFromJSONTyped,
     SvdEndpointTlsToJSON: () => SvdEndpointTlsToJSON,
@@ -464,6 +525,38 @@
     TrackingMethodEnum: () => TrackingMethodEnum,
     TrackingToJSON: () => TrackingToJSON,
     TrackingToJSONTyped: () => TrackingToJSONTyped,
+    VerifyAttributeFindingEnum: () => VerifyAttributeFindingEnum,
+    VerifyAttributeFromJSON: () => VerifyAttributeFromJSON,
+    VerifyAttributeFromJSONTyped: () => VerifyAttributeFromJSONTyped,
+    VerifyAttributeToJSON: () => VerifyAttributeToJSON,
+    VerifyAttributeToJSONTyped: () => VerifyAttributeToJSONTyped,
+    VerifyDetectorFromJSON: () => VerifyDetectorFromJSON,
+    VerifyDetectorFromJSONTyped: () => VerifyDetectorFromJSONTyped,
+    VerifyDetectorToJSON: () => VerifyDetectorToJSON,
+    VerifyDetectorToJSONTyped: () => VerifyDetectorToJSONTyped,
+    VerifyReportFromJSON: () => VerifyReportFromJSON,
+    VerifyReportFromJSONTyped: () => VerifyReportFromJSONTyped,
+    VerifyReportToJSON: () => VerifyReportToJSON,
+    VerifyReportToJSONTyped: () => VerifyReportToJSONTyped,
+    VerifyReviewConfidenceEnum: () => VerifyReviewConfidenceEnum,
+    VerifyReviewFromJSON: () => VerifyReviewFromJSON,
+    VerifyReviewFromJSONTyped: () => VerifyReviewFromJSONTyped,
+    VerifyReviewToJSON: () => VerifyReviewToJSON,
+    VerifyReviewToJSONTyped: () => VerifyReviewToJSONTyped,
+    VerifyReviewVerdictEnum: () => VerifyReviewVerdictEnum,
+    VerifySummaryFromJSON: () => VerifySummaryFromJSON,
+    VerifySummaryFromJSONTyped: () => VerifySummaryFromJSONTyped,
+    VerifySummaryReviewConfidenceEnum: () => VerifySummaryReviewConfidenceEnum,
+    VerifySummaryReviewVerdictEnum: () => VerifySummaryReviewVerdictEnum,
+    VerifySummaryToJSON: () => VerifySummaryToJSON,
+    VerifySummaryToJSONTyped: () => VerifySummaryToJSONTyped,
+    VerifySummaryVerdictEnum: () => VerifySummaryVerdictEnum,
+    VerifyWindowFromJSON: () => VerifyWindowFromJSON,
+    VerifyWindowFromJSONTyped: () => VerifyWindowFromJSONTyped,
+    VerifyWindowOutcomeEnum: () => VerifyWindowOutcomeEnum,
+    VerifyWindowToJSON: () => VerifyWindowToJSON,
+    VerifyWindowToJSONTyped: () => VerifyWindowToJSONTyped,
+    VerifyWindowVerdictEnum: () => VerifyWindowVerdictEnum,
     VideoInfoFromJSON: () => VideoInfoFromJSON,
     VideoInfoFromJSONTyped: () => VideoInfoFromJSONTyped,
     VideoInfoToJSON: () => VideoInfoToJSON,
@@ -548,7 +641,24 @@
     WebhookListenerFromJSONTyped: () => WebhookListenerFromJSONTyped,
     WebhookListenerToJSON: () => WebhookListenerToJSON,
     WebhookListenerToJSONTyped: () => WebhookListenerToJSONTyped,
+    WebhookProbeRequestFromJSON: () => WebhookProbeRequestFromJSON,
+    WebhookProbeRequestFromJSONTyped: () => WebhookProbeRequestFromJSONTyped,
+    WebhookProbeRequestToJSON: () => WebhookProbeRequestToJSON,
+    WebhookProbeRequestToJSONTyped: () => WebhookProbeRequestToJSONTyped,
+    WebhookProbeResultCredentialEnum: () => WebhookProbeResultCredentialEnum,
+    WebhookProbeResultFromJSON: () => WebhookProbeResultFromJSON,
+    WebhookProbeResultFromJSONTyped: () => WebhookProbeResultFromJSONTyped,
+    WebhookProbeResultToJSON: () => WebhookProbeResultToJSON,
+    WebhookProbeResultToJSONTyped: () => WebhookProbeResultToJSONTyped,
     instanceOfBaselineConfig: () => instanceOfBaselineConfig,
+    instanceOfChainCrop: () => instanceOfChainCrop,
+    instanceOfChainDecisionListener: () => instanceOfChainDecisionListener,
+    instanceOfChainDetector: () => instanceOfChainDetector,
+    instanceOfChainFrameSelection: () => instanceOfChainFrameSelection,
+    instanceOfChainRouting: () => instanceOfChainRouting,
+    instanceOfChainRule: () => instanceOfChainRule,
+    instanceOfChainStage: () => instanceOfChainStage,
+    instanceOfChainTarget: () => instanceOfChainTarget,
     instanceOfConfig: () => instanceOfConfig,
     instanceOfCustomListener: () => instanceOfCustomListener,
     instanceOfDefaultConfig: () => instanceOfDefaultConfig,
@@ -560,13 +670,16 @@
     instanceOfDiagnostics: () => instanceOfDiagnostics,
     instanceOfGenerationParams: () => instanceOfGenerationParams,
     instanceOfGrid: () => instanceOfGrid,
+    instanceOfHostGpuDevice: () => instanceOfHostGpuDevice,
     instanceOfHostStats: () => instanceOfHostStats,
     instanceOfHostStatsGpu: () => instanceOfHostStatsGpu,
     instanceOfId3Listener: () => instanceOfId3Listener,
+    instanceOfLifecycleWebhookProbeRequest: () => instanceOfLifecycleWebhookProbeRequest,
     instanceOfListener: () => instanceOfListener,
     instanceOfListenerType: () => instanceOfListenerType,
     instanceOfLogListener: () => instanceOfLogListener,
     instanceOfModelCatalog: () => instanceOfModelCatalog,
+    instanceOfMotionDetector: () => instanceOfMotionDetector,
     instanceOfObjectDetector: () => instanceOfObjectDetector,
     instanceOfOverlayListener: () => instanceOfOverlayListener,
     instanceOfPerformance: () => instanceOfPerformance,
@@ -586,10 +699,18 @@
     instanceOfStreamSettings: () => instanceOfStreamSettings,
     instanceOfStreamState: () => instanceOfStreamState,
     instanceOfSvdEndpoint: () => instanceOfSvdEndpoint,
+    instanceOfSvdEndpointProbeRequest: () => instanceOfSvdEndpointProbeRequest,
+    instanceOfSvdEndpointProbeResult: () => instanceOfSvdEndpointProbeResult,
     instanceOfSvdEndpointTls: () => instanceOfSvdEndpointTls,
     instanceOfSyntheticDetector: () => instanceOfSyntheticDetector,
     instanceOfTiling: () => instanceOfTiling,
     instanceOfTracking: () => instanceOfTracking,
+    instanceOfVerifyAttribute: () => instanceOfVerifyAttribute,
+    instanceOfVerifyDetector: () => instanceOfVerifyDetector,
+    instanceOfVerifyReport: () => instanceOfVerifyReport,
+    instanceOfVerifyReview: () => instanceOfVerifyReview,
+    instanceOfVerifySummary: () => instanceOfVerifySummary,
+    instanceOfVerifyWindow: () => instanceOfVerifyWindow,
     instanceOfVideoInfo: () => instanceOfVideoInfo,
     instanceOfVisInstanceStatus: () => instanceOfVisInstanceStatus,
     instanceOfVisInstanceStatusGpusInner: () => instanceOfVisInstanceStatusGpusInner,
@@ -609,7 +730,9 @@
     instanceOfVodJobState: () => instanceOfVodJobState,
     instanceOfVodResultsPage: () => instanceOfVodResultsPage,
     instanceOfVodSettings: () => instanceOfVodSettings,
-    instanceOfWebhookListener: () => instanceOfWebhookListener
+    instanceOfWebhookListener: () => instanceOfWebhookListener,
+    instanceOfWebhookProbeRequest: () => instanceOfWebhookProbeRequest,
+    instanceOfWebhookProbeResult: () => instanceOfWebhookProbeResult
   });
 
   // api/sdk/build/gen/models/ServiceBinding.ts
@@ -626,6 +749,7 @@
     return {
       "url": json["url"] == null ? void 0 : json["url"],
       "apiKey": json["api_key"] == null ? void 0 : json["api_key"],
+      "apiKeySecret": json["api_key_secret"] == null ? void 0 : json["api_key_secret"],
       "modelIdleTimeoutSeconds": json["model_idle_timeout_seconds"] == null ? void 0 : json["model_idle_timeout_seconds"]
     };
   }
@@ -639,6 +763,7 @@
     return {
       "url": value["url"],
       "api_key": value["apiKey"],
+      "api_key_secret": value["apiKeySecret"],
       "model_idle_timeout_seconds": value["modelIdleTimeoutSeconds"]
     };
   }
@@ -774,7 +899,9 @@
       return json;
     }
     return __spreadProps(__spreadValues({}, ListenerFromJSONTyped(json, true)), {
-      "url": json["url"] == null ? void 0 : json["url"]
+      "url": json["url"] == null ? void 0 : json["url"],
+      "credentialSecret": json["credential_secret"] == null ? void 0 : json["credential_secret"],
+      "credentialHeader": json["credential_header"] == null ? void 0 : json["credential_header"]
     });
   }
   function WebhookListenerToJSON(json) {
@@ -785,7 +912,9 @@
       return value;
     }
     return __spreadProps(__spreadValues({}, ListenerToJSONTyped(value, true)), {
-      "url": value["url"]
+      "url": value["url"],
+      "credential_secret": value["credentialSecret"],
+      "credential_header": value["credentialHeader"]
     });
   }
 
@@ -1020,12 +1149,78 @@
     };
   }
 
+  // api/sdk/build/gen/models/ChainCrop.ts
+  function instanceOfChainCrop(value) {
+    return true;
+  }
+  function ChainCropFromJSON(json) {
+    return ChainCropFromJSONTyped(json, false);
+  }
+  function ChainCropFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "classes": json["classes"] == null ? void 0 : json["classes"],
+      "minConfidence": json["min_confidence"] == null ? void 0 : json["min_confidence"],
+      "padding": json["padding"] == null ? void 0 : json["padding"],
+      "maxCrops": json["max_crops"] == null ? void 0 : json["max_crops"]
+    };
+  }
+  function ChainCropToJSON(json) {
+    return ChainCropToJSONTyped(json, false);
+  }
+  function ChainCropToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "classes": value["classes"],
+      "min_confidence": value["minConfidence"],
+      "padding": value["padding"],
+      "max_crops": value["maxCrops"]
+    };
+  }
+
+  // api/sdk/build/gen/models/ChainDecisionListener.ts
+  function instanceOfChainDecisionListener(value) {
+    if (!("className" in value) || value["className"] === void 0) return false;
+    return true;
+  }
+  function ChainDecisionListenerFromJSON(json) {
+    return ChainDecisionListenerFromJSONTyped(json, false);
+  }
+  function ChainDecisionListenerFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "className": json["class_name"],
+      "properties": json["properties"] == null ? void 0 : json["properties"]
+    };
+  }
+  function ChainDecisionListenerToJSON(json) {
+    return ChainDecisionListenerToJSONTyped(json, false);
+  }
+  function ChainDecisionListenerToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "class_name": value["className"],
+      "properties": value["properties"]
+    };
+  }
+
   // api/sdk/build/gen/models/DetectorType.ts
   var DetectorType = {
     Scene: "scene",
     Object: "object",
     Vlm: "vlm",
-    Synthetic: "synthetic"
+    Motion: "motion",
+    Synthetic: "synthetic",
+    Verify: "verify",
+    Chain: "chain"
   };
   function instanceOfDetectorType(value) {
     for (const key in DetectorType) {
@@ -1048,6 +1243,39 @@
   }
   function DetectorTypeToJSONTyped(value, ignoreDiscriminator) {
     return value;
+  }
+
+  // api/sdk/build/gen/models/MotionDetector.ts
+  function instanceOfMotionDetector(value) {
+    return true;
+  }
+  function MotionDetectorFromJSON(json) {
+    return MotionDetectorFromJSONTyped(json, false);
+  }
+  function MotionDetectorFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return __spreadProps(__spreadValues({}, DetectorFromJSONTyped(json, true)), {
+      "sensitivity": json["sensitivity"] == null ? void 0 : json["sensitivity"],
+      "minDisplacement": json["min_displacement"] == null ? void 0 : json["min_displacement"],
+      "mergeDistance": json["merge_distance"] == null ? void 0 : json["merge_distance"],
+      "suppressGlobalChanges": json["suppress_global_changes"] == null ? void 0 : json["suppress_global_changes"]
+    });
+  }
+  function MotionDetectorToJSON(json) {
+    return MotionDetectorToJSONTyped(json, false);
+  }
+  function MotionDetectorToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return __spreadProps(__spreadValues({}, DetectorToJSONTyped(value, true)), {
+      "sensitivity": value["sensitivity"],
+      "min_displacement": value["minDisplacement"],
+      "merge_distance": value["mergeDistance"],
+      "suppress_global_changes": value["suppressGlobalChanges"]
+    });
   }
 
   // api/sdk/build/gen/models/Tracking.ts
@@ -1292,7 +1520,8 @@
       "enabled": json["enabled"] == null ? void 0 : json["enabled"],
       "caCert": json["ca_cert"] == null ? void 0 : json["ca_cert"],
       "clientCert": json["client_cert"] == null ? void 0 : json["client_cert"],
-      "clientKey": json["client_key"] == null ? void 0 : json["client_key"]
+      "clientKey": json["client_key"] == null ? void 0 : json["client_key"],
+      "clientKeySecret": json["client_key_secret"] == null ? void 0 : json["client_key_secret"]
     };
   }
   function SvdEndpointTlsToJSON(json) {
@@ -1306,7 +1535,8 @@
       "enabled": value["enabled"],
       "ca_cert": value["caCert"],
       "client_cert": value["clientCert"],
-      "client_key": value["clientKey"]
+      "client_key": value["clientKey"],
+      "client_key_secret": value["clientKeySecret"]
     };
   }
 
@@ -1325,6 +1555,7 @@
       "address": json["address"] == null ? void 0 : json["address"],
       "tls": json["tls"] == null ? void 0 : SvdEndpointTlsFromJSON(json["tls"]),
       "apiKey": json["api_key"] == null ? void 0 : json["api_key"],
+      "apiKeySecret": json["api_key_secret"] == null ? void 0 : json["api_key_secret"],
       "functionId": json["function_id"] == null ? void 0 : json["function_id"],
       "timeoutSeconds": json["timeout_seconds"] == null ? void 0 : json["timeout_seconds"],
       "maxConcurrentRequests": json["max_concurrent_requests"] == null ? void 0 : json["max_concurrent_requests"]
@@ -1341,6 +1572,7 @@
       "address": value["address"],
       "tls": SvdEndpointTlsToJSON(value["tls"]),
       "api_key": value["apiKey"],
+      "api_key_secret": value["apiKeySecret"],
       "function_id": value["functionId"],
       "timeout_seconds": value["timeoutSeconds"],
       "max_concurrent_requests": value["maxConcurrentRequests"]
@@ -1373,6 +1605,76 @@
     return __spreadProps(__spreadValues({}, DetectorToJSONTyped(value, true)), {
       "endpoint": SvdEndpointToJSON(value["endpoint"]),
       "classification_threshold": value["classificationThreshold"]
+    });
+  }
+
+  // api/sdk/build/gen/models/VlmEndpoint.ts
+  function instanceOfVlmEndpoint(value) {
+    return true;
+  }
+  function VlmEndpointFromJSON(json) {
+    return VlmEndpointFromJSONTyped(json, false);
+  }
+  function VlmEndpointFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "url": json["url"] == null ? void 0 : json["url"],
+      "model": json["model"] == null ? void 0 : json["model"],
+      "apiKey": json["api_key"] == null ? void 0 : json["api_key"],
+      "apiKeySecret": json["api_key_secret"] == null ? void 0 : json["api_key_secret"],
+      "timeoutSeconds": json["timeout_seconds"] == null ? void 0 : json["timeout_seconds"],
+      "maxConcurrentRequests": json["max_concurrent_requests"] == null ? void 0 : json["max_concurrent_requests"]
+    };
+  }
+  function VlmEndpointToJSON(json) {
+    return VlmEndpointToJSONTyped(json, false);
+  }
+  function VlmEndpointToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "url": value["url"],
+      "model": value["model"],
+      "api_key": value["apiKey"],
+      "api_key_secret": value["apiKeySecret"],
+      "timeout_seconds": value["timeoutSeconds"],
+      "max_concurrent_requests": value["maxConcurrentRequests"]
+    };
+  }
+
+  // api/sdk/build/gen/models/VerifyDetector.ts
+  function instanceOfVerifyDetector(value) {
+    return true;
+  }
+  function VerifyDetectorFromJSON(json) {
+    return VerifyDetectorFromJSONTyped(json, false);
+  }
+  function VerifyDetectorFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return __spreadProps(__spreadValues({}, DetectorFromJSONTyped(json, true)), {
+      "flagThreshold": json["flag_threshold"] == null ? void 0 : json["flag_threshold"],
+      "strongThreshold": json["strong_threshold"] == null ? void 0 : json["strong_threshold"],
+      "endpoint": json["endpoint"] == null ? void 0 : SvdEndpointFromJSON(json["endpoint"]),
+      "review": json["review"] == null ? void 0 : VlmEndpointFromJSON(json["review"])
+    });
+  }
+  function VerifyDetectorToJSON(json) {
+    return VerifyDetectorToJSONTyped(json, false);
+  }
+  function VerifyDetectorToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return __spreadProps(__spreadValues({}, DetectorToJSONTyped(value, true)), {
+      "flag_threshold": value["flagThreshold"],
+      "strong_threshold": value["strongThreshold"],
+      "endpoint": SvdEndpointToJSON(value["endpoint"]),
+      "review": VlmEndpointToJSON(value["review"])
     });
   }
 
@@ -1467,41 +1769,6 @@
     };
   }
 
-  // api/sdk/build/gen/models/VlmEndpoint.ts
-  function instanceOfVlmEndpoint(value) {
-    return true;
-  }
-  function VlmEndpointFromJSON(json) {
-    return VlmEndpointFromJSONTyped(json, false);
-  }
-  function VlmEndpointFromJSONTyped(json, ignoreDiscriminator) {
-    if (json == null) {
-      return json;
-    }
-    return {
-      "url": json["url"] == null ? void 0 : json["url"],
-      "model": json["model"] == null ? void 0 : json["model"],
-      "apiKey": json["api_key"] == null ? void 0 : json["api_key"],
-      "timeoutSeconds": json["timeout_seconds"] == null ? void 0 : json["timeout_seconds"],
-      "maxConcurrentRequests": json["max_concurrent_requests"] == null ? void 0 : json["max_concurrent_requests"]
-    };
-  }
-  function VlmEndpointToJSON(json) {
-    return VlmEndpointToJSONTyped(json, false);
-  }
-  function VlmEndpointToJSONTyped(value, ignoreDiscriminator = false) {
-    if (value == null) {
-      return value;
-    }
-    return {
-      "url": value["url"],
-      "model": value["model"],
-      "api_key": value["apiKey"],
-      "timeout_seconds": value["timeoutSeconds"],
-      "max_concurrent_requests": value["maxConcurrentRequests"]
-    };
-  }
-
   // api/sdk/build/gen/models/VlmDetectSettings.ts
   var VlmDetectSettingsReasoningLevelEnum = {
     Low: "low",
@@ -1593,6 +1860,12 @@
       return json;
     }
     if (!ignoreDiscriminator) {
+      if (json["type"] === "chain") {
+        return ChainDetectorFromJSONTyped(json, ignoreDiscriminator);
+      }
+      if (json["type"] === "motion") {
+        return MotionDetectorFromJSONTyped(json, ignoreDiscriminator);
+      }
       if (json["type"] === "object") {
         return ObjectDetectorFromJSONTyped(json, ignoreDiscriminator);
       }
@@ -1601,6 +1874,9 @@
       }
       if (json["type"] === "synthetic") {
         return SyntheticDetectorFromJSONTyped(json, ignoreDiscriminator);
+      }
+      if (json["type"] === "verify") {
+        return VerifyDetectorFromJSONTyped(json, ignoreDiscriminator);
       }
       if (json["type"] === "vlm") {
         return VlmDetectorFromJSONTyped(json, ignoreDiscriminator);
@@ -1619,12 +1895,18 @@
     }
     if (!ignoreDiscriminator) {
       switch (value["type"]) {
+        case "chain":
+          return ChainDetectorToJSONTyped(value, ignoreDiscriminator);
+        case "motion":
+          return MotionDetectorToJSONTyped(value, ignoreDiscriminator);
         case "object":
           return ObjectDetectorToJSONTyped(value, ignoreDiscriminator);
         case "scene":
           return SceneDetectorToJSONTyped(value, ignoreDiscriminator);
         case "synthetic":
           return SyntheticDetectorToJSONTyped(value, ignoreDiscriminator);
+        case "verify":
+          return VerifyDetectorToJSONTyped(value, ignoreDiscriminator);
         case "vlm":
           return VlmDetectorToJSONTyped(value, ignoreDiscriminator);
         default:
@@ -1634,6 +1916,274 @@
     return {
       "type": DetectorTypeToJSON(value["type"])
     };
+  }
+
+  // api/sdk/build/gen/models/ChainFrameSelection.ts
+  var ChainFrameSelectionModeEnum = {
+    All: "all",
+    First: "first",
+    Middle: "middle",
+    Last: "last",
+    EveryNth: "every_nth"
+  };
+  function instanceOfChainFrameSelection(value) {
+    if (!("mode" in value) || value["mode"] === void 0) return false;
+    return true;
+  }
+  function ChainFrameSelectionFromJSON(json) {
+    return ChainFrameSelectionFromJSONTyped(json, false);
+  }
+  function ChainFrameSelectionFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "mode": json["mode"],
+      "stride": json["stride"] == null ? void 0 : json["stride"]
+    };
+  }
+  function ChainFrameSelectionToJSON(json) {
+    return ChainFrameSelectionToJSONTyped(json, false);
+  }
+  function ChainFrameSelectionToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "mode": value["mode"],
+      "stride": value["stride"]
+    };
+  }
+
+  // api/sdk/build/gen/models/ChainStageDetector.ts
+  function ChainStageDetectorFromJSON(json) {
+    return ChainStageDetectorFromJSONTyped(json, false);
+  }
+  function ChainStageDetectorFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    switch (json["type"]) {
+      case "motion":
+        return Object.assign({}, MotionDetectorFromJSONTyped(json, true), { type: "motion" });
+      case "object":
+        return Object.assign({}, ObjectDetectorFromJSONTyped(json, true), { type: "object" });
+      case "scene":
+        return Object.assign({}, SceneDetectorFromJSONTyped(json, true), { type: "scene" });
+      case "synthetic":
+        return Object.assign({}, SyntheticDetectorFromJSONTyped(json, true), { type: "synthetic" });
+      case "vlm":
+        return Object.assign({}, VlmDetectorFromJSONTyped(json, true), { type: "vlm" });
+      default:
+        throw new Error(`No variant of ChainStageDetector exists with 'type=${json["type"]}'`);
+    }
+  }
+  function ChainStageDetectorToJSON(json) {
+    return ChainStageDetectorToJSONTyped(json, false);
+  }
+  function ChainStageDetectorToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    switch (value["type"]) {
+      case "motion":
+        return Object.assign({}, MotionDetectorToJSON(value), { type: "motion" });
+      case "object":
+        return Object.assign({}, ObjectDetectorToJSON(value), { type: "object" });
+      case "scene":
+        return Object.assign({}, SceneDetectorToJSON(value), { type: "scene" });
+      case "synthetic":
+        return Object.assign({}, SyntheticDetectorToJSON(value), { type: "synthetic" });
+      case "vlm":
+        return Object.assign({}, VlmDetectorToJSON(value), { type: "vlm" });
+      default:
+        throw new Error(`No variant of ChainStageDetector exists with 'type=${value["type"]}'`);
+    }
+  }
+
+  // api/sdk/build/gen/models/ChainTarget.ts
+  function instanceOfChainTarget(value) {
+    return true;
+  }
+  function ChainTargetFromJSON(json) {
+    return ChainTargetFromJSONTyped(json, false);
+  }
+  function ChainTargetFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "stage": json["stage"] == null ? void 0 : json["stage"],
+      "end": json["end"] == null ? void 0 : json["end"]
+    };
+  }
+  function ChainTargetToJSON(json) {
+    return ChainTargetToJSONTyped(json, false);
+  }
+  function ChainTargetToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "stage": value["stage"],
+      "end": value["end"]
+    };
+  }
+
+  // api/sdk/build/gen/models/ChainRule.ts
+  function instanceOfChainRule(value) {
+    return true;
+  }
+  function ChainRuleFromJSON(json) {
+    return ChainRuleFromJSONTyped(json, false);
+  }
+  function ChainRuleFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "classes": json["classes"] == null ? void 0 : json["classes"],
+      "minConfidence": json["min_confidence"] == null ? void 0 : json["min_confidence"],
+      "minCount": json["min_count"] == null ? void 0 : json["min_count"]
+    };
+  }
+  function ChainRuleToJSON(json) {
+    return ChainRuleToJSONTyped(json, false);
+  }
+  function ChainRuleToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "classes": value["classes"],
+      "min_confidence": value["minConfidence"],
+      "min_count": value["minCount"]
+    };
+  }
+
+  // api/sdk/build/gen/models/ChainRouting.ts
+  var ChainRoutingMatchEnum = {
+    Any: "any",
+    All: "all"
+  };
+  function instanceOfChainRouting(value) {
+    return true;
+  }
+  function ChainRoutingFromJSON(json) {
+    return ChainRoutingFromJSONTyped(json, false);
+  }
+  function ChainRoutingFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "rules": json["rules"] == null ? void 0 : json["rules"].map(ChainRuleFromJSON),
+      "match": json["match"] == null ? void 0 : json["match"],
+      "onMatch": json["on_match"] == null ? void 0 : ChainTargetFromJSON(json["on_match"]),
+      "onNoMatch": json["on_no_match"] == null ? void 0 : ChainTargetFromJSON(json["on_no_match"]),
+      "onDone": json["on_done"] == null ? void 0 : ChainTargetFromJSON(json["on_done"])
+    };
+  }
+  function ChainRoutingToJSON(json) {
+    return ChainRoutingToJSONTyped(json, false);
+  }
+  function ChainRoutingToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "rules": value["rules"] == null ? void 0 : value["rules"].map(ChainRuleToJSON),
+      "match": value["match"],
+      "on_match": ChainTargetToJSON(value["onMatch"]),
+      "on_no_match": ChainTargetToJSON(value["onNoMatch"]),
+      "on_done": ChainTargetToJSON(value["onDone"])
+    };
+  }
+
+  // api/sdk/build/gen/models/ChainStage.ts
+  function instanceOfChainStage(value) {
+    if (!("name" in value) || value["name"] === void 0) return false;
+    if (!("detector" in value) || value["detector"] === void 0) return false;
+    return true;
+  }
+  function ChainStageFromJSON(json) {
+    return ChainStageFromJSONTyped(json, false);
+  }
+  function ChainStageFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "name": json["name"],
+      "detector": ChainStageDetectorFromJSON(json["detector"]),
+      "routing": json["routing"] == null ? void 0 : ChainRoutingFromJSON(json["routing"]),
+      "crop": json["crop"] == null ? void 0 : ChainCropFromJSON(json["crop"]),
+      "frameSelection": json["frame_selection"] == null ? void 0 : ChainFrameSelectionFromJSON(json["frame_selection"])
+    };
+  }
+  function ChainStageToJSON(json) {
+    return ChainStageToJSONTyped(json, false);
+  }
+  function ChainStageToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "name": value["name"],
+      "detector": ChainStageDetectorToJSON(value["detector"]),
+      "routing": ChainRoutingToJSON(value["routing"]),
+      "crop": ChainCropToJSON(value["crop"]),
+      "frame_selection": ChainFrameSelectionToJSON(value["frameSelection"])
+    };
+  }
+
+  // api/sdk/build/gen/models/ChainDetector.ts
+  var ChainDetectorModeEnum = {
+    Linear: "linear",
+    Conditional: "conditional",
+    Dynamic: "dynamic"
+  };
+  var ChainDetectorResultModeEnum = {
+    Final: "final",
+    Combined: "combined"
+  };
+  function instanceOfChainDetector(value) {
+    if (!("stages" in value) || value["stages"] === void 0) return false;
+    return true;
+  }
+  function ChainDetectorFromJSON(json) {
+    return ChainDetectorFromJSONTyped(json, false);
+  }
+  function ChainDetectorFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return __spreadProps(__spreadValues({}, DetectorFromJSONTyped(json, true)), {
+      "stages": json["stages"].map(ChainStageFromJSON),
+      "mode": json["mode"] == null ? void 0 : json["mode"],
+      "resultMode": json["result_mode"] == null ? void 0 : json["result_mode"],
+      "maxRings": json["max_rings"] == null ? void 0 : json["max_rings"],
+      "decisionTimeoutSeconds": json["decision_timeout_seconds"] == null ? void 0 : json["decision_timeout_seconds"],
+      "dispatchIntermediateRings": json["dispatch_intermediate_rings"] == null ? void 0 : json["dispatch_intermediate_rings"],
+      "decisionListener": json["decision_listener"] == null ? void 0 : ChainDecisionListenerFromJSON(json["decision_listener"])
+    });
+  }
+  function ChainDetectorToJSON(json) {
+    return ChainDetectorToJSONTyped(json, false);
+  }
+  function ChainDetectorToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return __spreadProps(__spreadValues({}, DetectorToJSONTyped(value, true)), {
+      "stages": value["stages"].map(ChainStageToJSON),
+      "mode": value["mode"],
+      "result_mode": value["resultMode"],
+      "max_rings": value["maxRings"],
+      "decision_timeout_seconds": value["decisionTimeoutSeconds"],
+      "dispatch_intermediate_rings": value["dispatchIntermediateRings"],
+      "decision_listener": ChainDecisionListenerToJSON(value["decisionListener"])
+    });
   }
 
   // api/sdk/build/gen/models/Config.ts
@@ -1715,7 +2265,9 @@
       "scene": json["scene"] == null ? void 0 : SceneDetectorFromJSON(json["scene"]),
       "object": json["object"] == null ? void 0 : ObjectDetectorFromJSON(json["object"]),
       "vlm": json["vlm"] == null ? void 0 : VlmDetectorFromJSON(json["vlm"]),
-      "synthetic": json["synthetic"] == null ? void 0 : SyntheticDetectorFromJSON(json["synthetic"])
+      "motion": json["motion"] == null ? void 0 : MotionDetectorFromJSON(json["motion"]),
+      "synthetic": json["synthetic"] == null ? void 0 : SyntheticDetectorFromJSON(json["synthetic"]),
+      "verify": json["verify"] == null ? void 0 : VerifyDetectorFromJSON(json["verify"])
     };
   }
   function DefaultConfigDetectorsToJSON(json) {
@@ -1729,7 +2281,9 @@
       "scene": SceneDetectorToJSON(value["scene"]),
       "object": ObjectDetectorToJSON(value["object"]),
       "vlm": VlmDetectorToJSON(value["vlm"]),
-      "synthetic": SyntheticDetectorToJSON(value["synthetic"])
+      "motion": MotionDetectorToJSON(value["motion"]),
+      "synthetic": SyntheticDetectorToJSON(value["synthetic"]),
+      "verify": VerifyDetectorToJSON(value["verify"])
     };
   }
 
@@ -1805,6 +2359,42 @@
     };
   }
 
+  // api/sdk/build/gen/models/HostGpuDevice.ts
+  function instanceOfHostGpuDevice(value) {
+    if (!("id" in value) || value["id"] === void 0) return false;
+    return true;
+  }
+  function HostGpuDeviceFromJSON(json) {
+    return HostGpuDeviceFromJSONTyped(json, false);
+  }
+  function HostGpuDeviceFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "id": json["id"],
+      "utilizationAvg": json["utilization_avg"] == null ? void 0 : json["utilization_avg"],
+      "memoryAvg": json["memory_avg"] == null ? void 0 : json["memory_avg"],
+      "encodeAvg": json["encode_avg"] == null ? void 0 : json["encode_avg"],
+      "decodeAvg": json["decode_avg"] == null ? void 0 : json["decode_avg"]
+    };
+  }
+  function HostGpuDeviceToJSON(json) {
+    return HostGpuDeviceToJSONTyped(json, false);
+  }
+  function HostGpuDeviceToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "id": value["id"],
+      "utilization_avg": value["utilizationAvg"],
+      "memory_avg": value["memoryAvg"],
+      "encode_avg": value["encodeAvg"],
+      "decode_avg": value["decodeAvg"]
+    };
+  }
+
   // api/sdk/build/gen/models/HostStatsGpu.ts
   function instanceOfHostStatsGpu(value) {
     return true;
@@ -1823,7 +2413,8 @@
       "utilizationAvg": json["utilization_avg"] == null ? void 0 : json["utilization_avg"],
       "memoryAvg": json["memory_avg"] == null ? void 0 : json["memory_avg"],
       "encodeAvg": json["encode_avg"] == null ? void 0 : json["encode_avg"],
-      "decodeAvg": json["decode_avg"] == null ? void 0 : json["decode_avg"]
+      "decodeAvg": json["decode_avg"] == null ? void 0 : json["decode_avg"],
+      "devices": json["devices"] == null ? void 0 : json["devices"].map(HostGpuDeviceFromJSON)
     };
   }
   function HostStatsGpuToJSON(json) {
@@ -1840,7 +2431,8 @@
       "utilization_avg": value["utilizationAvg"],
       "memory_avg": value["memoryAvg"],
       "encode_avg": value["encodeAvg"],
-      "decode_avg": value["decodeAvg"]
+      "decode_avg": value["decodeAvg"],
+      "devices": value["devices"] == null ? void 0 : value["devices"].map(HostGpuDeviceToJSON)
     };
   }
 
@@ -1874,6 +2466,37 @@
       "vif_module_version": value["vifModuleVersion"],
       "cpu_avg": value["cpuAvg"],
       "gpu": HostStatsGpuToJSON(value["gpu"])
+    };
+  }
+
+  // api/sdk/build/gen/models/LifecycleWebhookProbeRequest.ts
+  function instanceOfLifecycleWebhookProbeRequest(value) {
+    return true;
+  }
+  function LifecycleWebhookProbeRequestFromJSON(json) {
+    return LifecycleWebhookProbeRequestFromJSONTyped(json, false);
+  }
+  function LifecycleWebhookProbeRequestFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "url": json["url"] == null ? void 0 : json["url"],
+      "credentialSecret": json["credential_secret"] == null ? void 0 : json["credential_secret"],
+      "credentialHeader": json["credential_header"] == null ? void 0 : json["credential_header"]
+    };
+  }
+  function LifecycleWebhookProbeRequestToJSON(json) {
+    return LifecycleWebhookProbeRequestToJSONTyped(json, false);
+  }
+  function LifecycleWebhookProbeRequestToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "url": value["url"],
+      "credential_secret": value["credentialSecret"],
+      "credential_header": value["credentialHeader"]
     };
   }
 
@@ -1981,6 +2604,11 @@
   }
 
   // api/sdk/build/gen/models/Problem.ts
+  var ProblemCauseEnum = {
+    CredentialsRequired: "credentials_required",
+    ConfigMismatch: "config_mismatch",
+    ConfigDrift: "config_drift"
+  };
   function instanceOfProblem(value) {
     if (!("title" in value) || value["title"] === void 0) return false;
     if (!("status" in value) || value["status"] === void 0) return false;
@@ -1998,7 +2626,8 @@
       "title": json["title"],
       "status": json["status"],
       "detail": json["detail"] == null ? void 0 : json["detail"],
-      "instance": json["instance"] == null ? void 0 : json["instance"]
+      "instance": json["instance"] == null ? void 0 : json["instance"],
+      "cause": json["cause"] == null ? void 0 : json["cause"]
     };
   }
   function ProblemToJSON(json) {
@@ -2013,7 +2642,8 @@
       "title": value["title"],
       "status": value["status"],
       "detail": value["detail"],
-      "instance": value["instance"]
+      "instance": value["instance"],
+      "cause": value["cause"]
     };
   }
 
@@ -2406,6 +3036,381 @@
     };
   }
 
+  // api/sdk/build/gen/models/SvdEndpointProbeRequest.ts
+  function instanceOfSvdEndpointProbeRequest(value) {
+    return true;
+  }
+  function SvdEndpointProbeRequestFromJSON(json) {
+    return SvdEndpointProbeRequestFromJSONTyped(json, false);
+  }
+  function SvdEndpointProbeRequestFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "address": json["address"] == null ? void 0 : json["address"],
+      "tls": json["tls"] == null ? void 0 : SvdEndpointTlsFromJSON(json["tls"]),
+      "apiKey": json["api_key"] == null ? void 0 : json["api_key"],
+      "functionId": json["function_id"] == null ? void 0 : json["function_id"],
+      "streamGroupConfig": json["stream_group_config"] == null ? void 0 : json["stream_group_config"],
+      "application": json["application"] == null ? void 0 : json["application"],
+      "stream": json["stream"] == null ? void 0 : json["stream"],
+      "detectorType": json["detector_type"] == null ? void 0 : json["detector_type"],
+      "stage": json["stage"] == null ? void 0 : json["stage"]
+    };
+  }
+  function SvdEndpointProbeRequestToJSON(json) {
+    return SvdEndpointProbeRequestToJSONTyped(json, false);
+  }
+  function SvdEndpointProbeRequestToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "address": value["address"],
+      "tls": SvdEndpointTlsToJSON(value["tls"]),
+      "api_key": value["apiKey"],
+      "function_id": value["functionId"],
+      "stream_group_config": value["streamGroupConfig"],
+      "application": value["application"],
+      "stream": value["stream"],
+      "detector_type": value["detectorType"],
+      "stage": value["stage"]
+    };
+  }
+
+  // api/sdk/build/gen/models/SvdEndpointProbeResult.ts
+  function instanceOfSvdEndpointProbeResult(value) {
+    if (!("reachable" in value) || value["reachable"] === void 0) return false;
+    if (!("accepted" in value) || value["accepted"] === void 0) return false;
+    return true;
+  }
+  function SvdEndpointProbeResultFromJSON(json) {
+    return SvdEndpointProbeResultFromJSONTyped(json, false);
+  }
+  function SvdEndpointProbeResultFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "reachable": json["reachable"],
+      "accepted": json["accepted"],
+      "code": json["code"] == null ? void 0 : json["code"],
+      "error": json["error"] == null ? void 0 : json["error"]
+    };
+  }
+  function SvdEndpointProbeResultToJSON(json) {
+    return SvdEndpointProbeResultToJSONTyped(json, false);
+  }
+  function SvdEndpointProbeResultToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "reachable": value["reachable"],
+      "accepted": value["accepted"],
+      "code": value["code"],
+      "error": value["error"]
+    };
+  }
+
+  // api/sdk/build/gen/models/VerifyAttribute.ts
+  var VerifyAttributeFindingEnum = {
+    Adverse: "adverse",
+    Clear: "clear"
+  };
+  function instanceOfVerifyAttribute(value) {
+    if (!("finding" in value) || value["finding"] === void 0) return false;
+    return true;
+  }
+  function VerifyAttributeFromJSON(json) {
+    return VerifyAttributeFromJSONTyped(json, false);
+  }
+  function VerifyAttributeFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "finding": json["finding"],
+      "note": json["note"] == null ? void 0 : json["note"]
+    };
+  }
+  function VerifyAttributeToJSON(json) {
+    return VerifyAttributeToJSONTyped(json, false);
+  }
+  function VerifyAttributeToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "finding": value["finding"],
+      "note": value["note"]
+    };
+  }
+
+  // api/sdk/build/gen/models/VerifyReview.ts
+  var VerifyReviewVerdictEnum = {
+    Authentic: "authentic",
+    Synthetic: "synthetic",
+    Uncertain: "uncertain"
+  };
+  var VerifyReviewConfidenceEnum = {
+    High: "high",
+    Medium: "medium",
+    Low: "low"
+  };
+  function instanceOfVerifyReview(value) {
+    if (!("verdict" in value) || value["verdict"] === void 0) return false;
+    if (!("windowsReviewed" in value) || value["windowsReviewed"] === void 0) return false;
+    if (!("degraded" in value) || value["degraded"] === void 0) return false;
+    return true;
+  }
+  function VerifyReviewFromJSON(json) {
+    return VerifyReviewFromJSONTyped(json, false);
+  }
+  function VerifyReviewFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "verdict": json["verdict"],
+      "confidence": json["confidence"] == null ? void 0 : json["confidence"],
+      "attributes": json["attributes"] == null ? void 0 : mapValues(json["attributes"], VerifyAttributeFromJSON),
+      "reasoning": json["reasoning"] == null ? void 0 : json["reasoning"],
+      "model": json["model"] == null ? void 0 : json["model"],
+      "windowsReviewed": json["windows_reviewed"],
+      "degraded": json["degraded"]
+    };
+  }
+  function VerifyReviewToJSON(json) {
+    return VerifyReviewToJSONTyped(json, false);
+  }
+  function VerifyReviewToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "verdict": value["verdict"],
+      "confidence": value["confidence"],
+      "attributes": value["attributes"] == null ? void 0 : mapValues(value["attributes"], VerifyAttributeToJSON),
+      "reasoning": value["reasoning"],
+      "model": value["model"],
+      "windows_reviewed": value["windowsReviewed"],
+      "degraded": value["degraded"]
+    };
+  }
+
+  // api/sdk/build/gen/models/VerifyWindow.ts
+  var VerifyWindowVerdictEnum = {
+    Synthetic: "synthetic",
+    Real: "real",
+    Unknown: "unknown"
+  };
+  var VerifyWindowOutcomeEnum = {
+    Synthetic: "synthetic",
+    Cleared: "cleared",
+    Undecided: "undecided",
+    Real: "real",
+    Unscored: "unscored"
+  };
+  function instanceOfVerifyWindow(value) {
+    if (!("index" in value) || value["index"] === void 0) return false;
+    if (!("fromMs" in value) || value["fromMs"] === void 0) return false;
+    if (!("toMs" in value) || value["toMs"] === void 0) return false;
+    if (!("score" in value) || value["score"] === void 0) return false;
+    if (!("verdict" in value) || value["verdict"] === void 0) return false;
+    if (!("degraded" in value) || value["degraded"] === void 0) return false;
+    if (!("reviewed" in value) || value["reviewed"] === void 0) return false;
+    if (!("strong" in value) || value["strong"] === void 0) return false;
+    if (!("outcome" in value) || value["outcome"] === void 0) return false;
+    return true;
+  }
+  function VerifyWindowFromJSON(json) {
+    return VerifyWindowFromJSONTyped(json, false);
+  }
+  function VerifyWindowFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "index": json["index"],
+      "fromMs": json["from_ms"],
+      "toMs": json["to_ms"],
+      "score": json["score"],
+      "verdict": json["verdict"],
+      "degraded": json["degraded"],
+      "reviewed": json["reviewed"],
+      "strong": json["strong"],
+      "outcome": json["outcome"],
+      "review": json["review"] == null ? void 0 : VerifyReviewFromJSON(json["review"])
+    };
+  }
+  function VerifyWindowToJSON(json) {
+    return VerifyWindowToJSONTyped(json, false);
+  }
+  function VerifyWindowToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "index": value["index"],
+      "from_ms": value["fromMs"],
+      "to_ms": value["toMs"],
+      "score": value["score"],
+      "verdict": value["verdict"],
+      "degraded": value["degraded"],
+      "reviewed": value["reviewed"],
+      "strong": value["strong"],
+      "outcome": value["outcome"],
+      "review": VerifyReviewToJSON(value["review"])
+    };
+  }
+
+  // api/sdk/build/gen/models/VodJobState.ts
+  var VodJobState = {
+    Pending: "pending",
+    Connecting: "connecting",
+    Running: "running",
+    Completed: "completed",
+    Failed: "failed",
+    Cancelled: "cancelled"
+  };
+  function instanceOfVodJobState(value) {
+    for (const key in VodJobState) {
+      if (Object.prototype.hasOwnProperty.call(VodJobState, key)) {
+        if (VodJobState[key] === value) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  function VodJobStateFromJSON(json) {
+    return VodJobStateFromJSONTyped(json, false);
+  }
+  function VodJobStateFromJSONTyped(json, ignoreDiscriminator) {
+    return json;
+  }
+  function VodJobStateToJSON(value) {
+    return value;
+  }
+  function VodJobStateToJSONTyped(value, ignoreDiscriminator) {
+    return value;
+  }
+
+  // api/sdk/build/gen/models/VerifySummary.ts
+  var VerifySummaryVerdictEnum = {
+    Authentic: "authentic",
+    Synthetic: "synthetic",
+    Mixed: "mixed",
+    Uncertain: "uncertain"
+  };
+  var VerifySummaryReviewVerdictEnum = {
+    Authentic: "authentic",
+    Synthetic: "synthetic",
+    Uncertain: "uncertain"
+  };
+  var VerifySummaryReviewConfidenceEnum = {
+    High: "high",
+    Medium: "medium",
+    Low: "low"
+  };
+  function instanceOfVerifySummary(value) {
+    if (!("verdict" in value) || value["verdict"] === void 0) return false;
+    if (!("flagThreshold" in value) || value["flagThreshold"] === void 0) return false;
+    if (!("windowsTotal" in value) || value["windowsTotal"] === void 0) return false;
+    if (!("windowsFlagged" in value) || value["windowsFlagged"] === void 0) return false;
+    if (!("windowsStrong" in value) || value["windowsStrong"] === void 0) return false;
+    if (!("windowsSynthetic" in value) || value["windowsSynthetic"] === void 0) return false;
+    if (!("degraded" in value) || value["degraded"] === void 0) return false;
+    return true;
+  }
+  function VerifySummaryFromJSON(json) {
+    return VerifySummaryFromJSONTyped(json, false);
+  }
+  function VerifySummaryFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "verdict": json["verdict"],
+      "flagThreshold": json["flag_threshold"],
+      "strongThreshold": json["strong_threshold"] == null ? void 0 : json["strong_threshold"],
+      "windowsTotal": json["windows_total"],
+      "windowsFlagged": json["windows_flagged"],
+      "windowsStrong": json["windows_strong"],
+      "windowsSynthetic": json["windows_synthetic"],
+      "syntheticShare": json["synthetic_share"] == null ? void 0 : json["synthetic_share"],
+      "svdMeanScore": json["svd_mean_score"] == null ? void 0 : json["svd_mean_score"],
+      "svdPeakScore": json["svd_peak_score"] == null ? void 0 : json["svd_peak_score"],
+      "reviewVerdict": json["review_verdict"] == null ? void 0 : json["review_verdict"],
+      "reviewConfidence": json["review_confidence"] == null ? void 0 : json["review_confidence"],
+      "degraded": json["degraded"]
+    };
+  }
+  function VerifySummaryToJSON(json) {
+    return VerifySummaryToJSONTyped(json, false);
+  }
+  function VerifySummaryToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "verdict": value["verdict"],
+      "flag_threshold": value["flagThreshold"],
+      "strong_threshold": value["strongThreshold"],
+      "windows_total": value["windowsTotal"],
+      "windows_flagged": value["windowsFlagged"],
+      "windows_strong": value["windowsStrong"],
+      "windows_synthetic": value["windowsSynthetic"],
+      "synthetic_share": value["syntheticShare"],
+      "svd_mean_score": value["svdMeanScore"],
+      "svd_peak_score": value["svdPeakScore"],
+      "review_verdict": value["reviewVerdict"],
+      "review_confidence": value["reviewConfidence"],
+      "degraded": value["degraded"]
+    };
+  }
+
+  // api/sdk/build/gen/models/VerifyReport.ts
+  function instanceOfVerifyReport(value) {
+    if (!("jobId" in value) || value["jobId"] === void 0) return false;
+    if (!("state" in value) || value["state"] === void 0) return false;
+    if (!("summary" in value) || value["summary"] === void 0) return false;
+    if (!("windows" in value) || value["windows"] === void 0) return false;
+    return true;
+  }
+  function VerifyReportFromJSON(json) {
+    return VerifyReportFromJSONTyped(json, false);
+  }
+  function VerifyReportFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "jobId": json["job_id"],
+      "state": VodJobStateFromJSON(json["state"]),
+      "summary": VerifySummaryFromJSON(json["summary"]),
+      "windows": json["windows"].map(VerifyWindowFromJSON),
+      "review": json["review"] == null ? void 0 : VerifyReviewFromJSON(json["review"])
+    };
+  }
+  function VerifyReportToJSON(json) {
+    return VerifyReportToJSONTyped(json, false);
+  }
+  function VerifyReportToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "job_id": value["jobId"],
+      "state": VodJobStateToJSON(value["state"]),
+      "summary": VerifySummaryToJSON(value["summary"]),
+      "windows": value["windows"].map(VerifyWindowToJSON),
+      "review": VerifyReviewToJSON(value["review"])
+    };
+  }
+
   // api/sdk/build/gen/models/VlmEndpointProbeRequest.ts
   function instanceOfVlmEndpointProbeRequest(value) {
     return true;
@@ -2420,9 +3425,12 @@
     return {
       "url": json["url"] == null ? void 0 : json["url"],
       "apiKey": json["api_key"] == null ? void 0 : json["api_key"],
+      "apiKeySecret": json["api_key_secret"] == null ? void 0 : json["api_key_secret"],
       "streamGroupConfig": json["stream_group_config"] == null ? void 0 : json["stream_group_config"],
       "application": json["application"] == null ? void 0 : json["application"],
-      "stream": json["stream"] == null ? void 0 : json["stream"]
+      "stream": json["stream"] == null ? void 0 : json["stream"],
+      "detectorType": json["detector_type"] == null ? void 0 : json["detector_type"],
+      "stage": json["stage"] == null ? void 0 : json["stage"]
     };
   }
   function VlmEndpointProbeRequestToJSON(json) {
@@ -2435,9 +3443,12 @@
     return {
       "url": value["url"],
       "api_key": value["apiKey"],
+      "api_key_secret": value["apiKeySecret"],
       "stream_group_config": value["streamGroupConfig"],
       "application": value["application"],
-      "stream": value["stream"]
+      "stream": value["stream"],
+      "detector_type": value["detectorType"],
+      "stage": value["stage"]
     };
   }
 
@@ -2483,6 +3494,7 @@
     NotConnected: "not_connected",
     ConnectFailed: "connect_failed",
     DetectorError: "detector_error",
+    EndpointRejected: "endpoint_rejected",
     ConfigDrift: "config_drift",
     CoverageShortfall: "coverage_shortfall",
     SourceError: "source_error",
@@ -2577,38 +3589,6 @@
     };
   }
 
-  // api/sdk/build/gen/models/VodJobState.ts
-  var VodJobState = {
-    Pending: "pending",
-    Connecting: "connecting",
-    Running: "running",
-    Completed: "completed",
-    Failed: "failed",
-    Cancelled: "cancelled"
-  };
-  function instanceOfVodJobState(value) {
-    for (const key in VodJobState) {
-      if (Object.prototype.hasOwnProperty.call(VodJobState, key)) {
-        if (VodJobState[key] === value) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  function VodJobStateFromJSON(json) {
-    return VodJobStateFromJSONTyped(json, false);
-  }
-  function VodJobStateFromJSONTyped(json, ignoreDiscriminator) {
-    return json;
-  }
-  function VodJobStateToJSON(value) {
-    return value;
-  }
-  function VodJobStateToJSONTyped(value, ignoreDiscriminator) {
-    return value;
-  }
-
   // api/sdk/build/gen/models/VodJob.ts
   function instanceOfVodJob(value) {
     if (!("jobId" in value) || value["jobId"] === void 0) return false;
@@ -2650,6 +3630,7 @@
       "startedAt": json["started_at"] == null ? void 0 : new Date(json["started_at"]),
       "endedAt": json["ended_at"] == null ? void 0 : new Date(json["ended_at"]),
       "resumes": json["resumes"],
+      "verify": json["verify"] == null ? void 0 : VerifySummaryFromJSON(json["verify"]),
       "config": json["config"] == null ? void 0 : ConfigFromJSON(json["config"]),
       "effectiveConfig": json["effective_config"] == null ? void 0 : ConfigFromJSON(json["effective_config"])
     };
@@ -2681,6 +3662,7 @@
       "started_at": value["startedAt"] == null ? void 0 : value["startedAt"].toISOString(),
       "ended_at": value["endedAt"] == null ? void 0 : value["endedAt"].toISOString(),
       "resumes": value["resumes"],
+      "verify": VerifySummaryToJSON(value["verify"]),
       "config": ConfigToJSON(value["config"]),
       "effective_config": ConfigToJSON(value["effectiveConfig"])
     };
@@ -2746,6 +3728,7 @@
       "tag": json["tag"] == null ? void 0 : json["tag"],
       "lifecycleWebhook": json["lifecycle_webhook"] == null ? void 0 : json["lifecycle_webhook"],
       "lifecycleWebhookSecret": json["lifecycle_webhook_secret"] == null ? void 0 : json["lifecycle_webhook_secret"],
+      "lifecycleWebhookHeader": json["lifecycle_webhook_header"] == null ? void 0 : json["lifecycle_webhook_header"],
       "autoResume": json["auto_resume"] == null ? void 0 : json["auto_resume"]
     };
   }
@@ -2764,6 +3747,7 @@
       "tag": value["tag"],
       "lifecycle_webhook": value["lifecycleWebhook"],
       "lifecycle_webhook_secret": value["lifecycleWebhookSecret"],
+      "lifecycle_webhook_header": value["lifecycleWebhookHeader"],
       "auto_resume": value["autoResume"]
     };
   }
@@ -2857,6 +3841,7 @@
       "jobsDir": json["jobs_dir"] == null ? void 0 : json["jobs_dir"],
       "lifecycleWebhook": json["lifecycle_webhook"] == null ? void 0 : json["lifecycle_webhook"],
       "lifecycleWebhookSecret": json["lifecycle_webhook_secret"] == null ? void 0 : json["lifecycle_webhook_secret"],
+      "lifecycleWebhookHeader": json["lifecycle_webhook_header"] == null ? void 0 : json["lifecycle_webhook_header"],
       "autoResume": json["auto_resume"] == null ? void 0 : json["auto_resume"],
       "maxUploadBytes": json["max_upload_bytes"] == null ? void 0 : json["max_upload_bytes"],
       "etag": json["etag"] == null ? void 0 : json["etag"]
@@ -2877,9 +3862,86 @@
       "jobs_dir": value["jobsDir"],
       "lifecycle_webhook": value["lifecycleWebhook"],
       "lifecycle_webhook_secret": value["lifecycleWebhookSecret"],
+      "lifecycle_webhook_header": value["lifecycleWebhookHeader"],
       "auto_resume": value["autoResume"],
       "max_upload_bytes": value["maxUploadBytes"],
       "etag": value["etag"]
+    };
+  }
+
+  // api/sdk/build/gen/models/WebhookProbeRequest.ts
+  function instanceOfWebhookProbeRequest(value) {
+    return true;
+  }
+  function WebhookProbeRequestFromJSON(json) {
+    return WebhookProbeRequestFromJSONTyped(json, false);
+  }
+  function WebhookProbeRequestFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "app": json["app"] == null ? void 0 : json["app"],
+      "stream": json["stream"] == null ? void 0 : json["stream"],
+      "listener": json["listener"] == null ? void 0 : json["listener"],
+      "url": json["url"] == null ? void 0 : json["url"],
+      "credentialSecret": json["credential_secret"] == null ? void 0 : json["credential_secret"],
+      "credentialHeader": json["credential_header"] == null ? void 0 : json["credential_header"]
+    };
+  }
+  function WebhookProbeRequestToJSON(json) {
+    return WebhookProbeRequestToJSONTyped(json, false);
+  }
+  function WebhookProbeRequestToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "app": value["app"],
+      "stream": value["stream"],
+      "listener": value["listener"],
+      "url": value["url"],
+      "credential_secret": value["credentialSecret"],
+      "credential_header": value["credentialHeader"]
+    };
+  }
+
+  // api/sdk/build/gen/models/WebhookProbeResult.ts
+  var WebhookProbeResultCredentialEnum = {
+    Sent: "sent",
+    None: "none",
+    Unresolved: "unresolved"
+  };
+  function instanceOfWebhookProbeResult(value) {
+    if (!("delivered" in value) || value["delivered"] === void 0) return false;
+    return true;
+  }
+  function WebhookProbeResultFromJSON(json) {
+    return WebhookProbeResultFromJSONTyped(json, false);
+  }
+  function WebhookProbeResultFromJSONTyped(json, ignoreDiscriminator) {
+    if (json == null) {
+      return json;
+    }
+    return {
+      "delivered": json["delivered"],
+      "status": json["status"] == null ? void 0 : json["status"],
+      "error": json["error"] == null ? void 0 : json["error"],
+      "credential": json["credential"] == null ? void 0 : json["credential"]
+    };
+  }
+  function WebhookProbeResultToJSON(json) {
+    return WebhookProbeResultToJSONTyped(json, false);
+  }
+  function WebhookProbeResultToJSONTyped(value, ignoreDiscriminator = false) {
+    if (value == null) {
+      return value;
+    }
+    return {
+      "delivered": value["delivered"],
+      "status": value["status"],
+      "error": value["error"],
+      "credential": value["credential"]
     };
   }
 
@@ -3056,6 +4118,7 @@
       await this.deletePersistedDetectorRaw({ app, stream, ifMatch }, initOverrides);
     }
     /**
+     * Validates the resolved stream configuration before removal. If an inherited detector is invalid, returns 400 and leaves the saved configuration unchanged.
      * Remove a saved listener
      */
     async deletePersistedListenerRaw(requestParameters, initOverrides) {
@@ -3100,6 +4163,7 @@
       return new VoidApiResponse(response);
     }
     /**
+     * Validates the resolved stream configuration before removal. If an inherited detector is invalid, returns 400 and leaves the saved configuration unchanged.
      * Remove a saved listener
      */
     async deletePersistedListener(app, stream, name, ifMatch, initOverrides) {
@@ -3294,7 +4358,7 @@
       return await response.value();
     }
     /**
-     * The credentials a job\'s lifecycle webhook may be authorized with, by name only — a value never leaves the Engine. Stored in `conf.modules/vif/vod/secrets.json`.
+     * The global named credentials, by name only — a value never leaves the Engine. One flat namespace every credential consumer references: a config\'s `*_secret` members (service key, VLM/SVD endpoint keys, the SVD TLS client key), the VOD settings\' `lifecycle_webhook_secret`, and a job submit\'s. Stored in `conf.modules/vif/secrets.json`; a document still at the pre-move `conf.modules/vif/vod/secrets.json` is read from there and relocated by the first PATCH.
      * The names of the configured secrets
      */
     async getSecretsRaw(initOverrides) {
@@ -3312,7 +4376,7 @@
       return new JSONApiResponse(response, (jsonValue) => SecretsFromJSON(jsonValue));
     }
     /**
-     * The credentials a job\'s lifecycle webhook may be authorized with, by name only — a value never leaves the Engine. Stored in `conf.modules/vif/vod/secrets.json`.
+     * The global named credentials, by name only — a value never leaves the Engine. One flat namespace every credential consumer references: a config\'s `*_secret` members (service key, VLM/SVD endpoint keys, the SVD TLS client key), the VOD settings\' `lifecycle_webhook_secret`, and a job submit\'s. Stored in `conf.modules/vif/secrets.json`; a document still at the pre-move `conf.modules/vif/vod/secrets.json` is read from there and relocated by the first PATCH.
      * The names of the configured secrets
      */
     async getSecrets(initOverrides) {
@@ -3663,7 +4727,7 @@
       return await response.value();
     }
     /**
-     * A merge patch over `values`: a string sets or rotates the named secret, `null` removes it, a name not mentioned is kept. The revision covers the values, so a rotation changes the `ETag` even though the answer shows names only. `400` when a removal would leave the VOD settings\' `lifecycle_webhook_secret` naming nothing.
+     * A merge patch over `values`: a string sets or rotates the named secret, `null` removes it, a name not mentioned is kept. The revision covers the values, so a rotation changes the `ETag` even though the answer shows names only — and a rotation is never guarded: it applies to the next connect or delivery with no config write. A removal is guarded: `400` while anything still references the name — the VOD settings\' `lifecycle_webhook_secret`, or any config document\'s `*_secret` member, in either stored syntax. The detail lists every use of every name the patch removes, one per line, so one round of repointing clears them all. A name the patch adds uses only letters, digits, `.`, `_` and `-`, starts with a letter or digit, is at most 128 characters, and must not differ from another name only by letter case (`400`). Names that already exist are not checked, so they still rotate and remove.
      * Set, rotate or remove secrets
      */
     async updateSecretsRaw(requestParameters, initOverrides) {
@@ -3698,7 +4762,7 @@
       return new JSONApiResponse(response, (jsonValue) => SecretsFromJSON(jsonValue));
     }
     /**
-     * A merge patch over `values`: a string sets or rotates the named secret, `null` removes it, a name not mentioned is kept. The revision covers the values, so a rotation changes the `ETag` even though the answer shows names only. `400` when a removal would leave the VOD settings\' `lifecycle_webhook_secret` naming nothing.
+     * A merge patch over `values`: a string sets or rotates the named secret, `null` removes it, a name not mentioned is kept. The revision covers the values, so a rotation changes the `ETag` even though the answer shows names only — and a rotation is never guarded: it applies to the next connect or delivery with no config write. A removal is guarded: `400` while anything still references the name — the VOD settings\' `lifecycle_webhook_secret`, or any config document\'s `*_secret` member, in either stored syntax. The detail lists every use of every name the patch removes, one per line, so one round of repointing clears them all. A name the patch adds uses only letters, digits, `.`, `_` and `-`, starts with a letter or digit, is at most 128 characters, and must not differ from another name only by letter case (`400`). Names that already exist are not checked, so they still rotate and remove.
      * Set, rotate or remove secrets
      */
     async updateSecrets(ifMatch, secrets, initOverrides) {
@@ -3855,6 +4919,68 @@
   // api/sdk/build/gen/apis/ProbesApi.ts
   var ProbesApi = class extends BaseAPI {
     /**
+     * Delivers a single synthetic `status_changed` event — the shape every job transition posts, with `test: true` beside it and no `results` — so an operator can confirm the lifecycle consumer is reachable and authenticated without submitting a job. Its `job_id` names no job, and its `state` is `running`, the state a job\'s first event carries.  Without a `url` it goes where the VOD settings send every job\'s notifications: their `lifecycle_webhook`, with any `${ENV}` placeholder resolved, under their `lifecycle_webhook_secret` and `lifecycle_webhook_header`. With a `url` it goes there instead, under the `credential_secret` and `credential_header` beside it in the request — what a form shows before it is saved.  One attempt, no retries. Unreachable is a result, not an error — the response is `200` with `delivered: false` — so `400` means there is nothing to send to (no `url` and no configured `lifecycle_webhook`), a destination that is not an absolute http(s) URL with a host, or a `credential_header` that is not a legal header name. 
+     * Send one test status event to the VOD lifecycle webhook
+     */
+    async probeLifecycleWebhookRaw(requestParameters, initOverrides) {
+      const queryParameters = {};
+      const headerParameters = {};
+      headerParameters["Content-Type"] = "application/json";
+      if (this.configuration && (this.configuration.username !== void 0 || this.configuration.password !== void 0)) {
+        headerParameters["Authorization"] = "Basic " + btoa(this.configuration.username + ":" + this.configuration.password);
+      }
+      const response = await this.request({
+        path: `/probes/lifecycle-webhook`,
+        method: "POST",
+        headers: headerParameters,
+        query: queryParameters,
+        body: LifecycleWebhookProbeRequestToJSON(requestParameters["lifecycleWebhookProbeRequest"])
+      }, initOverrides);
+      return new JSONApiResponse(response, (jsonValue) => WebhookProbeResultFromJSON(jsonValue));
+    }
+    /**
+     * Delivers a single synthetic `status_changed` event — the shape every job transition posts, with `test: true` beside it and no `results` — so an operator can confirm the lifecycle consumer is reachable and authenticated without submitting a job. Its `job_id` names no job, and its `state` is `running`, the state a job\'s first event carries.  Without a `url` it goes where the VOD settings send every job\'s notifications: their `lifecycle_webhook`, with any `${ENV}` placeholder resolved, under their `lifecycle_webhook_secret` and `lifecycle_webhook_header`. With a `url` it goes there instead, under the `credential_secret` and `credential_header` beside it in the request — what a form shows before it is saved.  One attempt, no retries. Unreachable is a result, not an error — the response is `200` with `delivered: false` — so `400` means there is nothing to send to (no `url` and no configured `lifecycle_webhook`), a destination that is not an absolute http(s) URL with a host, or a `credential_header` that is not a legal header name. 
+     * Send one test status event to the VOD lifecycle webhook
+     */
+    async probeLifecycleWebhook(lifecycleWebhookProbeRequest, initOverrides) {
+      const response = await this.probeLifecycleWebhookRaw({ lifecycleWebhookProbeRequest }, initOverrides);
+      return await response.value();
+    }
+    /**
+     * The Engine relays the check to the Video Intelligence Service, which owns the gRPC client: the channel is opened the way the analyzer would open it (plaintext, TLS or mutual TLS), then one detection call with an empty body tells whether a Synthetic Video Detector service answered and took the credentials. Unreachable and rejected are results, not errors; the response is a 200 either way. A 502 means the Video Intelligence Service itself did not answer.
+     * Check that a Synthetic Video Detector answers at a gRPC endpoint and accepts the credentials
+     */
+    async probeSvdEndpointRaw(requestParameters, initOverrides) {
+      if (requestParameters["svdEndpointProbeRequest"] == null) {
+        throw new RequiredError(
+          "svdEndpointProbeRequest",
+          'Required parameter "svdEndpointProbeRequest" was null or undefined when calling probeSvdEndpoint().'
+        );
+      }
+      const queryParameters = {};
+      const headerParameters = {};
+      headerParameters["Content-Type"] = "application/json";
+      if (this.configuration && (this.configuration.username !== void 0 || this.configuration.password !== void 0)) {
+        headerParameters["Authorization"] = "Basic " + btoa(this.configuration.username + ":" + this.configuration.password);
+      }
+      const response = await this.request({
+        path: `/probes/svd-endpoint`,
+        method: "POST",
+        headers: headerParameters,
+        query: queryParameters,
+        body: SvdEndpointProbeRequestToJSON(requestParameters["svdEndpointProbeRequest"])
+      }, initOverrides);
+      return new JSONApiResponse(response, (jsonValue) => SvdEndpointProbeResultFromJSON(jsonValue));
+    }
+    /**
+     * The Engine relays the check to the Video Intelligence Service, which owns the gRPC client: the channel is opened the way the analyzer would open it (plaintext, TLS or mutual TLS), then one detection call with an empty body tells whether a Synthetic Video Detector service answered and took the credentials. Unreachable and rejected are results, not errors; the response is a 200 either way. A 502 means the Video Intelligence Service itself did not answer.
+     * Check that a Synthetic Video Detector answers at a gRPC endpoint and accepts the credentials
+     */
+    async probeSvdEndpoint(svdEndpointProbeRequest, initOverrides) {
+      const response = await this.probeSvdEndpointRaw({ svdEndpointProbeRequest }, initOverrides);
+      return await response.value();
+    }
+    /**
      * Check connectivity to an OpenAI-compatible VLM endpoint
      */
     async probeVlmEndpointRaw(requestParameters, initOverrides) {
@@ -3884,6 +5010,40 @@
      */
     async probeVlmEndpoint(vlmEndpointProbeRequest, initOverrides) {
       const response = await this.probeVlmEndpointRaw({ vlmEndpointProbeRequest }, initOverrides);
+      return await response.value();
+    }
+    /**
+     * Delivers a single synthetic event — `data.vif_data` empty and `context.options: \"viDetectionTest\"` — so an operator can confirm a consumer is reachable and authenticated without waiting for a detection. Its `context` is stamped as the stream\'s real deliveries are, `context.entity` included: the detector the stream runs, as `objects`, `scenes`, `motion`, `vlm`, `synthetic`, `chain` or `verify`. Every value but `objects` is new: before this version every detection event said `objects`.  Naming the listener (`app` + `stream` + `listener`) sends to its stored `url` with its stored `credential_secret` resolved now, under its `credential_header` — the only way to test a credential the API never echoes. `stream` is the stream\'s name, or the pattern a stream group config is keyed by.  A caller-supplied `url` is sent under the `credential_secret` and `credential_header` beside it in the request, resolved the same way — so a form can test what it shows before it is saved. Without a `credential_secret` it goes unauthenticated.  Unreachable is a result, not an error — the response is `200` with `delivered: false` — so `400` means the request named nothing to send to, a `url` that is not an absolute http(s) URL with a host, or a `credential_header` that is not a legal header name. 
+     * Send one test detection event to a webhook listener\'s destination
+     */
+    async probeWebhookListenerRaw(requestParameters, initOverrides) {
+      if (requestParameters["webhookProbeRequest"] == null) {
+        throw new RequiredError(
+          "webhookProbeRequest",
+          'Required parameter "webhookProbeRequest" was null or undefined when calling probeWebhookListener().'
+        );
+      }
+      const queryParameters = {};
+      const headerParameters = {};
+      headerParameters["Content-Type"] = "application/json";
+      if (this.configuration && (this.configuration.username !== void 0 || this.configuration.password !== void 0)) {
+        headerParameters["Authorization"] = "Basic " + btoa(this.configuration.username + ":" + this.configuration.password);
+      }
+      const response = await this.request({
+        path: `/probes/webhook`,
+        method: "POST",
+        headers: headerParameters,
+        query: queryParameters,
+        body: WebhookProbeRequestToJSON(requestParameters["webhookProbeRequest"])
+      }, initOverrides);
+      return new JSONApiResponse(response, (jsonValue) => WebhookProbeResultFromJSON(jsonValue));
+    }
+    /**
+     * Delivers a single synthetic event — `data.vif_data` empty and `context.options: \"viDetectionTest\"` — so an operator can confirm a consumer is reachable and authenticated without waiting for a detection. Its `context` is stamped as the stream\'s real deliveries are, `context.entity` included: the detector the stream runs, as `objects`, `scenes`, `motion`, `vlm`, `synthetic`, `chain` or `verify`. Every value but `objects` is new: before this version every detection event said `objects`.  Naming the listener (`app` + `stream` + `listener`) sends to its stored `url` with its stored `credential_secret` resolved now, under its `credential_header` — the only way to test a credential the API never echoes. `stream` is the stream\'s name, or the pattern a stream group config is keyed by.  A caller-supplied `url` is sent under the `credential_secret` and `credential_header` beside it in the request, resolved the same way — so a form can test what it shows before it is saved. Without a `credential_secret` it goes unauthenticated.  Unreachable is a result, not an error — the response is `200` with `delivered: false` — so `400` means the request named nothing to send to, a `url` that is not an absolute http(s) URL with a host, or a `credential_header` that is not a legal header name. 
+     * Send one test detection event to a webhook listener\'s destination
+     */
+    async probeWebhookListener(webhookProbeRequest, initOverrides) {
+      const response = await this.probeWebhookListenerRaw({ webhookProbeRequest }, initOverrides);
       return await response.value();
     }
   };
@@ -4590,7 +5750,7 @@
       return await response.value();
     }
     /**
-     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  `400` for anything wrong with the body: a missing or unsupported `file`, an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` naming no configured secret. `503` when VOD is unavailable on this Engine. 
+     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  An inline config may hold its credentials either way: a literal value is redacted out of the job\'s record (never written to disk, so a resume must re-supply it), while a `*_secret` reference is kept by name — the value resolves when the job runs, and the job stays resumable with no body.  `400` for anything wrong with the body: a missing or unsupported `file`, a `file` whose video is in a codec no job decodes (`detail` names the codec), an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` or config `*_secret` naming no configured secret, a config slot carrying both a literal credential and its `*_secret`. `503` when VOD is unavailable on this Engine. 
      * Submit a file for analysis
      */
     async createVodJobRaw(requestParameters, initOverrides) {
@@ -4616,7 +5776,7 @@
       return new JSONApiResponse(response, (jsonValue) => VodJobFromJSON(jsonValue));
     }
     /**
-     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  `400` for anything wrong with the body: a missing or unsupported `file`, an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` naming no configured secret. `503` when VOD is unavailable on this Engine. 
+     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  An inline config may hold its credentials either way: a literal value is redacted out of the job\'s record (never written to disk, so a resume must re-supply it), while a `*_secret` reference is kept by name — the value resolves when the job runs, and the job stays resumable with no body.  `400` for anything wrong with the body: a missing or unsupported `file`, a `file` whose video is in a codec no job decodes (`detail` names the codec), an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` or config `*_secret` naming no configured secret, a config slot carrying both a literal credential and its `*_secret`. `503` when VOD is unavailable on this Engine. 
      * Submit a file for analysis
      */
     async createVodJob(vodJobRequest, initOverrides) {
@@ -4751,7 +5911,7 @@
       return await response.value();
     }
     /**
-     * The job\'s own decoded frame — the size, scaling and encoding the detector was given — so it shows what was analyzed rather than a re-render of the source. `404` when the job is unknown or has no frame to show, which is every job on the clip path (a synthetic detector relays encoded video and never decodes a picture).
+     * The job\'s own decoded frame — the size, scaling and encoding the detector was given — so it shows what was analyzed rather than a re-render of the source. `404` when the job is unknown or has no frame to show, which is a job on the bare clip path (a synthetic detector relays encoded video and never decodes a picture; a verify job decodes frames for its review and has one).
      * The frame the job is analyzing, or the one it is represented by once done
      */
     async getVodJobThumbnailRaw(requestParameters, initOverrides) {
@@ -4775,7 +5935,7 @@
       return new BlobApiResponse(response);
     }
     /**
-     * The job\'s own decoded frame — the size, scaling and encoding the detector was given — so it shows what was analyzed rather than a re-render of the source. `404` when the job is unknown or has no frame to show, which is every job on the clip path (a synthetic detector relays encoded video and never decodes a picture).
+     * The job\'s own decoded frame — the size, scaling and encoding the detector was given — so it shows what was analyzed rather than a re-render of the source. `404` when the job is unknown or has no frame to show, which is a job on the bare clip path (a synthetic detector relays encoded video and never decodes a picture; a verify job decodes frames for its review and has one).
      * The frame the job is analyzing, or the one it is represented by once done
      */
     async getVodJobThumbnail(jobId, initOverrides) {
@@ -4783,7 +5943,39 @@
       return await response.value();
     }
     /**
-     * Every analysable container under the Engine\'s content directory, as the relative paths a job names its `file` by, newest first. At most 500 entries are listed; `truncated: true` marks a listing that was cut off, and the newest files are the ones kept. A listing is not a probe: a file here can still turn out to carry no H.264 track, which the job reports when it runs.
+     * A verify job\'s outcome in one document: the per-window score timeline, the verdict summary, and the review — built from the job\'s stored rows, so it needs `store_results` (the default). A job still running serves the windows scored so far. `404` when the job is unknown, is not a verify job, or has not stored a row yet; the `detail` says which.
+     * The assembled verification report of a verify job
+     */
+    async getVodJobVerifyReportRaw(requestParameters, initOverrides) {
+      if (requestParameters["jobId"] == null) {
+        throw new RequiredError(
+          "jobId",
+          'Required parameter "jobId" was null or undefined when calling getVodJobVerifyReport().'
+        );
+      }
+      const queryParameters = {};
+      const headerParameters = {};
+      if (this.configuration && (this.configuration.username !== void 0 || this.configuration.password !== void 0)) {
+        headerParameters["Authorization"] = "Basic " + btoa(this.configuration.username + ":" + this.configuration.password);
+      }
+      const response = await this.request({
+        path: `/vod/jobs/{jobId}/verify-report`.replace(`{${"jobId"}}`, encodeURIComponent(String(requestParameters["jobId"]))),
+        method: "GET",
+        headers: headerParameters,
+        query: queryParameters
+      }, initOverrides);
+      return new JSONApiResponse(response, (jsonValue) => VerifyReportFromJSON(jsonValue));
+    }
+    /**
+     * A verify job\'s outcome in one document: the per-window score timeline, the verdict summary, and the review — built from the job\'s stored rows, so it needs `store_results` (the default). A job still running serves the windows scored so far. `404` when the job is unknown, is not a verify job, or has not stored a row yet; the `detail` says which.
+     * The assembled verification report of a verify job
+     */
+    async getVodJobVerifyReport(jobId, initOverrides) {
+      const response = await this.getVodJobVerifyReportRaw({ jobId }, initOverrides);
+      return await response.value();
+    }
+    /**
+     * Every analysable container under the Engine\'s content directory, as the relative paths a job names its `file` by, newest first. At most 500 entries are listed; `truncated: true` marks a listing that was cut off, and the newest files are the ones kept. A listing is not a probe: a file here whose video is in a codec no job decodes (AV1, VP9…) is refused when a job is submitted on it; one with no readable video track fails when the job runs, as does an H.265 one under a detector type that only takes H.264.
      * List the files a VOD job can analyze
      */
     async listVodFilesRaw(initOverrides) {
@@ -4801,7 +5993,7 @@
       return new JSONApiResponse(response, (jsonValue) => VodFileListFromJSON(jsonValue));
     }
     /**
-     * Every analysable container under the Engine\'s content directory, as the relative paths a job names its `file` by, newest first. At most 500 entries are listed; `truncated: true` marks a listing that was cut off, and the newest files are the ones kept. A listing is not a probe: a file here can still turn out to carry no H.264 track, which the job reports when it runs.
+     * Every analysable container under the Engine\'s content directory, as the relative paths a job names its `file` by, newest first. At most 500 entries are listed; `truncated: true` marks a listing that was cut off, and the newest files are the ones kept. A listing is not a probe: a file here whose video is in a codec no job decodes (AV1, VP9…) is refused when a job is submitted on it; one with no readable video track fails when the job runs, as does an H.265 one under a detector type that only takes H.264.
      * List the files a VOD job can analyze
      */
     async listVodFiles(initOverrides) {
@@ -4891,7 +6083,7 @@
       return await response.value();
     }
     /**
-     * The same job id runs again from where its stored results stop, appending to the same results file rather than analyzing the source afresh; `resumes` counts the runs. A job submitted with a `stream_group_config` reloads that group by name and re-layers the inline `config` it was submitted with — the group must still resolve to the same analysis, or the resume is refused. An inline-only job whose credentials were redacted out of its record takes them from the body: `config` must be the same analysis as submitted, and only its credentials are taken. A body on a group-built job is refused.  `400` for a body this API cannot read. `409` for every other refusal, each saying which: a job still queued or running, a completed job with nothing to fill in, a job that kept no results, a source file that changed since the job ran, a configuration that no longer matches, credentials the record does not hold and the body did not supply, a resume point this file cannot open a window on, a job still writing its record (try again). 
+     * The same job id runs again from where its stored results stop, appending to the same results file rather than analyzing the source afresh; `resumes` counts the runs. A job submitted with a `stream_group_config` reloads that group by name and re-layers the inline `config` it was submitted with — the group must still resolve to the same analysis, or the resume is refused. An inline-only job whose **literal** credentials were redacted out of its record takes them from the body: `config` must be the same analysis as submitted, and only its credentials are taken. A job whose credentials are all `*_secret` references needs no body — the record keeps the names, and each resumed run resolves their current values. A body on a group-built job is refused.  `400` for a body this API cannot read. `409` for every other refusal, each saying which: a job still queued or running, a completed job with nothing to fill in, a job that kept no results, a source file that changed since the job ran, a configuration that no longer matches, credentials the record does not hold and the body did not supply, a resume point this file cannot open a window on, a job still writing its record (try again). A refusal over credentials, the configuration or a changed source also carries the problem\'s `cause` member, so a client can act on it without reading `detail`. 
      * Continue a failed or cancelled job from the last window its stored results answered
      */
     async resumeVodJobRaw(requestParameters, initOverrides) {
@@ -4917,7 +6109,7 @@
       return new JSONApiResponse(response, (jsonValue) => VodJobFromJSON(jsonValue));
     }
     /**
-     * The same job id runs again from where its stored results stop, appending to the same results file rather than analyzing the source afresh; `resumes` counts the runs. A job submitted with a `stream_group_config` reloads that group by name and re-layers the inline `config` it was submitted with — the group must still resolve to the same analysis, or the resume is refused. An inline-only job whose credentials were redacted out of its record takes them from the body: `config` must be the same analysis as submitted, and only its credentials are taken. A body on a group-built job is refused.  `400` for a body this API cannot read. `409` for every other refusal, each saying which: a job still queued or running, a completed job with nothing to fill in, a job that kept no results, a source file that changed since the job ran, a configuration that no longer matches, credentials the record does not hold and the body did not supply, a resume point this file cannot open a window on, a job still writing its record (try again). 
+     * The same job id runs again from where its stored results stop, appending to the same results file rather than analyzing the source afresh; `resumes` counts the runs. A job submitted with a `stream_group_config` reloads that group by name and re-layers the inline `config` it was submitted with — the group must still resolve to the same analysis, or the resume is refused. An inline-only job whose **literal** credentials were redacted out of its record takes them from the body: `config` must be the same analysis as submitted, and only its credentials are taken. A job whose credentials are all `*_secret` references needs no body — the record keeps the names, and each resumed run resolves their current values. A body on a group-built job is refused.  `400` for a body this API cannot read. `409` for every other refusal, each saying which: a job still queued or running, a completed job with nothing to fill in, a job that kept no results, a source file that changed since the job ran, a configuration that no longer matches, credentials the record does not hold and the body did not supply, a resume point this file cannot open a window on, a job still writing its record (try again). A refusal over credentials, the configuration or a changed source also carries the problem\'s `cause` member, so a client can act on it without reading `detail`. 
      * Continue a failed or cancelled job from the last window its stored results answered
      */
     async resumeVodJob(jobId, vodJobResumeRequest, initOverrides) {

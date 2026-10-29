@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
 <style>
 
     .vif-dashboard .plugin-scroll {
@@ -529,6 +529,15 @@
         white-space: nowrap;
     }
 
+    /* The overlay-off note under a stream's thumbnail: rendered only when no
+       overlay listener will draw, so a boxless thumbnail explains itself. */
+    .vif-dashboard .overlay-off-note {
+        margin-top: 3px;
+        font-size: 0.8em;
+        line-height: 1.3;
+        color: #6b7480;
+    }
+
     /* Stream notice/error chip: a calm dot + short label in the row's status
        line; the full server text opens in the click popover. Declared after
        .row-status-line so the inline-flex display wins on the shared element. */
@@ -692,14 +701,14 @@
         } catch (e) { /* storage unavailable — stay on Live */ }
     })();
 </script>
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=1.2.0"></script>
 <!-- vod-main.js only for its VIF.vod.api facade (the On-Demand tab count);
      V.init is not called here. Needs vif-api/vif-sdk, loaded above. -->
-<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.2.0"></script>
 <script>
     VIF.dashboard.init();
     // Click-popover tips: upgrades every "?" help-tip (native title -> a modern

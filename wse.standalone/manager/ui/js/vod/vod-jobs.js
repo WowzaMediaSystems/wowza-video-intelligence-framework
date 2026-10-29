@@ -38,8 +38,13 @@ VIF.vod = VIF.vod || {};
 		},
 
 		del: async (job, refresh) => {
-			if (!window.confirm('Remove job ' + job.jobId + '?\n\nThis deletes its record, stored results and thumbnail. '
-				+ 'Its source file stays in the content directory; delete it from the New Analysis file list if you no longer need it.')) return;
+			// Named by what the user knows (the file, the tag), with the id kept as
+			// the exact-identity line underneath.
+			if (!window.confirm('Remove the ' + V.stateLabel(job.state) + ' job for ' + job.file
+				+ (job.tag ? ' (tag "' + job.tag + '")' : '') + '?\n\n'
+				+ 'This deletes its record, stored results and thumbnail. '
+				+ 'Its source file stays in the content directory; delete it from the New Analysis file list if you no longer need it.'
+				+ '\n\nJob ID: ' + job.jobId)) return;
 			try {
 				await api.deleteJob(job.jobId);
 				toast('Job removed.');
@@ -86,6 +91,11 @@ VIF.vod = VIF.vod || {};
 		return job.state === 'failed' || job.state === 'cancelled' || (job.state === 'completed' && job.resultsTruncated);
 	}
 
+	/** Verify jobs open their own report page; every other type opens the generic one. */
+	function jobView(job) {
+		return job.detectorType === 'verify' ? 'verify' : 'job';
+	}
+
 	/* ---------- the analysis-options modal ----------
 	   What the job actually ran: the single-job resource's redacted effective_config, falling
 	   back to the inline config as submitted. One modal for both kinds — a stream group config
@@ -99,7 +109,8 @@ VIF.vod = VIF.vod || {};
 			if (k === 'listeners' && !prefix) {
 				rows.push([key, Object.keys(v).join(' · ') || '(none)']);
 			} else if (Array.isArray(v)) {
-				rows.push([key, v.map((x) => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(', ')]);
+				rows.push([key, key === 'detector.stages' ? v.map((stage) => stage.name).join(' → ')
+					: v.map((x) => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(', ')]);
 			} else if (typeof v === 'object') {
 				flattenConfig(v, key, rows);
 			} else {
@@ -124,7 +135,7 @@ VIF.vod = VIF.vod || {};
 		const meta = type ? V.DETECTOR_META[type] : null;
 
 		const body = [];
-		if (meta) {
+		if (meta && type !== 'chain') {
 			body.push(h('div', { class: 'drow', style: 'padding:0 0 12px' },
 				h('span', { class: 'dbadge' }, meta.badge),
 				h('div', null,
@@ -132,6 +143,7 @@ VIF.vod = VIF.vod || {};
 					h('div', { class: 'ddesc' }, meta.desc))));
 		}
 		if (config) {
+			if (type === 'chain') body.push(V.chain.definition(config.detector));
 			const rows = flattenConfig(config, '', []);
 			body.push(h('div', { class: 'kgrid' }, rows.map(([k, v]) => [
 				h('span', { class: 'kk' }, k), h('span', { class: 'kv' }, v)])));
@@ -193,10 +205,17 @@ VIF.vod = VIF.vod || {};
 
 	function applyThumb(holder, url, job) {
 		clear(holder);
-		if (url) holder.appendChild(h('img', { src: url, alt: '' }));
-		else holder.appendChild(document.createTextNode(
-			job.detectorType === 'synthetic' ? 'no frame (clip path)'
-				: isTerminal(job) ? 'no frame' : 'no frame yet'));
+		if (url) { holder.appendChild(h('img', { src: url, alt: '' })); return; }
+		if (job.detectorType === 'synthetic') {
+			// Synthetic never decodes a frame, so this placeholder is permanent: the
+			// detector's own mark. No title of its own — the row's "Open this job"
+			// applies here like everywhere else; the report's Frame pane has the why.
+			holder.classList.add('thumb-glyph');
+			holder.appendChild(h('img', { class: 'tg', src: 'wse-plugins/server/vif/synthetic.png', alt: '' }));
+			holder.appendChild(h('span', null, 'no preview'));
+			return;
+		}
+		holder.appendChild(document.createTextNode(isTerminal(job) ? 'no frame' : 'no frame yet'));
 	}
 
 	/** Drop cached thumbnails for jobs no longer on screen (deleted, evicted, other page). */
@@ -215,7 +234,7 @@ VIF.vod = VIF.vod || {};
 	const REQUESTS_TIP = 'Analysis requests the service answered.\nEach request covers one slice of media: either frames of video or a media window.';
 
 	function stateCell(job) {
-		const bits = [h('span', { class: 'st st-' + job.state }, job.state)];
+		const bits = [h('span', { class: 'st st-' + job.state }, V.stateLabel(job.state))];
 		if (job.resultsTruncated) bits.push(' ', h('span', { class: 'tag tag-e' }, 'results truncated'));
 		if (job.errorCause) bits.push(' ', h('span', { class: 'tag tag-e', title: job.errorCause }, V.causeLabel(job.errorCause)));
 		// The resumed chip is current status, not history: it shows only while the
@@ -245,9 +264,15 @@ VIF.vod = VIF.vod || {};
 			if (job.error) lines.push(h('div', { class: 'l2', title: job.error }, V.humanizeMs(job.error)));
 			if (job.errorCause && V.RETRY_GLOSS[job.errorCause]) lines.push(h('div', { class: 'l2' }, V.RETRY_GLOSS[job.errorCause]));
 		} else if (job.state === 'cancelled') {
-			lines.push(h('div', { class: 'l2' },
-				h('span', { title: REQUESTS_TIP }, job.requestsSent + ' / ' + (job.requestsTotal || '?') + ' requests'),
-				' · partial results kept · resumable'));
+			// Cancelled before it ever ran has no requests and no partial results —
+			// a 0 / ? line would claim both.
+			if (!job.requestsSent) {
+				lines.push(h('div', { class: 'l2' }, 'cancelled before it started · resumable'));
+			} else {
+				lines.push(h('div', { class: 'l2' },
+					h('span', { title: REQUESTS_TIP }, job.requestsSent + (job.requestsTotal ? ' / ' + job.requestsTotal : '') + ' requests'),
+					' · partial results kept · resumable'));
+			}
 		}
 		return h('td', { class: 'scell' }, h('div', null, bits), lines);
 	}
@@ -260,6 +285,14 @@ VIF.vod = VIF.vod || {};
 		const g = (V.store.groups || []).find((x) => x.name === name);
 		const m = g && g.match;
 		return m && m.application && m.streamPattern ? m.application + ' / ' + m.streamPattern : name;
+	}
+
+	/** What the Analysis sort orders BY is what the cell shows: the analysis
+	    name, its config rule breaking ties. Compound key, so equal rows keep
+	    their newest-first order. */
+	function analysisSortValue(job) {
+		const name = (V.DETECTOR_META[job.detectorType] || {}).name || job.detectorType || '';
+		return (name + '\n' + (configRule(job.streamGroupConfig) || '')).toLowerCase();
 	}
 
 	function timingCell(job) {
@@ -286,7 +319,7 @@ VIF.vod = VIF.vod || {};
 		if (!isTerminal(job)) btns.push(h('button', { class: 'btn btn-sm', onclick: () => actions.cancel(job, refresh) }, 'Cancel'));
 		if (canResume(job)) btns.push(h('button', { class: 'btn btn-sm', onclick: () => actions.resume(job, refresh) }, 'Resume'));
 		if (job.storeResults !== false && isTerminal(job)) btns.push(h('button', { class: 'btn btn-sm btn-ghost', onclick: () => actions.jsonl(job) }, 'JSONL'));
-		btns.push(h('button', { class: 'btn btn-sm', onclick: () => V.nav('job', { id: job.jobId }) }, 'View'));
+		btns.push(h('button', { class: 'btn btn-sm', onclick: () => V.nav(jobView(job), { id: job.jobId }) }, 'View'));
 		if (isTerminal(job)) btns.push(h('button', { class: 'btn btn-sm btn-danger', onclick: () => actions.del(job, refresh) }, 'Delete'));
 		return h('td', null, h('div', { class: 'acts' }, btns));
 	}
@@ -294,7 +327,7 @@ VIF.vod = VIF.vod || {};
 	/* ---------- the view ---------- */
 
 	const view = {
-		state: { tag: '', tagDraft: null, stateFilter: '', offset: 0, limit: 25, refreshMs: 5000, page: null, error: null, fetchSeq: 0 },
+		state: { tag: '', tagDraft: null, stateFilter: '', sortKey: '', sortDir: 1, offset: 0, limit: 25, refreshMs: 5000, page: null, error: null, fetchSeq: 0 },
 		timer: null,
 		gen: 0,
 
@@ -361,17 +394,27 @@ VIF.vod = VIF.vod || {};
 					V.store.groups ? Promise.resolve(null) : api.streamGroups().catch(() => null),
 				];
 				const q = s.tag.trim().toLowerCase();
-				if (!q) {
+				if (!q && !s.sortKey) {
 					[page] = await Promise.all([
 						api.listJobs({ state: s.stateFilter, offset: s.offset, limit: s.limit }),
 						...sideLoads,
 					]);
 				} else {
-					// Tag search is a contains-match, case-insensitive — the API only
-					// filters exact tags, so the listing is fetched whole and matched
-					// here; paging then runs over the matches.
+					// The search is a contains-match on tag and file name, case-
+					// insensitive — the API only filters exact tags, so the listing is
+					// fetched whole and matched here; paging then runs over the matches.
+					// A column sort rides the same whole listing, so it orders every
+					// page, not just the visible one. (An empty query matches all.)
 					const [{ all }] = await Promise.all([this.fetchAllJobs(), ...sideLoads]);
-					const matches = all.filter((j) => (j.tag || '').toLowerCase().indexOf(q) >= 0);
+					const matches = all.filter((j) => (j.tag || '').toLowerCase().indexOf(q) >= 0
+						|| (j.file || '').toLowerCase().indexOf(q) >= 0);
+					if (s.sortKey) {
+						const dir = s.sortDir;
+						matches.sort((a, b) => {
+							const x = analysisSortValue(a), y = analysisSortValue(b);
+							return x < y ? -dir : x > y ? dir : 0;
+						});
+					}
 					const jobs = matches.slice(s.offset, s.offset + s.limit);
 					page = { jobs, total: matches.length, offset: s.offset, count: jobs.length };
 				}
@@ -411,14 +454,16 @@ VIF.vod = VIF.vod || {};
 					h('button', { class: 'btn btn-pri', onclick: () => V.nav('new') }, 'New Analysis'))));
 			root.appendChild(h('div', { class: 'rule2' }));
 
-			const tagInput = h('input', { id: 'vod-tag-input', class: 'input', style: 'width:160px;padding:5px 9px;font-size:12px', placeholder: 'tag',
+			// Longer than any tag (64) plus room for file names, but still capped:
+			// an unbounded query's echo floods the empty state.
+			const tagInput = h('input', { id: 'vod-tag-input', class: 'input', style: 'width:200px;padding:5px 9px;font-size:12px', placeholder: 'tag or file name',
+				maxlength: '128',
 				value: s.tagDraft !== null ? s.tagDraft : s.tag,
 				oninput: (e) => {
 					s.tagDraft = e.target.value;
-					// Auto-apply once the tag is specific enough (3+ characters),
+					// Auto-apply once the query is specific enough (3+ characters),
 					// debounced so typing doesn't fetch per keystroke; emptying the
-					// box auto-clears an applied filter. Matching stays exact — the
-					// server filters and totals, so paging stays honest.
+					// box auto-clears an applied filter.
 					clearTimeout(this._tagTimer);
 					const v = e.target.value.trim();
 					if (v.length >= 3 || (v === '' && s.tag)) {
@@ -452,9 +497,9 @@ VIF.vod = VIF.vod || {};
 						onchange: (e) => { s.stateFilter = e.target.value; s.offset = 0; this.refresh(true); } },
 						STATE_FILTERS.map(([value, label]) =>
 							h('option', { value: value, selected: s.stateFilter === value }, label))),
-					h('label', { style: 'font-size:11px' }, 'Tag'), tagInput,
+					h('label', { style: 'font-size:11px' }, 'Search'), tagInput,
 					h('button', { class: 'btn btn-sm', onclick: applyTag }, 'Filter'),
-					h('button', { class: 'btn btn-sm btn-ghost', title: 'Clear the tag filter', onclick: clearTag }, 'Clear')),
+					h('button', { class: 'btn btn-sm btn-ghost', title: 'Clear the search', onclick: clearTag }, 'Clear')),
 				h('div', { style: 'margin-left:auto;display:flex;align-items:center;gap:12px' },
 					h('button', { class: 'btn btn-sm', onclick: () => this.refresh() }, 'Refresh'),
 					h('label', { class: 'hint' }, 'Auto-refresh ',
@@ -484,10 +529,10 @@ VIF.vod = VIF.vod || {};
 					webhookTitle = 'Every job’s lifecycle changes POST here.\nA job can name its own webhook instead.\n' + vod.lifecycleWebhook;
 				}
 				root.appendChild(h('div', { class: 'strip-cfg' },
-					h('span', { title: 'How many jobs are analyzed at once.\nThe rest wait in queue.' },
-						'Workers ', h('b', null, String(vod.maxConcurrentJobs ?? 1))),
-					h('span', { title: 'How many job records are kept.\nPast the cap, the oldest finished jobs are forgotten.\nTTL is a time limit on finished jobs; no TTL keeps them until the cap pushes them out.' },
-						'Retention ', h('b', null, (vod.maxJobs ?? 25) + ' jobs · ' + (vod.jobTtlSeconds ? 'TTL ' + vod.jobTtlSeconds + 's' : 'no TTL'))),
+					h('span', { title: 'How many jobs run at once; the rest wait their turn.\nSet on On-Demand Configs.' },
+						'Concurrent jobs ', h('b', null, String(vod.maxConcurrentJobs ?? 1))),
+					h('span', { title: 'How many job records are kept.\nPast the cap, the oldest finished jobs are forgotten.\nJob expiry (set on On-Demand Configs) can also forget finished jobs a set time after they end. With no expiry, they stay until the cap pushes them out.' },
+						'Retention ', h('b', null, (vod.maxJobs ?? 25) + ' jobs · ' + (vod.jobTtlSeconds ? 'expire after ' + vod.jobTtlSeconds + 's' : 'no expiry'))),
 					vod.contentDir ? h('span', { title: 'Where a job’s source file is resolved from.' },
 						'Content root ', h('b', null, vod.contentDir)) : null,
 					h('span', { title: webhookTitle }, 'Global webhook ', h('b', null, webhookLabel)),
@@ -506,36 +551,55 @@ VIF.vod = VIF.vod || {};
 				});
 				root.appendChild(h('div', { class: 'empty' },
 					s.error ? 'Nothing to show.'
-						: 'No ' + stateLabel + 'jobs' + (s.tag ? ' with tags matching "' + s.tag + '"' : '') + ((s.stateFilter || s.tag) ? '. ' : ' yet. '),
+						: 'No ' + stateLabel + 'jobs' + (s.tag ? ' matching "' + s.tag + '"' : '') + ((s.stateFilter || s.tag) ? '. ' : ' yet. '),
 					h('a', { href: '#', onclick: (e) => { e.preventDefault(); V.nav('new'); } }, 'Start an analysis'), '.'));
 				restoreScroll(root.lastElementChild);
 				return;
 			}
 
 			const refresh = () => this.settleRefresh();
+			// The Analysis header sorts on click: A to Z, reversed, then back to
+			// newest first. It wears the active direction.
+			const cycleAnalysisSort = () => {
+				if (!s.sortKey) { s.sortKey = 'analysis'; s.sortDir = 1; }
+				else if (s.sortDir > 0) s.sortDir = -1;
+				else { s.sortKey = ''; s.sortDir = 1; }
+				s.offset = 0;
+				this.refresh(true);
+			};
 			root.appendChild(h('table', { class: 'jobs' },
 				h('tr', null,
-					h('th', { style: 'width:300px' }, 'Media'),
-					h('th', { style: 'width:180px' }, 'Analysis'),
+					// Media is wide enough for a long filename but no wider — the
+					// unspecified Actions column absorbs the slack, and its buttons
+					// hug the right edge, so the data columns stay packed together.
+					h('th', { style: 'width:440px;min-width:340px' }, 'Media'),
+					h('th', { style: 'width:180px;cursor:pointer;user-select:none',
+						role: 'button', tabindex: '0',
+						title: 'Sort by analysis type.\nClick again to reverse. A third click brings back newest first.',
+						'aria-sort': s.sortKey ? (s.sortDir > 0 ? 'ascending' : 'descending') : 'none',
+						onclick: cycleAnalysisSort,
+						onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleAnalysisSort(); } } },
+						'Analysis' + (s.sortKey ? (s.sortDir > 0 ? ' ▲' : ' ▼') : '')),
 					h('th', { style: 'width:330px' }, 'State'),
 					h('th', { style: 'width:170px' }, 'Timing'),
 					h('th', { style: 'text-align:right' }, 'Actions')),
 				page.jobs.map((job) => h('tr', null,
 					h('td', null, h('div', { class: 'fcell fclick', role: 'button', tabindex: '0', title: 'Open this job',
-						onclick: () => V.nav('job', { id: job.jobId }),
-						onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); V.nav('job', { id: job.jobId }); } } },
+						onclick: () => V.nav(jobView(job), { id: job.jobId }),
+						onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); V.nav(jobView(job), { id: job.jobId }); } } },
 						thumbCell(job),
 						h('div', null, h('div', { class: 'fname' }, job.file),
-							job.tag ? h('div', { class: 'fmeta' }, h('span', { class: 'tag tag-n' }, job.tag)) : null))),
+							job.tag ? h('div', { class: 'fmeta' }, h('span', { class: 'tag tag-n verbatim' }, job.tag)) : null))),
 					h('td', { class: 'scell' },
 						h('div', { class: 'l1', style: 'display:flex;align-items:center;gap:6px;white-space:nowrap' },
 							job.detectorType ? h('img', { class: 'dticon', src: 'wse-plugins/server/vif/'
-								+ (['object', 'scene', 'vlm', 'synthetic'].indexOf(job.detectorType) >= 0 ? job.detectorType : 'unknown') + '.png', alt: '' }) : null,
+								+ (['object', 'scene', 'vlm', 'synthetic', 'verify', 'motion', 'chain'].indexOf(job.detectorType) >= 0 ? job.detectorType : 'unknown') + '.png', alt: '' }) : null,
 							(V.DETECTOR_META[job.detectorType] || {}).name || job.detectorType || '—'),
 						h('div', { class: 'l2 mono' }, (job.streamGroupConfig || job.detectorType)
 							? h('a', { href: '#', class: 'cfglink',
-								title: (job.streamGroupConfig ? job.streamGroupConfig + '\n' : '')
-									+ 'Show the analysis options this job ran with',
+								// No name preview here: the modal this opens is titled with the
+								// config's stored name, where the context explains it.
+								title: 'Show the analysis options this job ran with',
 								onclick: (e) => { e.preventDefault(); V.showJobOptions(job); } },
 								configRule(job.streamGroupConfig) || 'inline config')
 							: 'known once running')),

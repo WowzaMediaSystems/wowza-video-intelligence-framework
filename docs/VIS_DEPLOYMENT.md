@@ -7,7 +7,7 @@ For compute requirements, see the [Compute Requirements](../README.md#compute-re
 ## Prerequisites
 
 - **Docker Engine** and **Docker Compose** (v2)
-- **NVIDIA GPU** with compatible drivers (v570 or above, `nvidia-smi` should work)
+- **NVIDIA GPU** with compatible drivers (v580 or above, `nvidia-smi` should work)
 - **NVIDIA Container Toolkit** (`nvidia-container-toolkit`) — [installation guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - **A VIS license** (`VIS_LICENSE`, a license string) — contact us via [wowza.com/contact](https://www.wowza.com/contact) if you don't have one
 - **A clone or copy of this repository**
@@ -123,7 +123,7 @@ curl -o vis/models/rfdetr-medium.pth \
 
 When a checkpoint file is present in `vis/models/`, VIS uses it directly without downloading.
 
-**Custom models:** To use fine-tuned weights, place the `.pth` file in `vis/models/` and set `checkpoint_path` in your `video-intelligence.json` configuration (e.g., `"checkpoint_path": "models/my_custom_weights.pth"`).
+**Custom models:** To use fine-tuned weights, place the `.pth` file in `vis/models/` and set `checkpoint_path` for the stream in the [VIF configuration](http://localhost:8088/Home.htm#plugin/server/vif/stream-config.html) page or REST API (e.g., `"checkpoint_path": "models/my_custom_weights.pth"`).
 
 ### Scene Analysis (Experimental)
 

@@ -1,6 +1,6 @@
 # VOD Analysis Guide — analyzing video files
 
-The Video Intelligence framework can analyze **video files** as well as live streams. A **VOD job** points one of the framework's detectors — object detection, scene analysis, VLM analysis, or synthetic video detection — at an MP4 file that is already on the Engine, runs it over the whole file as fast as the analysis backend allows, and leaves behind a complete, queryable record: every detection with its position on the video's timeline, a provenance manifest describing exactly what was run, and a thumbnail.
+The Video Intelligence framework can analyze **video files** as well as live streams. A **VOD job** points one of the framework's detectors — object detection, scene analysis, VLM analysis, synthetic video detection, or [chains](CHAINS_API.md) — at an MP4 file that is already on the Engine, runs it over the whole file as fast as the analysis backend allows, and leaves behind a complete, queryable record: every detection with its position on the video's timeline, a provenance manifest describing exactly what was run, and a thumbnail.
 
 Everything is driven over the Wowza Streaming Engine REST API — the v2 Video Intelligence API, under `/v2/vif`. Jobs run in the background, survive Engine restarts, recover automatically from transient failures, and can push status updates to your own service via webhooks — so a single `POST` is enough to fire and forget.
 
@@ -11,16 +11,17 @@ Everything is driven over the Wowza Streaming Engine REST API — the v2 Video I
 1. [How it works](#how-it-works)
 2. [Quick start](#quick-start)
 3. [Choosing the analysis: stream group configs and inline configs](#choosing-the-analysis-stream-group-configs-and-inline-configs)
-4. [Inputs](#inputs)
-5. [Outputs](#outputs)
-6. [Playing the source file](#playing-the-source-file)
-7. [On-disk layout](#on-disk-layout)
-8. [Job lifecycle, failures, and resume](#job-lifecycle-failures-and-resume)
-9. [Lifecycle webhooks](#lifecycle-webhooks)
-10. [VOD settings and secrets](#vod-settings-and-secrets)
-11. [Best practices](#best-practices)
-12. [API reference](#api-reference)
-13. [Troubleshooting](#troubleshooting)
+4. [Chain analysis](#chain-analysis)
+5. [Inputs](#inputs)
+6. [Outputs](#outputs)
+7. [Playing the source file](#playing-the-source-file)
+8. [On-disk layout](#on-disk-layout)
+9. [Job lifecycle, failures, and resume](#job-lifecycle-failures-and-resume)
+10. [Lifecycle webhooks](#lifecycle-webhooks)
+11. [VOD settings and secrets](#vod-settings-and-secrets)
+12. [Best practices](#best-practices)
+13. [API reference](#api-reference)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -51,6 +52,7 @@ All detector types are supported:
 | `scene` | Scene analysis | Decoded frames at `inference_fps` | Yes |
 | `vlm` | Vision-language model | Decoded frames at `inference_fps` | Yes |
 | `synthetic` | Synthetic/AI-generated video detection | Keyframe-aligned clips of ~`duration` seconds | No (clips are relayed encoded, never decoded) |
+| `chain` | Named scene/object/VLM/synthetic stages | Shared capture; a synthetic stage uses clip windows | Yes when frames are decoded |
 
 ## Quick start
 
@@ -62,7 +64,7 @@ VIF="http://localhost:8087/v2/vif"
 ```
 
 > [!NOTE]
-> The framework configures the Engine REST API for HTTP Basic authentication, which is what `curl -u` speaks by default. If your Engine is set to digest auth instead (`<AuthenticationMethod>` in `Server.xml` — the default on standalone Engine installs), add `--digest` to every `curl` call in this guide.
+> The framework configures the Engine REST API for HTTP Basic authentication, which is what `curl -u` speaks by default. If your Engine is set to digest auth instead (`<AuthenticationMethod>` in `Server.xml` — the default on standalone Engine installs), add `--digest` to every `curl` call in this guide. The Manager's VIF pages answer either scheme, provided the Engine's CORS policy exposes `WWW-Authenticate` (the `restUserHTTPHeaders` value in [README.wse-plugin.md](README.wse-plugin.md)).
 
 **1. Put a video where the Engine can see it.** Jobs analyze files under the Engine's content directory — `./wse/content` in a compose checkout:
 
@@ -209,14 +211,35 @@ So a group plus a small inline config is the usual shape: reuse a tuned analysis
 Which to use:
 
 - **Stream group configs** are right when the same analysis runs repeatedly, when you manage configurations centrally through the Manager UI, and when jobs should be resumable unattended — the group's credentials live in the group, so the Engine can always reconstruct the job (see [resume](#job-lifecycle-failures-and-resume)).
-- **Inline configs** are right for programmatic, per-request variation. Note that inline credentials (a VLM `endpoint.api_key`, for example) are **never written to disk** — the job's record stores a redacted copy — which is good for secret hygiene, but means a failed inline job holding credentials can only be resumed by re-supplying them (automatic resume stands down and tells you why in the log).
+- **Inline configs** are right for programmatic, per-request variation. An inline credential can take either form. A literal value (a VLM `endpoint.api_key`, for example) is **never written to disk** — the job's record stores a redacted copy — which is good for secret hygiene, but means a failed inline job holding literals can only be resumed by re-supplying them (automatic resume stands down and tells you why in the log). A `*_secret` reference (`endpoint.api_key_secret` naming an entry in the [secrets document](#named-webhook-secrets)) removes that trade-off: the record keeps the name — a name is not a secret — so the job resumes unattended, and each run resolves the secret's current value.
 
 What the job resolved to is recorded on it either way, so "which configuration produced these detections" stays answerable even after the group is edited: the single-job read carries `config` (the inline document as submitted, redacted) and `effective_config` (what actually ran, redacted). Editing the group later never touches a job already submitted.
 
+## Chain analysis
+
+A [chain](CHAINS_API.md) uses named ordinary detectors in one `config.detector`.
+Each stage inherits its own detector baseline. Omitted `mode` runs stages
+linearly; `conditional` branches using typed routing; `dynamic` delegates
+decisions to an installed Java listener.
+
+Frame-only chains work on VOD and live streams. Synthetic stages require VOD
+and cannot use dynamic mode. Stages share the captured media, so sampling
+belongs in the parent `processing`; per-stage `frame_selection` narrows that
+capture and `crop` selects preceding bounding boxes.
+
+New Analysis's Stored config picker shows saved chain definitions. The report
+shows each window's executions in order, including revisits, missing historical
+detail and stages not run. JSONL and paged results retain the complete terminal
+`rings` even with the default `result_mode: final` listener setting.
+
+Resume retains committed windows and reruns an interrupted window from its
+entry stage. Java listener state is reconstructed, and external listener side
+effects from a replayed window can repeat. No partial ring advances the durable
+window checkpoint.
 ## Inputs
 
 - **Containers:** `.mp4`, `.m4v`, `.mov`, `.f4v` — anything else is not listed and not accepted.
-- **Codec:** an **H.264** or **H.265** video track for the frame-decoded types (`object`, `scene`, `vlm`). `synthetic` needs **H.264**: it relays the encoded bitstream rather than decoding it, and is refused at once on anything else.
+- **Codec:** an **H.264** or **H.265** video track for the frame-decoded types (`object`, `scene`, `vlm`). `synthetic` needs **H.264**: it relays the encoded bitstream rather than decoding it, and is refused at once on anything else. Any other video codec (AV1, VP9, MPEG-4 Part 2…) is refused at submit with a `400` naming the codec — transcode to H.264 first.
 - **Location:** files are named **relative to the content directory** (the VOD settings' `content_dir`, by default the Engine's `content/` folder — `./wse/content` in a compose checkout). Subdirectories work (`archive/cam3/monday.mp4`); paths that resolve outside the content root are refused.
 - **Audio** is ignored; only the video track is analyzed.
 
@@ -267,7 +290,10 @@ Submitting with `"store_results": false` runs a status-only job: nothing is writ
 
 Detection events also flow through the **listeners** configured on the job's config, exactly as for a live stream: a log listener writes to the Video Intelligence log, a webhook listener POSTs to your endpoint. Events from a file job carry the job's identity (`vod-<job id>`) as the stream name, plus `job_id` and `source_file` properties. Listeners that need an output stream (overlay, ID3) are skipped for file jobs and named in `listener_warning`.
 
-For webhook-listener routing (the Engine's `Webhooks.json` filters), a file job's events carry the context `vHost: _defaultVHost_`, `app: vod`, `appInstance: _definst_`, `stream: vod-<job id>` — a live-style wildcard filter (`vHost.*.app.*.appInstance.*.stream.*.>`) matches them alongside your live streams, and a filter anchored on `app.vod` selects file-job detections alone.
+A file job's detection events carry the context `vhost: _defaultVHost_`, `app: vod`, `appInstance: _definst_`, `stream: vod-<job id>` — a job runs server-scoped, with no application instance of its own, and the shape is filled rather than left partly null because a consumer routes on it. `app: vod` is what tells file-job detections apart from your live streams; there is no server-side filtering to configure, since a webhook listener's destination belongs to the listener and a job's listeners come from the config it names.
+
+> [!NOTE]
+> Detection webhooks and the **lifecycle** webhook are separate channels, and their ordering across each other is not guaranteed: a job's terminal `status_changed` may arrive before its last detection deliveries. The polled `…/results` view stays authoritative for what was analyzed.
 
 ## Playing the source file
 
@@ -372,9 +398,10 @@ The queue does not survive a restart: a job still waiting when the Engine goes d
 | `endpoint_degraded` | The detector's upstream endpoint (VLM, SVD…) reported itself unreachable or still loading. | Yes — patiently |
 | `not_connected` / `connect_failed` | No connection to the analysis service could be established. | Yes — patiently |
 | `detector_error` | The analysis service reported an error. | Yes — patiently |
+| `endpoint_rejected` | The detector's upstream endpoint (VLM, SVD…) rejected the job's credentials or request. | No — fix the credentials, then resume |
 | `config_drift` | The configuration no longer matches the run being continued. | No |
 | `coverage_shortfall` | The decode stopped short of the end of the file (damaged source). | No |
-| `source_error` | The file could not be opened or read (missing, no H.264 track…). | No |
+| `source_error` | The file could not be opened or read (missing, unreadable, no video track…). | No |
 | `store_error` | Results could not be written to disk. | No |
 | `engine_restart` | The Engine stopped while the job was running, and nobody had cancelled it. | No — resume it manually |
 
@@ -387,7 +414,7 @@ The queue does not survive a restart: a job still waiting when the Engine goes d
 
 Before continuing, the Engine verifies that the source file is unchanged (size/duration/frame rate as recorded in the manifest) and that the configuration still resolves to the same analysis. A job submitted with a `stream_group_config` reloads that group **by name** and re-layers the inline config it was submitted with, so a group edited in the meantime is caught here: the resume is refused with a `409` naming the drift rather than quietly running a different analysis.
 
-Most resumes need no body. The one exception: a job whose inline credentials were redacted out of its record must re-supply them — `{"config": { … }}` with the same configuration including the credential. A body on a group-built job is refused; its credentials reload from the group.
+Most resumes need no body. The one exception: a job whose inline **literal** credentials were redacted out of its record must re-supply them — `{"config": { … }}` with the same configuration including the credential; the credentials-`409` applies only to those. A job whose inline credentials are all `*_secret` references resumes with no body: the record kept the names — a name is not a secret — and the resumed run resolves their current values, so a rotation between the runs applies to the resumed one. A body on a group-built job is refused; its credentials reload from the group.
 
 **Automatic resume** is on by default (the VOD settings' `auto_resume`, or per job with `"auto_resume": false` at submit). When a job fails for a transient reason, the Engine re-runs it on a backoff — seconds apart for blips (`disconnected`, `response_timeout`…), a more patient schedule stretching to minutes for an endpoint that is down or still loading a model (`endpoint_degraded`, `connect_failed`…) — up to 3 attempts. The attempt counter resets whenever a retry gets further than the run before it, so a long file with occasional blips always makes progress, while a dead endpoint stops costing anything after three tries. Every stand-down is logged with its reason; a job left `failed` can always be resumed manually once the cause is fixed. To stop a retry without losing the job, `POST …/cancel` the failed job while it waits: the retry is dropped and the job stays `failed`, record and results intact. A DELETE stops it too, but takes the record with it.
 
@@ -423,12 +450,14 @@ If polling doesn't fit your integration, have the job call you: one POST per per
 
 Configure the destination globally (the VOD settings' `lifecycle_webhook` — every job) or per job (`"lifecycle_webhook": "https://…"` at submit, which overrides the global; an empty string `""` opts a job out entirely). Delivery is ordered per job, retried (3 attempts), never blocks or fails the job, and terminal events are re-delivered after an Engine restart if delivery was never confirmed — design your handler to tolerate an occasional duplicate.
 
+To check the consumer without submitting a job, **Send test event** on the Manager's On-Demand Configs page (or `POST /v2/vif/probes/lifecycle-webhook`) posts one event of this same shape with `"test": true`, a `job_id` that names no job, `state: "running"` and no `results` — to the saved destination under its credential, or to what the form shows if it has not been saved. A handler that acts on every event should ignore one marked `test`.
+
 > [!CAUTION]
 > A per-job webhook URL is recorded in the job's manifest on disk, so never embed a token in one — it would be on disk for as long as the job record is. Authorization is always a [named webhook secret](#named-webhook-secrets) instead: the VOD settings' `lifecycle_webhook_secret` names the credential for the global destination (sent only there, matched by exact string equality — a URL supplied at submit never receives it, even one differing from the global only by a trailing slash or letter case), and a submit's own `lifecycle_webhook_secret` names one for the job's own destination.
 
 ### Named webhook secrets
 
-Every webhook credential lives once, under a name, in the secrets document — `GET/PATCH /v2/vif/persist/secrets`, backed by `conf.modules/vif/vod/secrets.json`. A read answers the **names** only; a value never travels back out.
+Every credential the framework holds can live once, under a name, in the global secrets document — `GET/PATCH /v2/vif/persist/secrets`, backed by `conf.modules/vif/secrets.json` (a document still at the pre-move `conf.modules/vif/vod/secrets.json` is read from there and relocated by the first PATCH). Webhook authorization is one consumer of it; config documents reference the same names through their `*_secret` members (`service.api_key_secret`, `endpoint.api_key_secret`, `tls.client_key_secret`). A read answers the **names** only; a value never travels back out.
 
 ```bash
 curl -si -u "$WSE_ADMIN_USER:$WSE_ADMIN_PASSWORD" "$VIF/persist/secrets" | grep -i etag
@@ -446,11 +475,13 @@ The patch is a JSON merge patch over `values`: a string sets or rotates a name, 
   "lifecycle_webhook_secret": "partner-a" }
 ```
 
-Every delivery of that job's notifications carries the named secret's **current** value as the `Authorization` header. The job record stores the name only, so the value is never at rest in a manifest, rotating it applies immediately to jobs already submitted, and a job finalized after an Engine restart still authenticates. A name nothing configures is refused at submit (`400`); a name deleted **while a job runs** delivers unauthenticated (with a warning in the Engine log) rather than not at all.
+Every delivery of that job's notifications carries the named secret's **current** value as the `Authorization` header. The job record stores the name only, so the value is never at rest in a manifest, rotating it applies immediately to jobs already submitted, and a job finalized after an Engine restart still authenticates. A name nothing configures is refused at submit (`400`), and removing a name something still references — the VOD settings, or any config document's `*_secret` member — is refused with the referrer named. A job record is deliberately not a referencing surface, so a name held only by a submitted job can still be removed while it runs; that, an out-of-band file edit, or an unresolved `${ENV_VAR}` makes the name fail to resolve at delivery — and the delivery goes out unauthenticated, with a warning in the Engine log, rather than not at all.
+
+Some receivers expect their credential under a header of their own naming — `X-Api-Key`, for example. `lifecycle_webhook_header` names the header the secret's value is sent under: on the VOD settings for deliveries to the global destination, on the submit for that job's deliveries; the job's name wins where both are set. Absent means `Authorization`. The settings' name follows the same boundary as the settings' secret — it applies only to deliveries to `lifecycle_webhook` — so a job that brings its own URL sends its credential as `Authorization` unless it names a header of its own. It changes only the label on the credential; which destination receives it stays the secret's rule above. A name that is not a legal header, or one the delivery itself owns (`Content-Type` and the connection-management headers), is refused where it is written.
 
 The global destination authenticates through the same document: the VOD settings' `lifecycle_webhook_secret` names the entry sent on deliveries to its `lifecycle_webhook` — and only there; a job that overrides the URL names its own secret, and a job-named secret wins over the global one when both would apply. A settings patch whose `lifecycle_webhook_secret` names no configured secret is refused with a `400`, and so is a secrets patch that would remove the very entry the settings reference. A settings patch whose `lifecycle_webhook` is not an absolute http(s) URL is refused the same way; a `${ENV_VAR}` placeholder is accepted and judged when it resolves.
 
-Values may be `${ENV_VAR}` placeholders, resolved when the Engine reads the file — recommended in composed deployments. And mind the trust boundary: any client that can submit jobs can direct any named secret's value at a URL of its choosing, so file credentials minted for webhook consumption here — nothing else.
+Values may be `${ENV_VAR}` placeholders, resolved when the Engine reads the file — recommended in composed deployments. And mind the trust boundary: the secrets share one admin realm. Any client holding the Engine REST credentials can point a config or a job at a URL of its choosing and have any named secret's value sent there — exactly as a client that can edit configs has always been able to do with the stored literal credentials. Access to the Engine's REST API is access to every value stored here; scope who holds those credentials, not which secrets you file.
 
 ## VOD settings and secrets
 
@@ -464,7 +495,8 @@ How this Engine runs on-demand analysis is a persist document of its own, `GET/P
 | `content_dir` | Engine `content/` | Where job `file` paths are resolved and uploads land. Applies at the next Engine start. |
 | `jobs_dir` | Engine `vif-vod-jobs/` | Where manifests, results, and thumbnails are stored. Applies at the next Engine start. |
 | `lifecycle_webhook` | none | Default status-webhook URL for every job; an absolute http(s) URL, or a `${ENV_VAR}` placeholder resolving to one. Anything else is refused. |
-| `lifecycle_webhook_secret` | none | Name of a secrets entry whose value is the `Authorization` header on every lifecycle delivery to `lifecycle_webhook`; never sent to a job-supplied destination. A save naming no configured secret is refused. |
+| `lifecycle_webhook_secret` | none | Name of an entry in the global secrets document whose value is sent, under `lifecycle_webhook_header`, on every lifecycle delivery to `lifecycle_webhook`; never sent to a job-supplied destination. A save naming no configured secret is refused. |
+| `lifecycle_webhook_header` | `Authorization` | The header the secret's value is sent under, for receivers that expect their credential under a name of their own (`X-Api-Key`, for example). Applies only to deliveries to `lifecycle_webhook`, like the secret. A name that is not a legal header, or one the delivery itself owns, is refused. |
 | `auto_resume` | `true` | Whether jobs that fail for transient reasons are resumed automatically. |
 | `max_upload_bytes` | `10737418240` (10 GiB) | The largest upload `POST /vod/files` accepts; a bigger one is refused with `413` before a byte is written. |
 
@@ -482,14 +514,14 @@ The answer is the applied document. The caps take effect on the running Engine a
 
 **Retention.** The two retention keys compose rather than override: `max_jobs` bounds how many jobs are kept, `job_ttl_seconds` bounds how long, and either one on its own can forget a job — taking its stored results and thumbnail with it. Once a TTL is configured it is swept every 60 seconds, and again whenever a job is submitted or the Engine restarts; a saved TTL also applies at once to the jobs already held. A queued or running job is never touched however old it is. The clock is the moment the job last ended, so a job that was resumed is measured from the run that continued it rather than from the run that stopped.
 
-The credentials the settings and a submit refer to by name live in the secrets document beside it — see [Named webhook secrets](#named-webhook-secrets).
+The credentials the settings, the configs and a submit refer to by name live in the global secrets document at the VIF config root, `conf.modules/vif/secrets.json` — see [Named webhook secrets](#named-webhook-secrets).
 
 ## Best practices
 
 - **Track progress by `state` and `media_time_ms / source_duration_ms`**, not by `requests_sent/requests_total` — the total is an estimate (see [Outputs](#outputs)).
 - **Prefer webhooks to polling** for automation; poll for dashboards and ad-hoc checks. Handle the occasional duplicate terminal event.
 - **Tag your jobs.** `tag` is free-form and the job list filters on it exactly (`GET /vod/jobs?tag=…`) — use it to group a batch, mark an environment, or carry your own correlation id.
-- **Use stream group configs for recurring, unattended work.** They keep credentials out of your requests, make jobs resumable without re-supplying secrets, and centralize tuning in the Manager UI.
+- **Use stream group configs for recurring, unattended work.** They keep credentials out of your requests, make jobs resumable without re-supplying secrets, and centralize tuning in the Manager UI. (An inline config whose credentials are `*_secret` references is equally resumable — the trade-off is only about inline literals.)
 - **Mind the analysis cost before submitting.** A file job sends roughly `duration_seconds × inference_fps ÷ frames_per_request` requests. Lowering `inference_fps` is the single biggest lever on how long a job takes and what it costs; for many VOD use cases (finding whether/where something appears) 1–5 fps is plenty.
 - **Size the retention to your workflow.** The defaults keep the last 25 jobs forever; a busy pipeline should set `job_ttl_seconds` and copy results into its own storage as jobs complete (webhook → `GET …/results/file` is a clean pattern).
 - **Don't parse `error`; route on `error_cause`.** The message is for people and may change; the cause names are the contract.
@@ -516,7 +548,7 @@ All endpoints are under the Engine REST API (default `http://localhost:8087`), p
 | `GET  /vod/jobs/{jobId}/results/file` | The whole results file as newline-delimited JSON |
 | `GET  /vod/jobs/{jobId}/thumbnail` | The job's thumbnail (`image/jpeg`) |
 | `GET/PATCH /persist/vod-settings` | How this Engine runs on-demand analysis |
-| `GET/PATCH /persist/secrets` | The named webhook credentials |
+| `GET/PATCH /persist/secrets` | The global named credentials — endpoint keys, the service key, webhook authorization — names out, values in |
 
 **Responses.** A successful call answers with the operation's payload itself — a submit answers `201` with the job, a read returns the resource, an action answers `202` with the job as it stood when the request was taken, and a DELETE answers `204` with no body. Every **refusal** raised inside the API is one standard shape, `application/problem+json` (RFC 7807):
 
@@ -530,7 +562,7 @@ Which status means what, throughout the `/vod` world:
 
 | Status | When |
 |---|---|
-| `400` | Anything wrong with the request body or a query parameter: an unknown stream group config, neither configuration member, a configuration that selects no detector, a missing or unsupported file, a bad webhook URL, an unknown secret name, a non-numeric page number, a state that is not a state |
+| `400` | Anything wrong with the request body or a query parameter: an unknown stream group config, neither configuration member, a configuration that selects no detector, a missing or unsupported file, a bad webhook URL, an unknown secret name, a webhook header name that is not a legal header or one the delivery owns, a config slot carrying both a literal credential and its `*_secret`, a non-numeric page number, a state that is not a state |
 | `404` | The job id in the path names no job — and, on the results endpoints, a job that stored no rows; a file delete naming a file that is not there |
 | `409` | A conflict with the job's own state: cancelling a terminal job, deleting one that is not terminal, every resume refusal, an upload whose name is taken, a file delete while a queued or running job is using the file |
 | `413` | An upload larger than the VOD settings' `max_upload_bytes` |
@@ -556,7 +588,7 @@ curl -s -u "$WSE_ADMIN_USER:$WSE_ADMIN_PASSWORD" "$VIF/vod/files"
 }
 ```
 
-A listing is not a probe: a file here can still turn out to carry no video track this Engine can decode — or an H.265 one, which only the frame-decoded types accept — which the job reports when it runs.
+A listing is not a probe: a file here whose video is in a codec no job decodes (AV1, VP9…) is refused when a job is submitted on it; one with no readable video track fails when the job runs, as does an H.265 one under `synthetic`, which only takes H.264.
 
 ### `POST /vod/files?file=<relative path>`
 
@@ -607,7 +639,8 @@ Submits a job. Answers `201` immediately with the job; the analysis runs in the 
 | `store_results` | no (default `true`) | `false` runs the job status-only: no stored rows, no resume. |
 | `tag` | no | Free-form label; the job list filters on it. |
 | `lifecycle_webhook` | no | Status-webhook URL for this job. Overrides the global; `""` disables notifications for this job. |
-| `lifecycle_webhook_secret` | no | Name of an entry in the secrets document; its value is sent as the `Authorization` header on this job's notifications (see [Named webhook secrets](#named-webhook-secrets)). An unknown name is refused. |
+| `lifecycle_webhook_secret` | no | Name of an entry in the secrets document; its value is sent under `lifecycle_webhook_header` (`Authorization` by default) on this job's notifications (see [Named webhook secrets](#named-webhook-secrets)). An unknown name is refused. |
+| `lifecycle_webhook_header` | no | The header the secret's value is sent under on this job's notifications. Absent means the VOD settings' header when the job delivers to the settings' `lifecycle_webhook`, and `Authorization` otherwise. Refused beside a `lifecycle_webhook` of `""`. |
 | `auto_resume` | no | Overrides the VOD settings' `auto_resume` for this job. |
 
 ```bash
@@ -738,7 +771,7 @@ Refusals: `404` (unknown job), and `409` on a job that has already finished with
 
 ### `POST /vod/jobs/{jobId}/resume`
 
-Continues a stopped job from the last stored answer. The body is empty except to re-supply an inline job's credentials: `{"config": { … }}`, the same analysis as submitted, from which only the credentials are taken. A body on a group-built job is refused.
+Continues a stopped job from the last stored answer. The body is empty except to re-supply an inline job's **literal** credentials: `{"config": { … }}`, the same analysis as submitted, from which only the credentials are taken. A body on a group-built job is refused; a job whose credentials are all `*_secret` references needs none.
 
 Answers `202 Accepted` with the job as it was queued again. Refusals: `400` for a body this API cannot read; `404` for an unknown job; `409` with a `detail` naming the rule — the job is still running or already completed, its run has not finished writing its record yet, it kept no results, the source file changed, the stream group config it was built from is gone or has changed, credentials the record does not hold and the body did not supply, or the resume point cannot be opened.
 
@@ -793,7 +826,9 @@ The job's frame as a JPEG — live while running, representative once finished, 
 
 **An upload answers `413`.** The file is bigger than `max_upload_bytes` in the VOD settings (10 GiB by default). Raise it, or put the file in the content directory by other means.
 
-**The job fails immediately with `source_error`.** The file is missing, unreadable, or carries no H.264 or H.265 video track. The extension filter on `/vod/files` is not a probe — a `.mp4` with only AV1 or VP9 inside lists fine and fails here.
+**The submit answers `400` naming a codec.** The file reads, but its video is AV1, VP9 or another codec no job decodes (`"the video track in clip.mp4 is av01 (AV1), which VOD analysis cannot decode; …"`). The extension filter on `/vod/files` is not a probe — such a file lists fine — and no job is created. Transcode it to H.264 and submit that.
+
+**The job fails immediately with `source_error`.** The file is missing, unreadable, or carries no video track at all.
 
 **A `synthetic` job fails with "clip detectors need an H.264 source".** The file is H.265, and clip-based analysis relays the bitstream instead of decoding it. Analyze that file with `object`, `scene`, or `vlm` instead, which decode either codec — or transcode it to H.264 and submit that.
 
@@ -816,6 +851,10 @@ The job's frame as a JPEG — live while running, representative once finished, 
 **A resume answers 409 "the source file for this job cannot be resolved".** The file was deleted or moved after the job ran. Put the same bytes back under the same name and resume again, or submit a new job.
 
 **A cancel answers 409 "only a queued or running job can be cancelled".** The job already reached `completed`, `failed`, or `cancelled` — there is nothing left to stop. DELETE it if what you wanted was the record gone. The one terminal job a cancel accepts is a `failed` one still waiting on its automatic retry: that cancel drops the retry and answers `202`.
+
+**A config write answers 400 "… and … are exclusive; send one".** The write carried both a literal credential and its `*_secret` reference for the same slot — a slot holds one form, never both. Send the form you mean; setting either clears the stored other.
+
+**A secrets PATCH answers 400 "Unable to remove secret '…' while it is in use: …".** The removal would strand a reference: a config document, the VOD settings or an unfinished inline job still points at that secret. The detail lists every use of every name the patch removes, one per line; repoint or clear each of them, then remove the names. Rotation is never refused — to change a value, just set it.
 
 **A settings or secrets PATCH answers 428 or 412.** Persist writes are guarded by `If-Match`: `428` means the header was missing, `412` that the revision it quoted is no longer current. Read the document again and quote the `ETag` it answers with.
 

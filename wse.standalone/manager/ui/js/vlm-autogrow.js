@@ -7,6 +7,10 @@
         'cfg-vlm-response-schema'
     ];
 
+    var SELECTOR = IDS.map(function (id) {
+        return 'textarea[id="' + id + '"], textarea[id$="-' + id + '"]';
+    }).join(', ');
+
     // Fit one textarea to its content. Bail when hidden (offsetParent === null):
     // scrollHeight is unreliable for a display:none element, and vlmAutoGrowAll()
     // re-fits it once its panel is shown. Resetting to 'auto' before measuring lets
@@ -18,15 +22,15 @@
     }
 
     function growAll() {
-        IDS.forEach(function (id) { grow(document.getElementById(id)); });
+        Array.prototype.forEach.call(document.querySelectorAll(SELECTOR), grow);
     }
 
-    IDS.forEach(function (id) {
-        var el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('input', function () { grow(el); });
-        }
-    });
+    if (!window.vlmAutoGrowAll) {
+        document.addEventListener('input', function (event) {
+            var target = event.target;
+            if (target && target.matches && target.matches(SELECTOR)) grow(target);
+        });
+    }
 
     window.vlmAutoGrowAll = growAll;
 })();

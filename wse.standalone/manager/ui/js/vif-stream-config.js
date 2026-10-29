@@ -4,6 +4,11 @@
     VIF.streamConfig = VIF.streamConfig || {};
 
     VIF.streamConfig.init = async function () {
+        if (!VIF.core.verifyEnabled()) {
+            var verifyOption = document.querySelector('#cfg-detector-type option[value="verify"]');
+            if (verifyOption) verifyOption.remove();
+        }
+
         var COCO_CLASSES = ['airplane', 'apple', 'backpack', 'banana', 'baseball bat', 'baseball glove', 'bear', 'bed', 'bench', 'bicycle', 'bird', 'boat', 'book', 'bottle', 'bowl', 'broccoli', 'bus', 'cake', 'car', 'carrot', 'cat', 'cell phone', 'chair', 'clock', 'couch', 'cow', 'cup', 'dining table', 'dog', 'donut', 'elephant', 'fire hydrant', 'fork', 'frisbee', 'giraffe', 'hair drier', 'handbag', 'horse', 'hot dog', 'keyboard', 'kite', 'knife', 'laptop', 'microwave', 'motorcycle', 'mouse', 'orange', 'oven', 'parking meter', 'person', 'pizza', 'potted plant', 'refrigerator', 'remote', 'sandwich', 'scissors', 'sheep', 'sink', 'skateboard', 'skis', 'snowboard', 'spoon', 'sports ball', 'stop sign', 'suitcase', 'surfboard', 'teddy bear', 'tennis racket', 'tie', 'toaster', 'toilet', 'toothbrush', 'traffic light', 'train', 'truck', 'tv', 'umbrella', 'vase', 'wine glass', 'zebra'];
 
         function loadVlmModules() {
@@ -12,11 +17,6 @@
                 return VIF.core.loadScript('wse-plugins/server/vif/js/' + name + '.js');
             }));
         }
-        // Kick off the loads immediately (same timing as the original fire-and-forget
-        // injection - give the three modules the most possible time to load before
-        // they're needed), but keep the promise so it can be awaited later, right
-        // before loadStreams() (see the end of this function).
-        var vlmModulesPromise = loadVlmModules();
 
         var streamsList = [];
         // The resource each dropdown entry addresses, keyed by its option value:
@@ -51,6 +51,11 @@
         // default 2s window = 4 images per request, matching the bundled example config in
         // docker/conf.modules/vif/Default.json.
         var VLM_SUGGESTED_INFERENCE_FPS = 2;
+        // What a new Verify config arrives with: a longer window than the live detectors ask for,
+        // and the rate its review runs at. Prepopulated values only — a Verify config that clears
+        // them inherits the global processing defaults like any other config.
+        var VERIFY_SUGGESTED_WINDOW_SECONDS = 8;
+        var VERIFY_SUGGESTED_INFERENCE_FPS = 1;
         var isDirty = false;
         var isSaving = false;
         var wasSaved = false;
@@ -65,7 +70,228 @@
         // stream selection, or another status message replaces them - never on a timer.
         var statusIsSticky = false;
         var STREAM_CONFIG_SELECTION_STORAGE_KEY = `vif.stream-config.selected-stream.${window.location.host}`;
+        // A one-shot hint another page leaves for "+ New Stream Config": the detector type to open on.
+        var NEW_CONFIG_DETECTOR_TYPE_STORAGE_KEY = `vif.stream-config.new-detector-type.${window.location.host}`;
         FIELD_RULES = VIF.fieldRegistry.deriveFieldRules();
+
+        var SECTION_EVENT_TYPES = ['change', 'click', 'input'];
+
+        // The credential slots the detector sections carry; the VIS service key's slot
+        // lives outside the sections and is not one of these.
+        var SECTION_SECRET_SOURCES = ['cfg-vlm-api-key',
+            'cfg-synthetic-api-key', 'cfg-synthetic-tls-client-key'];
+        var secretNamesLoaded = [];
+
+        function byId(baseId) {
+            return function(el, prefix) { return el.id === prefix + baseId; };
+        }
+
+        function byClass(name) {
+            return function(el) { return !!el.classList && el.classList.contains(name); };
+        }
+
+        // The slot a secret button acts on, from the row that holds it: the row's id is
+        // <prefix><base><rowSuffix>.
+        function secretBaseFrom(root, el, rowSuffix) {
+            const row = el.closest('[id$="' + rowSuffix + '"]');
+            return row ? row.id.slice(sectionPrefix(root).length, -rowSuffix.length) : null;
+        }
+
+        function byRadioGroup(name) {
+            return function(el, prefix) { return el.type === 'radio' && el.name === prefix + name; };
+        }
+
+        function bySelectorFrom(anchorBaseId, rest) {
+            return function(el, prefix) { return el.matches('#' + CSS.escape(prefix + anchorBaseId) + rest); };
+        }
+
+        function byLabelHolding(baseId) {
+            return function(el, prefix) {
+                return el.tagName === 'LABEL' && !!el.querySelector(':scope > #' + CSS.escape(prefix + baseId));
+            };
+        }
+
+        var SECTION_HANDLERS = [
+            { on: 'change', matches: byId('cfg-model-name'), run: function(root) { toggleCheckpointPath(root); } },
+            { on: 'change', matches: byId('cfg-checkpoint-path'), run: function(root) { updateClassNamesOptions(root); } },
+            { on: 'change', matches: byId('cfg-tracking-method'), run: function(root) { toggleByteTrack(root); } },
+            { on: 'change', matches: byId('cfg-tiling-enabled'), run: function(root) { toggleTiling(root); } },
+            { on: 'change', matches: byId('cfg-tiling-mode'), run: function(root) { toggleTilingMode(root); } },
+            { on: 'change', matches: byId('cfg-tiling-full-frame'), run: function(root) { toggleFullFrameDetection(root); } },
+            { on: 'click', matches: bySelectorFrom('cfg-scene-class-names', ' + button'),
+                run: function(root) { addClassRow(root, 'cfg-scene-class-names', '', { withHint: false }); } },
+            { on: 'input', matches: byId('cfg-synthetic-endpoint'), run: function(root) { updateSyntheticEndpointFields(root); } },
+            { on: 'click', matches: byId('cfg-synthetic-endpoint-test'), run: function(root) { testSvdEndpoint(root); } },
+            { on: 'click', matches: byLabelHolding('cfg-synthetic-tls-certs-caret'), run: function(root) { toggleSyntheticTlsCerts(root); } },
+            { on: 'click', matches: byLabelHolding('cfg-motion-advanced-caret'), run: function(root) { toggleMotionAdvanced(root); } },
+            { on: 'input', matches: byId('cfg-synthetic-api-key'),
+                run: function(root) { syncSectionApiKeyToggle(root, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle'); } },
+            { on: 'click', matches: byId('cfg-synthetic-api-key-toggle'), run: function(root) { toggleSyntheticApiKeyVisibility(root); } },
+            { on: 'input', matches: byId('cfg-synthetic-endpoint'), run: function(root) { clearSvdEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-synthetic-tls-ca-cert'), run: function(root) { clearSvdEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-synthetic-tls-client-cert'), run: function(root) { clearSvdEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-synthetic-tls-client-key'), run: function(root) {
+                clearSvdEndpointTestResult(root);
+                syncSaveAsSecret(field(root, 'cfg-synthetic-tls-client-key'));
+            } },
+            { on: 'input', matches: byId('cfg-synthetic-api-key'), run: function(root) { clearSvdEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-synthetic-function-id'), run: function(root) { clearSvdEndpointTestResult(root); } },
+            { on: 'change', matches: byId('cfg-synthetic-use-tls'), run: function(root) { clearSvdEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-verify-flag-threshold'), run: function(root) { updateVerifyGateLine(root); } },
+            { on: 'input', matches: byId('cfg-verify-strong-threshold'), run: function(root) { updateVerifyGateLine(root); } },
+            { on: 'change', matches: byId('cfg-vlm-model-name'), run: function(root) { toggleVlmModelNameOther(root); } },
+            { on: 'change', matches: byId('cfg-vlm-model-name'), run: function(root) { clearVlmEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-vlm-model-name-other'), run: function(root) { clearVlmEndpointTestResult(root); } },
+            { on: 'input', matches: byId('cfg-vlm-endpoint-url'), run: function(root) { clearVlmEndpointTestResult(root); } },
+            { on: 'click', matches: byId('cfg-vlm-endpoint-test'), run: function(root) { testVlmEndpoint(root); } },
+            { on: 'input', matches: byId('cfg-vlm-api-key'),
+                run: function(root) { syncSectionApiKeyToggle(root, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle'); } },
+            { on: 'input', matches: byId('cfg-vlm-api-key'), run: function(root) { clearVlmEndpointTestResult(root); } },
+            { on: 'click', matches: byId('cfg-vlm-api-key-toggle'), run: function(root) { toggleVlmApiKeyVisibility(root); } },
+            { on: 'change', matches: byRadioGroup('vlm-mode'), run: function(root) { toggleVlmMode(root); } },
+            { on: 'change', matches: byRadioGroup('vlm-reasoning-level'), run: function() { markDirty(); } },
+            { on: 'click', matches: bySelectorFrom('cfg-vlm-detect-classes', ' + button'),
+                run: function(root) { addVlmClassRow(root, 'cfg-vlm-detect-classes'); } },
+            { on: 'click', matches: bySelectorFrom('vlm-mode-custom', ' > .form-group > button'),
+                run: function(root) { withPromptGuide(root, function(guide) { guide.open(); }); } },
+            { on: 'click', matches: byId('vlm-guide-modal'),
+                run: function(root, el, event) { if (event.target === el) withPromptGuide(root, function(guide) { guide.close(); }); } },
+            { on: 'click', matches: bySelectorFrom('vlm-guide-modal', ' .overlay-close'),
+                run: function(root) { withPromptGuide(root, function(guide) { guide.close(); }); } },
+            { on: 'input', matches: byId('cfg-vlm-system-prompt'), run: function(root) { updateVlmCustomLint(root); } },
+            { on: 'input', matches: byId('cfg-vlm-user-prompt'), run: function(root) { updateVlmCustomLint(root); } },
+            { on: 'click', matches: bySelectorFrom('cfg-vlm-custom-classes', ' + button'),
+                run: function(root) { addVlmClassRow(root, 'cfg-vlm-custom-classes'); } },
+            { on: 'change', matches: byRadioGroup('vlm-schema-kind'),
+                run: function(root, el) { withSchemaBuilder(root, function(builder) { builder.switchKind(el.value); }); } },
+            { on: 'change', matches: byRadioGroup('vlm-schema-mode'),
+                run: function(root, el) { withSchemaBuilder(root, function(builder) { builder.switchMode(el.value); }); } },
+            { on: 'click', matches: bySelectorFrom('cfg-vlm-schema-rows', ' + button'),
+                run: function(root) { withSchemaBuilder(root, function(builder) { builder.addField(); }); } },
+            { on: 'input', matches: byId('cfg-vlm-response-schema'),
+                run: function(root) { withSchemaBuilder(root, function(builder) { builder.validate(); }); } },
+            { on: 'click', matches: byLabelHolding('cfg-vlm-advanced-caret'), run: function(root) { toggleVlmAdvanced(root); } },
+            { on: 'change', matches: byId('cfg-vlm-api-key-source'),
+                run: function(root) { secretSourceChanged(root, 'cfg-vlm-api-key'); clearVlmEndpointTestResult(root); } },
+            { on: 'change', matches: byId('cfg-synthetic-api-key-source'),
+                run: function(root) { secretSourceChanged(root, 'cfg-synthetic-api-key'); clearSvdEndpointTestResult(root); } },
+            { on: 'change', matches: byId('cfg-synthetic-tls-client-key-source'),
+                run: function(root) { secretSourceChanged(root, 'cfg-synthetic-tls-client-key'); clearSvdEndpointTestResult(root); } },
+            { on: 'change', matches: byId('cfg-vlm-api-key-secret'),
+                run: function(root) { markDirty(); clearVlmEndpointTestResult(root); } },
+            { on: 'change', matches: byId('cfg-synthetic-api-key-secret'),
+                run: function(root) { markDirty(); clearSvdEndpointTestResult(root); } },
+            { on: 'change', matches: byId('cfg-synthetic-tls-client-key-secret'),
+                run: function(root) { markDirty(); clearSvdEndpointTestResult(root); } },
+            { on: 'click', matches: byClass('secret-save-as'),
+                run: function(root, el) { promptStoreSecret(root, secretBaseFrom(root, el, '-value-row')); } },
+            { on: 'click', matches: byClass('secret-store-confirm'),
+                run: function(root, el) { confirmStoreSecret(root, secretBaseFrom(root, el, '-store-row')); } },
+            { on: 'click', matches: byClass('secret-store-cancel'),
+                run: function(root, el) { cancelStoreSecret(root, secretBaseFrom(root, el, '-store-row')); } }
+        ];
+
+        function sectionPrefix(root) {
+            return root.dataset.vifPrefix || '';
+        }
+
+        function withSchemaBuilder(root, fn) {
+            return window.vlmSchemaBuilder ? fn(window.vlmSchemaBuilder(root)) : undefined;
+        }
+
+        function withPromptGuide(root, fn) {
+            return window.vlmPromptGuide ? fn(window.vlmPromptGuide(root)) : undefined;
+        }
+
+        function field(root, baseId) {
+            const prefix = sectionPrefix(root);
+            const id = prefix + baseId;
+            const sections = VIF.fieldRegistry.sections;
+            for (let i = 0; i < sections.length; i++) {
+                const section = root.querySelector('#' + CSS.escape(prefix + sections[i].group));
+                if (!section) continue;
+                if (section.id === id) return section;
+                const found = section.querySelector('#' + CSS.escape(id));
+                if (found) return found;
+            }
+            return null;
+        }
+
+        function dispatchSectionEvent(event) {
+            const root = event.currentTarget;
+            const prefix = sectionPrefix(root);
+            SECTION_HANDLERS.forEach(function(handler) {
+                if (handler.on !== event.type) return;
+                for (let el = event.target; el && el !== root; el = el.parentElement) {
+                    if (handler.matches(el, prefix)) {
+                        handler.run(root, el, event);
+                        return;
+                    }
+                }
+            });
+        }
+
+        function addVlmModelOptions(select) {
+            const otherOption = select.querySelector('option[value="' + VLM_MODEL_OTHER + '"]');
+            VLM_MODEL_OPTIONS.forEach(function(o) {
+                const option = document.createElement('option');
+                option.value = o.value;
+                option.textContent = o.label;
+                select.insertBefore(option, otherOption);
+            });
+        }
+
+        function instantiateSections(prefix, root) {
+            const fragment = document.importNode(document.getElementById('vif-detector-sections').content, true);
+            if (prefix) {
+                fragment.querySelectorAll('[data-scope="config"]').forEach(function(el) { el.remove(); });
+                fragment.querySelectorAll('[id]').forEach(function(el) { el.id = prefix + el.id; });
+                fragment.querySelectorAll('label[for]').forEach(function(el) { el.htmlFor = prefix + el.htmlFor; });
+                fragment.querySelectorAll('input[type="radio"]').forEach(function(el) { el.name = prefix + el.name; });
+            }
+            addVlmModelOptions(fragment.getElementById(prefix + 'cfg-vlm-model-name'));
+            // A clone made after the names loaded (a chain stage card) gets its pickers
+            // filled here; the standalone clone is filled by loadSecretNames() at init.
+            SECTION_SECRET_SOURCES.forEach(function(base) {
+                fillSecretPicker(fragment.getElementById(prefix + base + '-secret'));
+            });
+            root.dataset.vifPrefix = prefix;
+            // Capture phase: a synthetic `new Event('input')` does not bubble, and handlers bound
+            // to the fields themselves used to see it.
+            SECTION_EVENT_TYPES.forEach(function(type) { root.addEventListener(type, dispatchSectionEvent, true); });
+            return fragment;
+        }
+
+        function mountStandaloneSections() {
+            const template = document.getElementById('vif-detector-sections');
+            const root = template.parentElement;
+            // The Manager's fragment loader can re-run this script over a DOM that
+            // already holds the clone; a second insert would duplicate every section.
+            if (!document.getElementById('object-analysis-section'))
+                template.after(instantiateSections('', root));
+            return root;
+        }
+
+        VIF.detectorSections = {
+            instantiate: instantiateSections,
+            field: field,
+            populate: populateSections,
+            read: readSections,
+            reset: resetSections,
+            toggle: toggleSections
+        };
+
+        // The VLM modules bind to section elements when they load, and loadStreams() fills
+        // them: the sections have to be in the page before either starts.
+        var sectionsRoot = mountStandaloneSections();
+        var vlmModulesPromise = loadVlmModules();
+
+        function onStandaloneSections(fn) {
+            return function() {
+                return fn.apply(null, [sectionsRoot].concat(Array.from(arguments)));
+            };
+        }
+
         function formatRuleGuidance(rule) {
             const parts = [];
             if (Number.isFinite(rule.min) && Number.isFinite(rule.max)) {
@@ -150,24 +376,36 @@
             input.step = rule.integer ? '1' : `0.${'0'.repeat(Math.max((rule.decimals || 1) - 1, 0))}1`;
             input.inputMode = 'decimal';
             input.title = formatRuleGuidance(rule);
+            // A detector switch re-applies a FRESH rule object to an already-bound
+            // input, so the once-bound listeners below must read the rule that is
+            // current at the keystroke - a rule captured at first bind would keep
+            // clamping with the static default forever (typed 8 snapped back to 5
+            // on the VLM duration long after its cap moved).
+            input.__vifNumericRule = rule;
             if (input.dataset.ruleBound === 'true') return;
             input.addEventListener('input', function() {
-                const sanitized = sanitizeNumericString(input.value, rule);
+                const live = input.__vifNumericRule;
+                const sanitized = sanitizeNumericString(input.value, live);
                 if (input.value !== sanitized) input.value = sanitized;
-                const valid = input.value === '' || validateNumericValue(input.value, rule);
-                input.setCustomValidity(valid ? '' : formatRuleGuidance(rule));
+                const valid = input.value === '' || validateNumericValue(input.value, live);
+                input.setCustomValidity(valid ? '' : formatRuleGuidance(live));
             });
             input.addEventListener('blur', function() {
-                input.value = normalizeNumericValue(input.value, rule);
-                const valid = input.value === '' || validateNumericValue(input.value, rule);
-                input.setCustomValidity(valid ? '' : formatRuleGuidance(rule));
+                const live = input.__vifNumericRule;
+                input.value = normalizeNumericValue(input.value, live);
+                const valid = input.value === '' || validateNumericValue(input.value, live);
+                input.setCustomValidity(valid ? '' : formatRuleGuidance(live));
             });
             input.dataset.ruleBound = 'true';
         }
 
-        function initializeStaticFieldRules() {
+        function rootInput(root, baseId) {
+            return field(root, baseId) || (sectionPrefix(root) ? null : document.getElementById(baseId));
+        }
+
+        function initializeStaticFieldRules(root) {
             Object.entries(FIELD_RULES).forEach(function(entry) {
-                const input = document.getElementById(entry[0]);
+                const input = rootInput(root, entry[0]);
                 if (input) applyNumericRuleToInput(input, entry[1]);
             });
         }
@@ -253,23 +491,27 @@
             });
             // The bulk-enable above would re-enable a Show/Hide button whose API-key field is
             // empty; re-assert the empty-key disabling once the form is no longer loading.
-            if (!loading) syncAllApiKeyToggles();
+            if (!loading) {
+                syncAllApiKeyToggles();
+                updateSaveButtonState();
+                if (chainState) refreshChainView();
+            }
         }
 
-        function toggleCheckpointPath() {
-            const model = document.getElementById('cfg-model-name').value;
-            document.getElementById('checkpoint-path-group').style.display = model === 'custom' ? 'flex' : 'none';
-            updateClassNamesOptions();
+        function toggleCheckpointPath(root) {
+            const model = field(root, 'cfg-model-name').value;
+            field(root, 'checkpoint-path-group').style.display = model === 'custom' ? 'flex' : 'none';
+            updateClassNamesOptions(root);
             markDirty();
         }
 
-        function getModelClasses() {
-            const modelName = document.getElementById('cfg-model-name').value;
+        function getModelClasses(root) {
+            const modelName = field(root, 'cfg-model-name').value;
             if (!defaultConfig || !defaultConfig.available_models || !defaultConfig.available_models.models) return [];
             const models = defaultConfig.available_models.models;
             let model;
             if (modelName === 'custom') {
-                const checkpointPath = document.getElementById('cfg-checkpoint-path').value;
+                const checkpointPath = field(root, 'cfg-checkpoint-path').value;
                 if (!checkpointPath) return [];
                 model = models.find(m => m.checkpoint_path === checkpointPath);
             } else {
@@ -281,9 +523,9 @@
             return [];
         }
 
-        function updateClassNamesOptions() {
-            const select = document.getElementById('cfg-class-names');
-            const classes = getModelClasses();
+        function updateClassNamesOptions(root) {
+            const select = field(root, 'cfg-class-names');
+            const classes = getModelClasses(root);
             const selected = new Set(Array.from(select.selectedOptions).map(o => o.value));
             select.innerHTML = '';
             classes.forEach(cls => {
@@ -295,15 +537,15 @@
             });
         }
 
-        function toggleByteTrack() {
-            const method = document.getElementById('cfg-tracking-method').value;
+        function toggleByteTrack(root) {
+            const method = field(root, 'cfg-tracking-method').value;
             const show = method === 'byte-track';
-            document.getElementById('byte-track-section').style.display = show ? 'block' : 'none';
-            if (show && !document.getElementById('cfg-bt-min-confidence').value) {
-                const btMinConfidence = document.getElementById('cfg-bt-min-confidence');
-                const btMaxLostFrames = document.getElementById('cfg-bt-max-lost-frames');
-                const btMinOverlap = document.getElementById('cfg-bt-min-overlap');
-                const btMinFrames = document.getElementById('cfg-bt-min-frames');
+            field(root, 'byte-track-section').style.display = show ? 'block' : 'none';
+            if (show && !field(root, 'cfg-bt-min-confidence').value) {
+                const btMinConfidence = field(root, 'cfg-bt-min-confidence');
+                const btMaxLostFrames = field(root, 'cfg-bt-max-lost-frames');
+                const btMinOverlap = field(root, 'cfg-bt-min-overlap');
+                const btMinFrames = field(root, 'cfg-bt-min-frames');
                 btMinConfidence.value = btMinConfidence.placeholder || '50';
                 btMaxLostFrames.value = btMaxLostFrames.placeholder || '30';
                 btMinOverlap.value = btMinOverlap.placeholder || '20';
@@ -312,51 +554,51 @@
             markDirty();
         }
 
-        function toggleTiling() {
+        function toggleTiling(root) {
             // Tiling is feature-gated behind the ?tiling=true query param (like vlm). When it
             // is not present, keep both the toggle and the properties section hidden — even if a
             // loaded config has tiling enabled (the stored config is preserved, just not shown).
             const uiEnabled = new URLSearchParams(window.location.search).get('tiling') === 'true';
-            const enabled = uiEnabled && document.getElementById('cfg-tiling-enabled').checked;
-            document.getElementById('tiling-section').style.display = enabled ? 'block' : 'none';
-            if (enabled && !document.getElementById('cfg-tiling-max-rows').value) {
+            const enabled = uiEnabled && field(root, 'cfg-tiling-enabled').checked;
+            field(root, 'tiling-section').style.display = enabled ? 'block' : 'none';
+            if (enabled && !field(root, 'cfg-tiling-max-rows').value) {
                 ['cfg-tiling-min-rows', 'cfg-tiling-min-cols', 'cfg-tiling-max-rows',
                  'cfg-tiling-max-cols', 'cfg-tiling-coverage-cutoff', 'cfg-tiling-cluster-children']
                     .forEach(function(id) {
-                        const el = document.getElementById(id);
+                        const el = field(root, id);
                         if (!el.value) el.value = el.placeholder || '';
                     });
             }
-            toggleTilingMode();
+            toggleTilingMode(root);
             markDirty();
         }
 
-        function toggleTilingMode() {
-            const mode = document.getElementById('cfg-tiling-mode').value;
-            document.getElementById('tiling-gated-fields').style.display = mode === 'gated' ? 'block' : 'none';
+        function toggleTilingMode(root) {
+            const mode = field(root, 'cfg-tiling-mode').value;
+            field(root, 'tiling-gated-fields').style.display = mode === 'gated' ? 'block' : 'none';
             // The full-frame toggle only applies to Fixed mode. In Gated the full-frame
             // probe always runs, so the toggle is hidden there.
-            document.getElementById('tiling-fixed-fields').style.display = mode === 'gated' ? 'none' : 'block';
+            field(root, 'tiling-fixed-fields').style.display = mode === 'gated' ? 'none' : 'block';
             // In Fixed mode there is a single grid, so "Max" is misleading — drop the prefix.
-            document.getElementById('lbl-tiling-max-rows').textContent = mode === 'gated' ? 'Max Slice Rows' : 'Slice Rows';
-            document.getElementById('lbl-tiling-max-cols').textContent = mode === 'gated' ? 'Max Slice Cols' : 'Slice Cols';
-            updateClusterChildrenVisibility();
+            field(root, 'lbl-tiling-max-rows').textContent = mode === 'gated' ? 'Max Slice Rows' : 'Slice Rows';
+            field(root, 'lbl-tiling-max-cols').textContent = mode === 'gated' ? 'Max Slice Cols' : 'Slice Cols';
+            updateClusterChildrenVisibility(root);
             markDirty();
         }
 
-        function toggleFullFrameDetection() {
-            updateClusterChildrenVisibility();
+        function toggleFullFrameDetection(root) {
+            updateClusterChildrenVisibility(root);
             markDirty();
         }
 
         // Cluster suppression only does something when there is a full-frame pass that
         // can produce the over-large "parent" box: that is always the case in Gated
         // (the probe), but in Fixed only when Full Frame Detection is enabled.
-        function updateClusterChildrenVisibility() {
-            const mode = document.getElementById('cfg-tiling-mode').value;
-            const fullFrame = document.getElementById('cfg-tiling-full-frame').checked;
+        function updateClusterChildrenVisibility(root) {
+            const mode = field(root, 'cfg-tiling-mode').value;
+            const fullFrame = field(root, 'cfg-tiling-full-frame').checked;
             const show = mode === 'gated' || fullFrame;
-            document.getElementById('tiling-cluster-children-group').style.display = show ? 'block' : 'none';
+            field(root, 'tiling-cluster-children-group').style.display = show ? 'block' : 'none';
         }
 
         function getSelectedStream() {
@@ -390,13 +632,16 @@
         function resetNewStreamMatchFields() {
             const appInput = document.getElementById('cfg-new-app-name');
             const streamInput = document.getElementById('cfg-new-stream-name');
-            appInput.value = appInput.placeholder || 'live';
+            appInput.placeholder = 'live';
+            delete appInput.dataset.suggested;
+            appInput.value = 'live';
+            delete streamInput.dataset.suggested;
             streamInput.value = '';
 
             window.requestAnimationFrame(function() {
                 if (!isNewStream()) return;
                 appInput.value = appInput.placeholder || 'live';
-                streamInput.value = '';
+                streamInput.value = streamInput.dataset.suggested || '';
             });
         }
 
@@ -415,12 +660,20 @@
         // stream. VLM gets VLM_SUGGESTED_INFERENCE_FPS instead of the global default (-1 = match
         // source): -1 is allowed for VLM (VIS subsamples oversized windows), but a fixed rate
         // gives predictable, full-quality sampling out of the box; switching away restores the
-        // global-derived suggestion. Only replaces an untouched suggestion.
+        // global-derived suggestion. Verify gets its own rate — the one its review runs at, which
+        // more frames do not improve. Only replaces an untouched suggestion.
+        function suggestionTypeFor(detectorType) {
+            return detectorType === 'chain' ? chainEntryType() : detectorType;
+        }
+
         function applyDetectorTypeInferenceFpsSuggestion(detectorType) {
             if (!isNewStream()) return;
+            detectorType = suggestionTypeFor(detectorType);
             const input = document.getElementById('cfg-inference-fps');
             if (input.value !== input.dataset.suggested) return;
-            if (detectorType === 'vlm') {
+            if (detectorType === 'verify') {
+                applyDefaultFieldValue(input, VERIFY_SUGGESTED_INFERENCE_FPS, VERIFY_SUGGESTED_INFERENCE_FPS);
+            } else if (detectorType === 'vlm') {
                 applyDefaultFieldValue(input, VLM_SUGGESTED_INFERENCE_FPS, VLM_SUGGESTED_INFERENCE_FPS);
             } else {
                 const globalDefault = Number.isFinite(defaultConfig && defaultConfig.inference_fps)
@@ -435,12 +688,234 @@
         // while the user hasn't manually toggled the checkbox away from the last suggested value.
         function applyDetectorTypeTranscoderSuggestion(detectorType) {
             if (!isNewStream()) return;
+            detectorType = suggestionTypeFor(detectorType);
             const cb = document.getElementById('cfg-use-transcoder');
             if (cb.dataset.suggested !== undefined && String(cb.checked) !== cb.dataset.suggested) return;
-            const suggested = detectorType !== 'synthetic';
+            const suggested = detectorType !== 'synthetic' && detectorType !== 'verify';
             cb.checked = suggested;
             cb.dataset.suggested = String(suggested);
             updateSyntheticOverlayWarning();
+        }
+
+        // Verify scores whole windows and reviews their frames, so it wants a longer window than
+        // the global default suggests; the same untouched-suggestion rule as the fps above.
+        function applyDetectorTypeDurationSuggestion(detectorType) {
+            if (!isNewStream()) return;
+            detectorType = suggestionTypeFor(detectorType);
+            const input = document.getElementById('cfg-duration');
+            if (input.value !== input.dataset.suggested) return;
+            if (detectorType === 'verify') {
+                applyDefaultFieldValue(input, VERIFY_SUGGESTED_WINDOW_SECONDS, VERIFY_SUGGESTED_WINDOW_SECONDS);
+            } else {
+                const entry = computeEffectiveFieldDefaults()['cfg-duration'];
+                applyDefaultFieldValue(input, entry.value, entry.fallback);
+            }
+        }
+
+        // A Verify config is used by on-demand jobs, so its rule is an identity rather than a live
+        // match; suggest the on-demand application while the operator has not typed one.
+        function applyDetectorTypeApplicationSuggestion(detectorType) {
+            if (!isNewStream()) return;
+            detectorType = suggestionTypeFor(detectorType);
+            const input = document.getElementById('cfg-new-app-name');
+            const suggestedBefore = input.dataset.suggested !== undefined ? input.dataset.suggested : (input.placeholder || 'live');
+            if (input.value !== suggestedBefore) return;
+            const suggested = detectorType === 'verify' ? 'vod' : 'live';
+            input.value = suggested;
+            input.placeholder = suggested;
+            input.dataset.suggested = suggested;
+            updateMatchOverlapNote();
+        }
+
+        function freeVerifyConfigName(app) {
+            const taken = {};
+            Object.keys(streamRegistry).forEach(function(key) {
+                const r = streamRegistry[key];
+                if (r.kind === 'group' && r.app === app) taken[r.stream] = true;
+            });
+            let name = 'verify';
+            for (let n = 2; taken[name]; n++) name = 'verify-' + n;
+            return name;
+        }
+
+        function applyDetectorTypeStreamNameSuggestion(detectorType) {
+            if (!isNewStream()) return;
+            detectorType = suggestionTypeFor(detectorType);
+            const input = document.getElementById('cfg-new-stream-name');
+            if (input.value !== (input.dataset.suggested || '')) return;
+            const appInput = document.getElementById('cfg-new-app-name');
+            const app = (appInput.value || appInput.placeholder || '').trim();
+            const suggested = detectorType === 'verify' ? freeVerifyConfigName(app) : '';
+            input.value = suggested;
+            if (suggested) input.dataset.suggested = suggested;
+            else delete input.dataset.suggested;
+            updateMatchOverlapNote();
+        }
+
+        // Seed for "+ New Stream Config": the global defaults, switched on, minus the blocks the form
+        // must surface as placeholders rather than bake in as the stream's own values —
+        // the verify thresholds always, and for a Verify config both stage blocks, whose
+        // blanks inherit the Verify baseline rather than the live detectors' globals.
+        function newConfigSeed(hintedType) {
+            const seed = Object.assign({}, defaultConfig);
+            seed.active = true;
+            if (hintedType) seed.detector_type = hintedType;
+            delete seed.verify_analysis;
+            if (seed.detector_type === 'verify') {
+                delete seed.vlm_analysis;
+                delete seed.synthetic_analysis;
+            }
+            return seed;
+        }
+
+        function liveStageSeeds() {
+            const va = (defaultConfig && defaultConfig.vlm_analysis) || {};
+            const sy = (defaultConfig && defaultConfig.synthetic_analysis) || {};
+            const number = function(raw) { return raw !== undefined && raw !== null ? String(raw) : ''; };
+            return {
+                'cfg-vlm-endpoint-url': va.endpoint_url || '',
+                'cfg-vlm-api-key': va.api_key || '',
+                'cfg-vlm-request-timeout': number(va.request_timeout_seconds),
+                'cfg-synthetic-endpoint': sy.endpoint || '',
+                'cfg-synthetic-use-tls': typeof sy.use_tls === 'boolean' ? String(sy.use_tls) : '',
+                'cfg-synthetic-tls-ca-cert': sy.tls_ca_cert || '',
+                'cfg-synthetic-tls-client-cert': sy.tls_client_cert || '',
+                'cfg-synthetic-tls-client-key': sy.tls_client_key || '',
+                'cfg-synthetic-api-key': sy.api_key || '',
+                'cfg-synthetic-function-id': sy.function_id || '',
+                'cfg-synthetic-classification-threshold': number(sy.classification_threshold)
+            };
+        }
+
+        // The stage-connection fields follow the detector type on a new config the way the
+        // name suggestion does: only a field the operator has not touched moves. Verify's
+        // seed is blank (a blank inherits the Verify baseline); the live types get back the
+        // global block values newConfigSeed() gives them.
+        function applyDetectorTypeStageFieldSuggestions(detectorType) {
+            if (!isNewStream()) return;
+            detectorType = suggestionTypeFor(detectorType);
+            const seeds = liveStageSeeds();
+            const verify = detectorType === 'verify';
+            const seedModel = ((defaultConfig && defaultConfig.vlm_analysis) || {}).model_name
+                || VLM_FALLBACK_DEFAULTS.model_name;
+            let changed = false;
+            Object.keys(seeds).forEach(function(id) {
+                const input = field(sectionsRoot, id);
+                const from = verify ? seeds[id] : '';
+                const to = verify ? '' : seeds[id];
+                if (from === to || input.value !== from) return;
+                input.value = to;
+                changed = true;
+            });
+            if (verify) {
+                if (readVlmModelName(sectionsRoot) === seedModel) {
+                    setVerifyReviewModel(sectionsRoot, '');
+                    changed = true;
+                }
+            } else if (!readVlmModelName(sectionsRoot)) {
+                setVlmModelName(sectionsRoot, seedModel);
+                changed = true;
+            }
+            if (!changed) return;
+            updateSyntheticEndpointFields(sectionsRoot);
+            syncSectionApiKeyToggle(sectionsRoot, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+            syncSectionApiKeyToggle(sectionsRoot, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+            clearVlmEndpointTestResult(sectionsRoot);
+            clearSvdEndpointTestResult(sectionsRoot);
+        }
+
+        function verifyBaseline() {
+            return (defaultConfig && defaultConfig.verify_analysis) || {};
+        }
+
+        // The synthetic and VLM blocks serve two detectors each; their placeholders follow the
+        // baseline of the one selected, so a Verify config sees the Verify baseline.
+        function applyStagePlaceholdersForDetector(root, detectorType) {
+            const verify = detectorType === 'verify';
+            const sy = verify ? (verifyBaseline().svd || {}) : ((defaultConfig && defaultConfig.synthetic_analysis) || {});
+            const va = verify ? (verifyBaseline().vlm || {}) : ((defaultConfig && defaultConfig.vlm_analysis) || {});
+            const endpoint = field(root, 'cfg-synthetic-endpoint');
+            endpoint.placeholder = sy.endpoint || 'svd.docker:8001';
+            endpoint.dataset.globalDefault = sy.endpoint || '';
+            updateSyntheticEndpointFields(root);
+            const url = field(root, 'cfg-vlm-endpoint-url');
+            const effectiveUrl = va.endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url;
+            url.placeholder = effectiveUrl ? vlmEndpointPlaceholder(effectiveUrl) : 'vlm.docker:8000';
+            const timeout = field(root, 'cfg-vlm-request-timeout');
+            timeout.placeholder = va.request_timeout_seconds !== undefined && va.request_timeout_seconds !== null
+                ? String(va.request_timeout_seconds) : '30';
+        }
+
+        function verifyBaselineModel() {
+            const vlm = verifyBaseline().vlm || {};
+            return vlm.model_name || VIF.fieldRegistry.VERIFY_FALLBACK_REVIEW_MODEL;
+        }
+
+        // Verify reviews with one of the NVIDIA models the report's prompts were tuned for, and
+        // a blank choice inherits the baseline's; the other detector types keep the full list.
+        function applyVlmModelChoicesForDetector(root, detectorType) {
+            const select = field(root, 'cfg-vlm-model-name');
+            const inherit = field(root, 'cfg-vlm-model-inherit');
+            const verify = detectorType === 'verify';
+            inherit.style.display = verify ? '' : 'none';
+            inherit.disabled = !verify;
+            inherit.textContent = 'Default (' + verifyBaselineModel() + ')';
+            Array.from(select.options).forEach(function(option) {
+                if (option === inherit) return;
+                const offered = !verify || option.value.indexOf('nvidia/') === 0 || option.dataset.stored === 'true';
+                option.style.display = offered ? '' : 'none';
+                option.disabled = !offered;
+            });
+            const selected = select.options[select.selectedIndex];
+            if (!selected || selected.disabled) {
+                select.value = verify ? '' : VLM_KNOWN_MODELS[0];
+                toggleVlmModelNameOther(root);
+            }
+        }
+
+        // The stored review model, the inherit choice when there is none; a model outside the
+        // offered list is shown as its own entry rather than lost behind "Other".
+        function setVerifyReviewModel(root, modelName) {
+            const select = field(root, 'cfg-vlm-model-name');
+            field(root, 'cfg-vlm-model-name-other').value = '';
+            if (!modelName) {
+                select.value = '';
+            } else {
+                if (!Array.from(select.options).some(function(option) { return option.value === modelName; })) {
+                    const option = document.createElement('option');
+                    option.value = modelName;
+                    option.textContent = modelName;
+                    option.dataset.stored = 'true';
+                    select.insertBefore(option, select.querySelector('option[value="' + VLM_MODEL_OTHER + '"]'));
+                }
+                select.value = modelName;
+            }
+            toggleVlmModelNameOther(root);
+        }
+
+        function updateVerifyGateLine(root) {
+            const line = field(root, 'verify-gate-line');
+            if (!line) return;
+            const baseline = verifyBaseline();
+            const unit = function(raw, fallback) {
+                const n = typeof raw === 'number' ? raw : parseFloat(raw);
+                return Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
+            };
+            const flag = unit(field(root, 'cfg-verify-flag-threshold').value, unit(baseline.flag_threshold, 0.3));
+            const strong = unit(field(root, 'cfg-verify-strong-threshold').value, unit(baseline.strong_threshold, 0.9));
+            line.textContent = 'score > ' + flag + ' → the window is reviewed · below → it stands as scored'
+                + (strong < 1 ? ' · above ' + strong + ' → strong synthetic confidence, the VLM only explains' : '');
+        }
+
+        function takeNewConfigDetectorTypeHint() {
+            try {
+                const hint = window.localStorage.getItem(NEW_CONFIG_DETECTOR_TYPE_STORAGE_KEY);
+                if (hint) window.localStorage.removeItem(NEW_CONFIG_DETECTOR_TYPE_STORAGE_KEY);
+                if (hint === 'verify' && !VIF.core.verifyEnabled()) return null;
+                return VIF.fieldRegistry.detectorTypes.indexOf(hint) !== -1 ? hint : null;
+            } catch (error) {
+                return null;
+            }
         }
 
         function computeEffectiveFieldDefaults() {
@@ -469,6 +944,9 @@
                 && Number.isFinite(defaultConfig.scene_analysis.confidence_threshold)
                 ? Math.round(defaultConfig.scene_analysis.confidence_threshold * 100)
                 : null;
+            const motionDefaults = defaultConfig && defaultConfig.motion_analysis
+                ? defaultConfig.motion_analysis
+                : {};
 
             return {
                 // No fallback and no default value to show: the placeholder already reads
@@ -554,6 +1032,23 @@
                 'cfg-scene-confidence-threshold': {
                     path: 'scene_analysis.confidence_threshold', fallback: '30', value: sceneConfidenceDefault
                 },
+                'cfg-motion-sensitivity': {
+                    path: 'motion_analysis.sensitivity', fallback: '5',
+                    value: Number.isFinite(motionDefaults.sensitivity) ? motionDefaults.sensitivity : null
+                },
+                'cfg-motion-min-displacement': {
+                    path: 'motion_analysis.min_displacement', fallback: '2',
+                    value: Number.isFinite(motionDefaults.min_displacement) ? Math.round(motionDefaults.min_displacement * 1000) / 10 : null
+                },
+                'cfg-motion-merge-distance': {
+                    path: 'motion_analysis.merge_distance', fallback: '8',
+                    value: Number.isFinite(motionDefaults.merge_distance) ? Math.round(motionDefaults.merge_distance * 1000) / 10 : null
+                },
+                'cfg-motion-suppress-global-changes': {
+                    path: 'motion_analysis.suppress_global_changes', fallback: '', skipNewStreamPrefill: true,
+                    value: typeof motionDefaults.suppress_global_changes === 'boolean'
+                        ? (motionDefaults.suppress_global_changes ? 'Suppress' : 'Report') : null
+                },
                 // catch_up_max_behind_seconds has no global default in the shipped
                 // Default.json (it's commented out - unset = ~2s server-side auto), so
                 // `value` is null in the common case and refreshEffectiveDefaultPlaceholders()
@@ -588,28 +1083,42 @@
                 'cfg-synthetic-tls-client-cert': { path: 'synthetic_analysis.tls_client_cert', fallback: '', value: null, skipNewStreamPrefill: true },
                 'cfg-synthetic-tls-client-key': { path: 'synthetic_analysis.tls_client_key', fallback: '', value: null, skipNewStreamPrefill: true },
                 'cfg-synthetic-api-key': { path: 'synthetic_analysis.api_key', fallback: '', value: null, skipNewStreamPrefill: true },
+                // The *_secret pickers: present so a slot switched back to a value clears its
+                // stored reference — a blank picker with a stored name travels as an unset.
+                'cfg-vi-service-api-key-secret': { path: 'vi_service_api_key_secret', fallback: '', value: null, skipNewStreamPrefill: true },
+                'cfg-vlm-api-key-secret': { path: 'vlm_analysis.api_key_secret', fallback: '', value: null, skipNewStreamPrefill: true },
+                'cfg-synthetic-api-key-secret': { path: 'synthetic_analysis.api_key_secret', fallback: '', value: null, skipNewStreamPrefill: true },
+                'cfg-synthetic-tls-client-key-secret': { path: 'synthetic_analysis.tls_client_key_secret', fallback: '', value: null, skipNewStreamPrefill: true },
                 'cfg-synthetic-function-id': { path: 'synthetic_analysis.function_id', fallback: '', value: null, skipNewStreamPrefill: true },
                 'cfg-synthetic-classification-threshold': { path: 'synthetic_analysis.classification_threshold', fallback: '', value: null, skipNewStreamPrefill: true }
             };
         }
 
-        function applySuggestedDefaultsForNewStream() {
+        function applySuggestedDefaultsForNewStream(root) {
             const defaults = computeEffectiveFieldDefaults();
             Object.keys(defaults).forEach(function(id) {
                 const entry = defaults[id];
                 if (entry.skipNewStreamPrefill) return;
-                const input = document.getElementById(id);
+                const input = rootInput(root, id);
                 if (input) applyDefaultFieldValue(input, entry.value, entry.fallback);
             });
         }
 
-        function refreshEffectiveDefaultPlaceholders() {
+        function refreshEffectiveDefaultPlaceholders(root) {
             const defaults = computeEffectiveFieldDefaults();
             Object.keys(defaults).forEach(function(id) {
                 const entry = defaults[id];
                 if (entry.value === null || entry.value === undefined) return;
-                const input = document.getElementById(id);
-                if (input) input.placeholder = String(entry.value);
+                const input = rootInput(root, id);
+                if (!input) return;
+                if (input.tagName === 'SELECT') {
+                    const blank = Array.prototype.find.call(input.options, function(option) {
+                        return option.value === '';
+                    });
+                    if (blank) blank.textContent = 'Default (' + entry.value + ')';
+                } else {
+                    input.placeholder = String(entry.value);
+                }
             });
         }
 
@@ -618,14 +1127,17 @@
             return !!field && field.inheritMode === 'blank-inherits';
         }
 
-        function isFieldBlank(id, entry) {
+        function isFieldBlank(root, id, entry) {
             if (typeof entry.isBlank === 'function') return entry.isBlank();
-            const input = document.getElementById(id);
+            const input = rootInput(root, id);
             return !input || !input.value || !input.value.trim();
         }
 
         function readNumericInputValue(id, integer, scale) {
-            const input = document.getElementById(id);
+            return readNumber(document.getElementById(id), integer, scale);
+        }
+
+        function readNumber(input, integer, scale) {
             const raw = (input.value || '').trim();
             if (raw === '') return undefined;
             const number = integer ? parseInt(raw, 10) : parseFloat(raw);
@@ -649,14 +1161,14 @@
             return current;
         }
 
-        function collectUnsetFields() {
+        function collectUnsetFields(root) {
             if (isNewStream()) return [];
             const defaults = computeEffectiveFieldDefaults();
             const paths = [];
             Object.keys(defaults).forEach(function(id) {
                 const entry = defaults[id];
                 if (!isFieldUnsettable(entry.path)) return;
-                if (!isFieldBlank(id, entry)) return;
+                if (!isFieldBlank(root, id, entry)) return;
                 const stored = getConfigValueAtPath(lastRawStreamConfig, entry.path);
                 if (stored === null || stored === undefined) return;
                 paths.push(entry.path);
@@ -696,13 +1208,13 @@
             // isn't known here, so there's no N to show - just the informational note.
             if (effectiveFps === -1) {
                 meterEl.classList.add('text-warn');
-                meterEl.textContent = 'Matches the source frame rate — each window will be evenly subsampled to the endpoint’s image cap. Use a fixed rate for predictable sampling.';
+                meterEl.textContent = 'Matches the source frame rate, so the window cannot be held to the endpoint’s image cap — set a fixed rate. A VLM config with -1 does not save.';
                 return;
             }
             const images = Math.round(duration * effectiveFps * 100) / 100;
             if (images > VLM_TYPICAL_ENDPOINT_IMAGE_CAP) {
                 meterEl.classList.add('text-warn');
-                meterEl.textContent = `Images per request: ${images} — above the bundled endpoint's default cap (${VLM_TYPICAL_ENDPOINT_IMAGE_CAP}); the service will evenly subsample each window down to the endpoint's limit. For full-quality sampling keep Duration × Inference FPS at or below the cap.`;
+                meterEl.textContent = `Images per request: ${images} — over the endpoint's image cap (${VLM_TYPICAL_ENDPOINT_IMAGE_CAP}). Lower Duration or Inference FPS; a config over the cap does not save.`;
             } else {
                 meterEl.classList.remove('text-warn');
                 meterEl.textContent = `Images per request: ${images}`;
@@ -725,9 +1237,9 @@
             btn.textContent = hide ? 'Hide' : 'Show';
         }
 
-        function toggleSyntheticApiKeyVisibility() {
-            const input = document.getElementById('cfg-synthetic-api-key');
-            const btn   = document.getElementById('cfg-synthetic-api-key-toggle');
+        function toggleSyntheticApiKeyVisibility(root) {
+            const input = field(root, 'cfg-synthetic-api-key');
+            const btn   = field(root, 'cfg-synthetic-api-key-toggle');
             const hide  = input.type === 'password';
             input.type      = hide ? 'text' : 'password';
             btn.textContent = hide ? 'Hide' : 'Show';
@@ -740,36 +1252,43 @@
         // supports.
         // The effective endpoint is the field value layered over the global default
         // (mirrored into data-global-default by populateForm).
-        function syntheticEndpointIsNvcf() {
-            const endpointInput = document.getElementById('cfg-synthetic-endpoint');
+        function syntheticEndpointIsNvcf(root) {
+            const endpointInput = field(root, 'cfg-synthetic-endpoint');
             if (!endpointInput) return false;
             const effective = endpointInput.value.trim() || (endpointInput.dataset.globalDefault || '');
             return /(^|\.)nvcf\.nvidia\.com(:\d+)?$/i.test(effective);
         }
 
-        function updateSyntheticEndpointFields() {
-            const nvcfFields = document.getElementById('synthetic-nvcf-fields');
-            const mtlsHint   = document.getElementById('synthetic-mtls-hint');
-            const tlsCerts   = document.getElementById('synthetic-tls-certs-group');
+        function updateSyntheticEndpointFields(root) {
+            const nvcfFields = field(root, 'synthetic-nvcf-fields');
+            const mtlsHint   = field(root, 'synthetic-mtls-hint');
+            const tlsCerts   = field(root, 'synthetic-tls-certs-group');
             if (!nvcfFields || !mtlsHint || !tlsCerts) return;
-            const isNvcf = syntheticEndpointIsNvcf();
+            const isNvcf = syntheticEndpointIsNvcf(root);
             nvcfFields.style.display = isNvcf ? 'block' : 'none';
             mtlsHint.style.display   = isNvcf ? 'none' : 'block';
             tlsCerts.style.display   = isNvcf ? 'none' : 'block';
         }
 
-        function setSyntheticTlsCertsExpanded(show) {
-            document.getElementById('cfg-synthetic-tls-certs').style.display = show ? 'block' : 'none';
-            document.getElementById('cfg-synthetic-tls-certs-caret').innerHTML = show ? '&#9662;' : '&#9656;';
+        function setSyntheticTlsCertsExpanded(root, show) {
+            field(root, 'cfg-synthetic-tls-certs').style.display = show ? 'block' : 'none';
+            field(root, 'cfg-synthetic-tls-certs-caret').innerHTML = show ? '&#9662;' : '&#9656;';
         }
 
-        function toggleSyntheticTlsCerts() {
-            setSyntheticTlsCertsExpanded(document.getElementById('cfg-synthetic-tls-certs').style.display === 'none');
+        function toggleSyntheticTlsCerts(root) {
+            setSyntheticTlsCertsExpanded(root, field(root, 'cfg-synthetic-tls-certs').style.display === 'none');
         }
 
-        function toggleVlmApiKeyVisibility() {
-            const input = document.getElementById('cfg-vlm-api-key');
-            const btn   = document.getElementById('cfg-vlm-api-key-toggle');
+        function toggleMotionAdvanced(root) {
+            const fields = field(root, 'cfg-motion-advanced');
+            const show = fields.style.display === 'none';
+            fields.style.display = show ? 'block' : 'none';
+            field(root, 'cfg-motion-advanced-caret').innerHTML = show ? '&#9662;' : '&#9656;';
+        }
+
+        function toggleVlmApiKeyVisibility(root) {
+            const input = field(root, 'cfg-vlm-api-key');
+            const btn   = field(root, 'cfg-vlm-api-key-toggle');
             const hide  = input.type === 'password';
             input.type      = hide ? 'text' : 'password';
             btn.textContent = hide ? 'Hide' : 'Show';
@@ -799,8 +1318,21 @@
         }
 
         function syncApiKeyToggleState(inputId, toggleId) {
-            const input = document.getElementById(inputId);
-            const btn   = document.getElementById(toggleId);
+            syncApiKeyToggle(document.getElementById(inputId), document.getElementById(toggleId));
+        }
+
+        function syncSectionApiKeyToggle(root, inputBaseId, toggleBaseId) {
+            syncApiKeyToggle(field(root, inputBaseId), field(root, toggleBaseId));
+        }
+
+        // "Save as secret" stores what was typed, so like Show it waits for a value.
+        function syncSaveAsSecret(input) {
+            const btn = input && input.parentElement && input.parentElement.querySelector('.secret-save-as');
+            if (btn) btn.disabled = (input.value || '').trim() === '';
+        }
+
+        function syncApiKeyToggle(input, btn) {
+            syncSaveAsSecret(input);
             if (!input || !btn) return;
             const empty = (input.value || '').trim() === '';
             btn.disabled = empty;
@@ -812,8 +1344,218 @@
 
         function syncAllApiKeyToggles() {
             syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
-            syncApiKeyToggleState('cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
-            syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+            syncSectionApiKeyToggle(sectionsRoot, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+            syncSectionApiKeyToggle(sectionsRoot, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+            // Every slot on the page, chain stage cards and toggle-less slots included: the
+            // loading state's bulk enable reaches them all.
+            document.querySelectorAll('.secret-save-as').forEach(function(btn) {
+                syncSaveAsSecret(btn.parentElement.querySelector('input'));
+            });
+        }
+
+        // ── credential slots: a value or a stored secret, never both ─────────
+        // Each credential field may hold the literal (the password/path input, tri-state as
+        // ever) OR a reference into the global secrets document — exclusive per field, the
+        // way the API refuses a write carrying both. `base` is the literal input's id; the
+        // mode select is <base>-source, the name picker <base>-secret, and the literal's
+        // wrapper <base>-value-row. A reference is readable, so the picker shows the saved
+        // name; anything else — a stored literal or an empty slot — opens in value mode,
+        // where the placeholder copy steers toward a stored secret without hiding the
+        // value-row controls behind a mode switch.
+        //
+        // The three in-section slots exist once per instantiated root — the standalone
+        // page and every chain stage card — so every function here takes the root. A null
+        // root means the page itself: the VIS service key's slot lives outside the
+        // sections and is the one caller that passes it.
+        function slotEl(root, id) {
+            return root ? field(root, id) : document.getElementById(id);
+        }
+
+        function secretSourceIsStored(root, base) {
+            var source = slotEl(root, base + '-source');
+            return !!source && source.value === 'stored';
+        }
+
+        /** The flat path a slot saves its literal under, from SECRET_INPUTS. */
+        function secretPathOf(base) {
+            var paths = Object.keys(SECRET_INPUTS);
+            for (var i = 0; i < paths.length; i++) {
+                if (SECRET_INPUTS[paths[i]] === base) return paths[i];
+            }
+            return null;
+        }
+
+        // The touch tracker serves the standalone form's tri-state; a stage card's
+        // literals ride whole with its stage, so its slots never touch it.
+        function forgetTouchedSecret(root, base) {
+            if (root && sectionPrefix(root)) return;
+            var path = secretPathOf(base);
+            if (path) delete touchedSecrets[path];
+        }
+
+        function syncSlotApiKeyToggle(root, base) {
+            if (root) syncSectionApiKeyToggle(root, base, base + '-toggle');
+            else syncApiKeyToggleState(base, base + '-toggle');
+        }
+
+        function secretSourceChanged(root, base) {
+            applySecretSourceVisibility(root, base);
+            if (secretSourceIsStored(root, base)) {
+                // The slot holds one form: entering stored mode withdraws anything typed,
+                // or the save would carry a literal beside the reference and be refused.
+                var input = slotEl(root, base);
+                if (input) input.value = '';
+                forgetTouchedSecret(root, base);
+                syncSlotApiKeyToggle(root, base);
+            } else {
+                // Back to a value: the blanked picker is what clears the stored name on save.
+                var picker = slotEl(root, base + '-secret');
+                if (picker) picker.value = '';
+            }
+            markDirty();
+            updateSaveButtonState();
+        }
+
+        function applySecretSourceVisibility(root, base) {
+            var stored = secretSourceIsStored(root, base);
+            var valueRow = slotEl(root, base + '-value-row');
+            var picker = slotEl(root, base + '-secret');
+            var storeRow = slotEl(root, base + '-store-row');
+            if (valueRow) valueRow.style.display = stored ? 'none' : '';
+            if (picker) picker.style.display = stored ? '' : 'none';
+            if (storeRow && stored) storeRow.style.display = 'none';
+        }
+
+        /** The reference this save sends for the slot, or undefined when it holds a value. */
+        function referenceValue(root, base) {
+            if (!secretSourceIsStored(root, base)) return undefined;
+            var picker = slotEl(root, base + '-secret');
+            return (picker && picker.value) || undefined;
+        }
+
+        // ── "Save as secret": promote a typed value into the secrets document ─
+        // In value mode, one click stores what was typed under a name and switches the
+        // slot to that stored secret — the value lands in the document, never in the
+        // config file.
+        function promptStoreSecret(root, base) {
+            if (!base) return;
+            var input = slotEl(root, base);
+            if (!input || !(input.value || '').trim()) {
+                showStatus('Type the value first, then save it as a secret.', true);
+                return;
+            }
+            var row = slotEl(root, base + '-store-row');
+            if (row) {
+                row.style.display = '';
+                var name = slotEl(root, base + '-store-name');
+                if (name) name.focus();
+            }
+        }
+
+        function cancelStoreSecret(root, base) {
+            if (!base) return;
+            var row = slotEl(root, base + '-store-row');
+            if (row) row.style.display = 'none';
+        }
+
+        async function confirmStoreSecret(root, base) {
+            if (!base) return;
+            var input = slotEl(root, base);
+            var nameInput = slotEl(root, base + '-store-name');
+            var value = input ? (input.value || '').trim() : '';
+            var name = nameInput ? (nameInput.value || '').trim() : '';
+            if (!name || !value) {
+                showStatus('A secret needs both a name and the typed value.', true);
+                return;
+            }
+            if (secretNamesLoaded.indexOf(name) !== -1) {
+                showStatus('Secret "' + name + '" already exists — pick it from the list, or rotate it on the Secrets page.', true);
+                return;
+            }
+            try {
+                var values = {};
+                values[name] = value;
+                var secrets = VIF.core.client().persist.secrets();
+                await secrets.get();
+                secretNamesLoaded = (await secrets.update({ values: values })).names || secretNamesLoaded;
+            } catch (error) {
+                showStatus(error.message, true);
+                return;
+            }
+            fillSecretPickers();
+            if (nameInput) nameInput.value = '';
+            cancelStoreSecret(root, base);
+            // The value now lives in the document; the slot switches to it by name and
+            // the typed literal is withdrawn so the save carries the reference alone.
+            setSecretSlot(root, base, name);
+            forgetTouchedSecret(root, base);
+            if (input) input.value = '';
+            syncSlotApiKeyToggle(root, base);
+            markDirty();
+            updateSaveButtonState();
+            showStatus('Secret "' + name + '" saved — this field now uses it.', false);
+        }
+
+        function setPickerValue(picker, name) {
+            // A stored reference always shows, even when its name has left the document.
+            var known = Array.prototype.some.call(picker.options, function(o) { return o.value === name; });
+            if (!known) {
+                var opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name + ' (not configured)';
+                picker.appendChild(opt);
+            }
+            picker.value = name;
+        }
+
+        function setSecretSlot(root, base, referenceName) {
+            var source = slotEl(root, base + '-source');
+            var picker = slotEl(root, base + '-secret');
+            if (!source || !picker) return;
+            // A reference is readable, so the slot shows it by name; anything else opens in
+            // value mode — a stored literal is invisible to a read, and showing the picker
+            // over it would report a configured slot as empty and hide the value-row
+            // controls. An untouched save keeps the stored form either way.
+            source.value = referenceName ? 'stored' : 'value';
+            if (referenceName) setPickerValue(picker, referenceName);
+            else picker.value = '';
+            applySecretSourceVisibility(root, base);
+        }
+
+        function fillSecretPicker(picker) {
+            if (!picker) return;
+            var selected = picker.value;
+            picker.innerHTML = '';
+            var none = document.createElement('option');
+            none.value = '';
+            none.textContent = secretNamesLoaded.length
+                ? '(pick a secret)' : '(none — add one on the Secrets page)';
+            picker.appendChild(none);
+            secretNamesLoaded.forEach(function(name) {
+                var opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                picker.appendChild(opt);
+            });
+            if (selected) setPickerValue(picker, selected);
+        }
+
+        function fillSecretPickers() {
+            fillSecretPicker(document.getElementById('cfg-vi-service-api-key-secret'));
+            document.querySelectorAll('[data-vif-prefix]').forEach(function(root) {
+                SECTION_SECRET_SOURCES.forEach(function(base) {
+                    fillSecretPicker(field(root, base + '-secret'));
+                });
+            });
+        }
+
+        async function loadSecretNames() {
+            try {
+                secretNamesLoaded = (await VIF.core.client().persist.secrets().get()).names || [];
+            } catch (error) {
+                secretNamesLoaded = [];
+            }
+            fillSecretPickers();
         }
 
         // The credential inputs, by the flat path a save names each one under.
@@ -830,10 +1572,11 @@
         // and it is forgotten whenever the form is repopulated.
         var touchedSecrets = {};
 
-        function watchSecretInputs() {
+        // `touched` is read at keystroke time: resetForm() replaces the standalone map.
+        function watchSecretInputs(root, touched) {
             Object.keys(SECRET_INPUTS).forEach(function(path) {
-                const input = document.getElementById(SECRET_INPUTS[path]);
-                if (input) input.addEventListener('input', function() { touchedSecrets[path] = true; });
+                const input = rootInput(root, SECRET_INPUTS[path]);
+                if (input) input.addEventListener('input', function() { touched()[path] = true; });
             });
         }
 
@@ -843,10 +1586,14 @@
         function collectSecrets(config) {
             const secrets = {};
             Object.keys(SECRET_INPUTS).forEach(function(path) {
+                // A slot in stored-secret mode holds the name; its literal is withdrawn
+                // entirely — the API refuses a write carrying both forms.
+                if (secretSourceIsStored(null, SECRET_INPUTS[path])) return;
                 const value = VIF.v2map.secretValue(
                     !!touchedSecrets[path], getConfigValueAtPath(config, path));
                 if (value !== undefined) secrets[path] = value;
             });
+            if (config.detector_type === 'chain') Object.assign(secrets, collectChainStageSecrets());
             return secrets;
         }
 
@@ -964,9 +1711,9 @@
                         kind: 'override', app: override.application, stream: override.stream
                     });
                 });
-                refreshEffectiveDefaultPlaceholders();
+                refreshEffectiveDefaultPlaceholders(sectionsRoot);
                 populateClassNameDropdown();
-                populateCheckpointPaths();
+                populateCheckpointPaths(sectionsRoot);
 
                 select.innerHTML = '';
 
@@ -1020,7 +1767,8 @@
                 cloneBtnTop.style.display = 'none';
                 listenersPanel.style.display = '';
                 suppressDirtyTracking = true;
-                populateForm(defaultConfig);
+                const hintedType = takeNewConfigDetectorTypeHint();
+                populateForm(newConfigSeed(hintedType));
                 // A new stream leaves VIS URL/API key blank so they inherit from the default
                 // config at runtime, rather than baking a copy of the current global values into
                 // the stream's own config. populateForm(defaultConfig) above filled them in from
@@ -1031,9 +1779,16 @@
                 syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
                 resetNewStreamMatchFields();
                 updateMatchOverlapNote();
-                applySuggestedDefaultsForNewStream();
+                applySuggestedDefaultsForNewStream(sectionsRoot);
                 suppressDirtyTracking = false;
-                document.getElementById('cfg-detector-type').value = 'object';
+                document.getElementById('cfg-detector-type').value = hintedType || 'object';
+                if (hintedType) {
+                    applyDetectorTypeInferenceFpsSuggestion(hintedType);
+                    applyDetectorTypeTranscoderSuggestion(hintedType);
+                    applyDetectorTypeDurationSuggestion(hintedType);
+                    applyDetectorTypeApplicationSuggestion(hintedType);
+                    applyDetectorTypeStreamNameSuggestion(hintedType);
+                }
                 toggleDetectorSection();
                 markClean(false);
                 updateSaveButtonState();
@@ -1052,6 +1807,32 @@
             getConfig();
         }
 
+        /**
+         * The credential slots a clone cannot carry: the ones in use by this detector that hold
+         * no stored-secret reference. A key entered as a value is never read back, so a clone
+         * built from the read saves without it; a reference is a name, and copies. Whether a
+         * value is actually stored is not knowable from the read, so a slot counts as soon as
+         * it could hold one.
+         */
+        function uncopyableCredentialsOf(config) {
+            const labels = [];
+            const type = config.detector_type;
+            const vlm = config.vlm_analysis || {};
+            const svd = config.synthetic_analysis || {};
+            if ((type === 'vlm' || type === 'verify') && !vlm.api_key_secret) {
+                labels.push(type === 'verify' ? 'review endpoint API key' : 'VLM API key');
+            }
+            if (type === 'synthetic' || type === 'verify') {
+                if (/(^|\.)nvcf\.nvidia\.com(:\d+)?$/i.test(svd.endpoint || '') && !svd.api_key_secret) {
+                    labels.push('Synthetic Video Detector API key');
+                }
+                if (svd.tls_client_cert && !svd.tls_client_key_secret) {
+                    labels.push('TLS client key');
+                }
+            }
+            return labels;
+        }
+
         async function cloneConfig() {
             const stream = getSelectedStream();
             if (!stream) return;
@@ -1061,13 +1842,24 @@
             try {
                 suppressDirtyTracking = true;
                 const config = await readConfig(resource);
+                const uncopyable = uncopyableCredentialsOf(config);
+                if (uncopyable.length && !confirm(
+                        `The ${uncopyable.join(' and the ')} of this config will not be copied: `
+                        + 'a key entered as a value is never read back, so the clone would be saved without it.\n\n'
+                        + 'To keep it, store the key as a secret first (the Secrets page, or "Save as secret…" '
+                        + 'on the field) and pick it in the original config, or enter the key again in the '
+                        + 'clone before saving.\n\nClone anyway?')) {
+                    return;
+                }
                 const select = document.getElementById('cfg-stream-select');
                 select.value = '__new__';
                 onStreamSelected();
-                populateForm(config);
+                populateForm(Object.assign({}, config, { active: true }));
                 document.getElementById('cfg-new-app-name').value = config.app_name || stream.appName || '';
                 document.getElementById('cfg-new-stream-name').value = '';
-                showStatus('Config cloned. Enter a new stream name or regex, then save.', false);
+                showStatus(uncopyable.length
+                    ? `Config cloned without its ${uncopyable.join(' and ')}. Enter it again (or pick a stored secret), set a new stream name or regex, then save.`
+                    : 'Config cloned. Enter a new stream name or regex, then save.', false);
                 markDirty();
             } catch (error) {
                 console.error("Error cloning config:", error);
@@ -1078,22 +1870,22 @@
         }
 
 
-        function getVlmMode() {
-            const checked = document.querySelector('#cfg-vlm-mode input[name="vlm-mode"]:checked');
+        function getVlmMode(root) {
+            const checked = field(root, 'cfg-vlm-mode').querySelector('input[name="' + sectionPrefix(root) + 'vlm-mode"]:checked');
             return checked ? checked.value : 'detect';
         }
 
         // Detect "Reasoning Level" (Low / Medium / High). The selector writes ONLY the level
         // marker; VIS owns the per-level prompts and per-class schema and applies them
         // server-side. Sub-choice inside Detect only, separate from getVlmMode().
-        function getReasoningLevel() {
-            const checked = document.querySelector('#cfg-vlm-reasoning-level input[name="vlm-reasoning-level"]:checked');
+        function getReasoningLevel(root) {
+            const checked = field(root, 'cfg-vlm-reasoning-level').querySelector('input[name="' + sectionPrefix(root) + 'vlm-reasoning-level"]:checked');
             return checked ? checked.value : 'low';
         }
 
-        function setReasoningLevel(level) {
+        function setReasoningLevel(root, level) {
             const value = (level === 'medium' || level === 'high') ? level : 'low';
-            const radios = document.querySelectorAll('#cfg-vlm-reasoning-level input[name="vlm-reasoning-level"]');
+            const radios = field(root, 'cfg-vlm-reasoning-level').querySelectorAll('input[name="' + sectionPrefix(root) + 'vlm-reasoning-level"]');
             radios.forEach(function(r) { r.checked = (r.value === value); });
         }
 
@@ -1106,26 +1898,26 @@
         }
 
         // Reveal the custom model-name input only when the "Other" option is selected.
-        function toggleVlmModelNameOther() {
-            const isOther = document.getElementById('cfg-vlm-model-name').value === VLM_MODEL_OTHER;
-            document.getElementById('cfg-vlm-model-name-other').style.display = isOther ? 'block' : 'none';
+        function toggleVlmModelNameOther(root) {
+            const isOther = field(root, 'cfg-vlm-model-name').value === VLM_MODEL_OTHER;
+            field(root, 'cfg-vlm-model-name-other').style.display = isOther ? 'block' : 'none';
             markDirty();
         }
 
         // Effective model_name from the dropdown, or the custom text when "Other" is chosen.
         // Empty custom -> null so the stream inherits the global default.
-        function readVlmModelName() {
-            const select = document.getElementById('cfg-vlm-model-name');
+        function readVlmModelName(root) {
+            const select = field(root, 'cfg-vlm-model-name');
             if (select.value === VLM_MODEL_OTHER) {
-                return document.getElementById('cfg-vlm-model-name-other').value.trim() || null;
+                return field(root, 'cfg-vlm-model-name-other').value.trim() || null;
             }
             return select.value || null;
         }
 
         // Select the option matching modelName; an unknown value loads into "Other" + custom input.
-        function setVlmModelName(modelName) {
-            const select = document.getElementById('cfg-vlm-model-name');
-            const other = document.getElementById('cfg-vlm-model-name-other');
+        function setVlmModelName(root, modelName) {
+            const select = field(root, 'cfg-vlm-model-name');
+            const other = field(root, 'cfg-vlm-model-name-other');
             if (modelName && VLM_KNOWN_MODELS.indexOf(modelName) === -1) {
                 select.value = VLM_MODEL_OTHER;
                 other.value = modelName;
@@ -1133,7 +1925,7 @@
                 select.value = modelName || VLM_KNOWN_MODELS[0];
                 other.value = '';
             }
-            toggleVlmModelNameOther();
+            toggleVlmModelNameOther(root);
         }
 
         // The VLM Server field takes a lenient address: on save, a missing scheme
@@ -1152,8 +1944,8 @@
 
         // Build the stored endpoint_url from the field. Empty -> null so the
         // stream inherits the global default.
-        function buildVlmEndpointUrl() {
-            let s = document.getElementById('cfg-vlm-endpoint-url').value.trim();
+        function buildVlmEndpointUrl(root) {
+            let s = field(root, 'cfg-vlm-endpoint-url').value.trim();
             if (!s) return null;
             if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) s = 'http://' + s;
             // No path after host:port (a lone trailing / counts as none) -> append /v1.
@@ -1162,35 +1954,181 @@
             return s;
         }
 
-        // Endpoint the Verify button probes: the field (normalized to a full URL), else the
-        // effective global default layered the same way the load block does.
-        function effectiveVlmEndpointForTest() {
-            const fromField = buildVlmEndpointUrl();
-            if (fromField) return fromField;
-            const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
-            return globalVa.endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url || null;
+        // The vlm_analysis block a blank field inherits from: the Verify baseline's for a
+        // Verify config, the global defaults' otherwise.
+        function effectiveVlmDefaults() {
+            return document.getElementById('cfg-detector-type').value === 'verify'
+                ? (verifyBaseline().vlm || {})
+                : ((defaultConfig && defaultConfig.vlm_analysis) || {});
         }
 
-        // Bumped on every clear so an in-flight probe knows its result is stale.
-        var vlmEndpointTestSeq = 0;
+        // Endpoint the Verify button probes: the field (normalized to a full URL), else the
+        // default a blank field inherits, layered the same way the placeholders are.
+        function effectiveVlmEndpointForTest(root) {
+            const fromField = buildVlmEndpointUrl(root);
+            if (fromField) return fromField;
+            return effectiveVlmDefaults().endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url || null;
+        }
 
-        // The endpoint URL the selected document stores, snapshotted at populate.
-        // While the field still matches it, Verify probes BY REFERENCE (group name,
-        // no URL) so the stored api_key — which a read never echoes — authenticates
-        // server-side. Editing the URL or typing a key switches to a by-value probe.
-        var vlmStoredEndpointUrl = null;
+        // Per section root, bumped on every clear so an in-flight probe knows its result is stale.
+        var probeSeqs = new WeakMap();
 
-        function clearVlmEndpointTestResult() {
-            vlmEndpointTestSeq++;
-            const el = document.getElementById('cfg-vlm-endpoint-test-result');
+        function probeSeq(root, kind, bump) {
+            const seqs = probeSeqs.get(root) || { vlm: 0, svd: 0 };
+            if (bump) seqs[kind]++;
+            probeSeqs.set(root, seqs);
+            return seqs[kind];
+        }
+
+        // Per section root, the endpoints its stored document holds, snapshotted at populate.
+        // While a field still matches its snapshot, Verify probes BY REFERENCE so the stored
+        // api_key, which a read never echoes, authenticates server-side.
+        var storedEndpoints = new WeakMap();
+
+        function probeTarget(root) {
+            const resource = getSelectedResource();
+            const config = resource && resource.kind === 'group' ? resource.name : null;
+            const stored = storedEndpoints.get(root) || null;
+            const card = chainCardOfRoot(root);
+            if (!card) {
+                const override = resource && resource.kind === 'override'
+                    ? { application: resource.app, stream: resource.stream } : null;
+                return { config: config, override: override, stage: null,
+                    detectorType: document.getElementById('cfg-detector-type').value, stored: stored };
+            }
+            const name = chainCardName(card);
+            const unrenamed = !!stored && stored.stage === name && stored.type === card.type;
+            return {
+                config: unrenamed ? config : null,
+                stage: unrenamed ? name : null,
+                detectorType: card.type,
+                stored: unrenamed ? stored : null
+            };
+        }
+
+        function clearSvdEndpointTestResult(root) {
+            probeSeq(root, 'svd', true);
+            const el = field(root, 'cfg-synthetic-endpoint-test-result');
             if (!el) return;
             el.style.display = 'none';
             el.className = 'endpoint-test-result';
             el.textContent = '';
         }
 
-        function showVlmEndpointTestResult(cls) {
-            const el = document.getElementById('cfg-vlm-endpoint-test-result');
+        function showSvdEndpointTestResult(root, cls) {
+            const el = field(root, 'cfg-synthetic-endpoint-test-result');
+            el.className = 'endpoint-test-result ' + cls;
+            el.style.display = '';
+            return el;
+        }
+
+        function svdEndpointFields(root) {
+            const value = function(id) { return field(root, id).value.trim(); };
+            const useTlsRaw = value('cfg-synthetic-use-tls');
+            const nvcf = syntheticEndpointIsNvcf(root);
+            return {
+                endpoint: value('cfg-synthetic-endpoint'),
+                use_tls: useTlsRaw === '' ? null : useTlsRaw === 'true',
+                tls_ca_cert: nvcf ? '' : value('cfg-synthetic-tls-ca-cert'),
+                tls_client_cert: nvcf ? '' : value('cfg-synthetic-tls-client-cert'),
+                tls_client_key: nvcf ? '' : value('cfg-synthetic-tls-client-key'),
+                api_key: nvcf ? value('cfg-synthetic-api-key') : '',
+                function_id: nvcf ? value('cfg-synthetic-function-id') : ''
+            };
+        }
+
+        // An endpoint the operator did not type — a stored config's own, or the baseline's, with
+        // no secret typed beside it — is probed by reference, so the Engine dials it with the
+        // stored credentials the analyzer would use. Anything typed goes by value.
+        function svdProbeRequest(root, fields) {
+            const target = probeTarget(root);
+            const typedSecret = fields.api_key || fields.tls_client_key;
+            if (!typedSecret) {
+                const storedEndpoint = target.stored ? target.stored.svdEndpoint : null;
+                if (target.stage && target.config && fields.endpoint === (storedEndpoint || '')) {
+                    return { streamGroupConfig: target.config, stage: target.stage, detectorType: target.detectorType };
+                }
+                if (!target.stage && target.config && storedEndpoint && fields.endpoint === storedEndpoint) {
+                    return { streamGroupConfig: target.config };
+                }
+                const baseline = field(root, 'cfg-synthetic-endpoint').dataset.globalDefault || '';
+                if (!fields.endpoint || fields.endpoint === baseline) {
+                    return { streamGroupConfig: 'default', detectorType: target.detectorType };
+                }
+            }
+            return VIF.v2map.svdProbeRequestFromV1(fields);
+        }
+
+        // The SVD probe takes no secret name, so a stored secret only reaches it by reference:
+        // a picked name that is not the saved one would be probed as the saved one.
+        function unsavedSvdSecret(root) {
+            const stored = probeTarget(root).stored || {};
+            const nvcf = syntheticEndpointIsNvcf(root);
+            const slots = nvcf ? [['cfg-synthetic-api-key', stored.svdKeySecret]]
+                : [['cfg-synthetic-tls-client-key', stored.svdTlsKeySecret]];
+            for (let i = 0; i < slots.length; i++) {
+                const picked = referenceValue(root, slots[i][0]);
+                if (picked && picked !== (slots[i][1] || '')) return picked;
+            }
+            return null;
+        }
+
+        async function testSvdEndpoint(root) {
+            const btn = field(root, 'cfg-synthetic-endpoint-test');
+            const fields = svdEndpointFields(root);
+            const endpointInput = field(root, 'cfg-synthetic-endpoint');
+            const effective = fields.endpoint || endpointInput.dataset.globalDefault || '';
+            if (!effective) {
+                showSvdEndpointTestResult(root, 'error').textContent = '✗ No SVD endpoint configured';
+                return;
+            }
+            const unsaved = unsavedSvdSecret(root);
+            if (unsaved) {
+                showSvdEndpointTestResult(root, 'warn').textContent =
+                    `⚠ Save the config, then Verify: the SVD check uses the secrets saved with it, and '${unsaved}' is not saved yet.`;
+                return;
+            }
+            const original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Verifying…';
+            showSvdEndpointTestResult(root, '').textContent = 'Verifying…';
+            const seq = probeSeq(root, 'svd', true);
+            try {
+                const result = await VIF.core.client().probes.svdEndpoint(svdProbeRequest(root, fields));
+                if (seq !== probeSeq(root, 'svd')) return;
+                renderSvdEndpointTestOutcome(root, result, effective);
+            } catch (error) {
+                if (seq !== probeSeq(root, 'svd')) return;
+                showSvdEndpointTestResult(root, 'error').textContent = `✗ ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = original;
+            }
+        }
+
+        function renderSvdEndpointTestOutcome(root, result, endpoint) {
+            if (result.reachable && result.accepted) {
+                showSvdEndpointTestResult(root, 'ok').textContent = `✓ Reachable — an SVD service answered at ${endpoint} and accepted the credentials`;
+                return;
+            }
+            if (result.reachable) {
+                showSvdEndpointTestResult(root, 'warn').textContent = `⚠ ${result.error || 'Reachable, but the endpoint did not accept the probe'}`;
+                return;
+            }
+            showSvdEndpointTestResult(root, 'error').textContent = `✗ ${result.error || 'Unreachable'}`;
+        }
+
+        function clearVlmEndpointTestResult(root) {
+            probeSeq(root, 'vlm', true);
+            const el = field(root, 'cfg-vlm-endpoint-test-result');
+            if (!el) return;
+            el.style.display = 'none';
+            el.className = 'endpoint-test-result';
+            el.textContent = '';
+        }
+
+        function showVlmEndpointTestResult(root, cls) {
+            const el = field(root, 'cfg-vlm-endpoint-test-result');
             el.className = 'endpoint-test-result ' + cls;
             el.style.display = '';
             return el;
@@ -1198,67 +2136,79 @@
 
         // Server-side connectivity probe: the browser can't reach compose-internal
         // hostnames, so the Engine plugin issues GET <endpoint>/models on our behalf.
-        async function testVlmEndpoint() {
-            const btn = document.getElementById('cfg-vlm-endpoint-test');
-            const endpoint = effectiveVlmEndpointForTest();
+        async function testVlmEndpoint(root) {
+            const btn = field(root, 'cfg-vlm-endpoint-test');
+            const endpoint = effectiveVlmEndpointForTest(root);
             if (!endpoint) {
-                showVlmEndpointTestResult('error').textContent = '✗ No VLM endpoint configured';
+                showVlmEndpointTestResult(root, 'error').textContent = '✗ No VLM endpoint configured';
                 return;
             }
-            // Layer the key like the endpoint: the per-stream field, else the global default.
-            const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
-            const apiKey = document.getElementById('cfg-vlm-api-key').value || globalVa.api_key || '';
+            // The browser never holds a stored key: a stored secret goes by reference or by
+            // name, and vlmProbePlan picks which.
+            const target = probeTarget(root);
+            const typedUrl = (field(root, 'cfg-vlm-endpoint-url').value || '').trim();
+            const storedUrl = target.stored ? target.stored.vlmUrl : null;
+            const plan = VIF.v2map.vlmProbePlan({
+                named: secretSourceIsStored(root, 'cfg-vlm-api-key'),
+                picked: referenceValue(root, 'cfg-vlm-api-key') || '',
+                storedKeySecret: target.stored ? target.stored.vlmKeySecret : null,
+                typedKey: field(root, 'cfg-vlm-api-key').value,
+                inheritedKey: effectiveVlmDefaults().api_key || '',
+                endpoint: endpoint,
+                typedUrl: typedUrl,
+                urlAsStored: buildVlmEndpointUrl(root) === storedUrl,
+                untouchedUrl: target.stage
+                    ? buildVlmEndpointUrl(root) === storedUrl
+                    : !!storedUrl && buildVlmEndpointUrl(root) === storedUrl,
+                config: target.config,
+                override: target.override,
+                stage: target.stage,
+                detectorType: target.detectorType
+            });
 
             const original = btn.textContent;
             btn.disabled = true;
             btn.textContent = 'Verifying…';
-            showVlmEndpointTestResult('').textContent = 'Verifying…';
-            const seq = ++vlmEndpointTestSeq;
+            showVlmEndpointTestResult(root, '').textContent = 'Verifying…';
+            const seq = probeSeq(root, 'vlm', true);
 
             try {
-                // The request carries the endpoint in its body, so the api_key stays out
-                // of logged URLs. Verifying the stored endpoint untouched goes by
-                // reference: the server pairs the stored URL with its stored key (the
-                // key never reaches the browser, so a by-value probe cannot carry it).
-                const resource = getSelectedResource();
-                const typedKey = document.getElementById('cfg-vlm-api-key').value;
-                const storedProbe = !typedKey && resource && resource.kind === 'group'
-                    && vlmStoredEndpointUrl && buildVlmEndpointUrl() === vlmStoredEndpointUrl;
-                const result = await VIF.core.client().probes.vlmEndpoint(
-                    storedProbe
-                        ? VIF.v2map.probeRequestFromV1({}, resource.name)
-                        : VIF.v2map.probeRequestFromV1({ endpoint_url: endpoint, api_key: apiKey },
-                            (resource && resource.kind === 'group') ? resource.name : 'default'));
-                if (seq !== vlmEndpointTestSeq) return; // field edited mid-flight; result is stale
-                renderVlmEndpointTestOutcome(result);
+                const request = plan.request;
+                const result = await VIF.core.client().probes.vlmEndpoint(request);
+                if (seq !== probeSeq(root, 'vlm')) return; // field edited mid-flight; result is stale
+                renderVlmEndpointTestOutcome(root, result);
             } catch (error) {
-                if (seq !== vlmEndpointTestSeq) return;
-                showVlmEndpointTestResult('error').textContent = `✗ ${error.message}`;
+                if (seq !== probeSeq(root, 'vlm')) return;
+                showVlmEndpointTestResult(root, 'error').textContent = `✗ ${error.message}`;
             } finally {
                 btn.disabled = false;
                 btn.textContent = original;
             }
         }
 
-        function renderVlmEndpointTestOutcome(result) {
+        function renderVlmEndpointTestOutcome(root, result) {
             const models = Array.isArray(result.models) ? result.models : [];
             if (result.reachable && models.length) {
-                // Compare against the model the stream would actually use (field,
-                // else the global default). A single served model that differs is
-                // adopted right away — the note reports the change; save persists it.
+                // Compare against the model the stream would actually use (field, else
+                // the default an empty choice inherits). A single served model that
+                // differs is adopted right away — the note reports the change; save
+                // persists it.
+                const verify = document.getElementById('cfg-detector-type').value === 'verify';
                 const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
-                const configured = readVlmModelName() || globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name;
+                const configured = readVlmModelName(root)
+                    || (verify ? verifyBaselineModel() : (globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name));
                 const matches = models.indexOf(configured) !== -1;
                 if (matches) {
-                    showVlmEndpointTestResult('ok').textContent =
+                    showVlmEndpointTestResult(root, 'ok').textContent =
                         `✓ Reachable — serving: ${models.join(', ')} (matches the configured model)`;
                 } else if (models.length === 1) {
-                    setVlmModelName(models[0]);
+                    if (verify) setVerifyReviewModel(root, models[0]);
+                    else setVlmModelName(root, models[0]);
                     markDirty();
-                    showVlmEndpointTestResult('warn').textContent =
+                    showVlmEndpointTestResult(root, 'warn').textContent =
                         `⚠ Reachable — serving: ${models[0]}; the configured model (${configured}) did not match, so it was updated. Save to keep it.`;
                 } else {
-                    showVlmEndpointTestResult('warn').textContent =
+                    showVlmEndpointTestResult(root, 'warn').textContent =
                         `⚠ Reachable — serving: ${models.join(', ')}, which does not match the configured model (${configured}). Pick one of the served models.`;
                 }
                 return;
@@ -1266,27 +2216,27 @@
             if (result.reachable) {
                 // Reachable but no usable model list: auth rejection, redirect, or
                 // a model listing too large/odd to read.
-                showVlmEndpointTestResult('warn').textContent = `⚠ ${result.error || 'Endpoint reachable but returned no models'}`;
+                showVlmEndpointTestResult(root, 'warn').textContent = `⚠ ${result.error || 'Endpoint reachable but returned no models'}`;
                 return;
             }
-            showVlmEndpointTestResult('error').textContent = `✗ ${result.error || 'Endpoint unreachable'}`;
+            showVlmEndpointTestResult(root, 'error').textContent = `✗ ${result.error || 'Endpoint unreachable'}`;
         }
 
-        function toggleVlmMode() {
-            const mode = getVlmMode();
-            document.getElementById('vlm-mode-detect').style.display = mode === 'detect' ? 'block' : 'none';
-            document.getElementById('vlm-mode-describe').style.display = mode === 'describe' ? 'block' : 'none';
-            document.getElementById('vlm-mode-custom').style.display = mode === 'custom' ? 'block' : 'none';
+        function toggleVlmMode(root) {
+            const mode = getVlmMode(root);
+            field(root, 'vlm-mode-detect').style.display = mode === 'detect' ? 'block' : 'none';
+            field(root, 'vlm-mode-describe').style.display = mode === 'describe' ? 'block' : 'none';
+            field(root, 'vlm-mode-custom').style.display = mode === 'custom' ? 'block' : 'none';
             if (mode === 'detect' || mode === 'custom') {
                 const targetId = mode === 'detect' ? 'cfg-vlm-detect-classes' : 'cfg-vlm-custom-classes';
                 const sourceId = mode === 'detect' ? 'cfg-vlm-custom-classes' : 'cfg-vlm-detect-classes';
-                carryOverVlmClasses(sourceId, targetId);
+                carryOverVlmClasses(root, sourceId, targetId);
             }
-            if (mode === 'custom') updateVlmCustomLint();
+            if (mode === 'custom') updateVlmCustomLint(root);
             // Leaving Detect resets the reasoning level to High so Custom/Describe never
             // carry a Low/Medium marker. On a Low/Medium load, populateForm sets the level
             // AFTER this runs (mode is 'detect' there), so a reopened config keeps its level.
-            if (mode !== 'detect') setReasoningLevel('low');
+            if (mode !== 'detect') setReasoningLevel(root, 'low');
             // Re-fit the now-visible Custom-mode textareas to any prefilled content — a
             // programmatic value set (loadConfig) fires no 'input' event. Safe in any
             // mode: vlmAutoGrowAll skips textareas that are still hidden.
@@ -1294,16 +2244,16 @@
             markDirty();
         }
 
-        function setVlmMode(mode) {
-            const radios = document.querySelectorAll('#cfg-vlm-mode input[name="vlm-mode"]');
+        function setVlmMode(root, mode) {
+            const radios = field(root, 'cfg-vlm-mode').querySelectorAll('input[name="' + sectionPrefix(root) + 'vlm-mode"]');
             radios.forEach(function(r) { r.checked = (r.value === mode); });
-            toggleVlmMode();
+            toggleVlmMode(root);
         }
 
-        function addClassRow(containerId, name, options) {
+        function addClassRow(root, containerId, name, options) {
             options = options || {};
             const withHint = options.withHint !== false;
-            const container = document.getElementById(containerId);
+            const container = field(root, containerId);
             const row = document.createElement('div');
             row.className = withHint ? 'vlm-class-row' : 'vif-class-row';
 
@@ -1312,14 +2262,14 @@
             nameInput.className = withHint ? 'vlm-class-name' : 'vif-class-name';
             nameInput.placeholder = options.placeholder || 'class (e.g. fire)';
             nameInput.value = name || '';
-            nameInput.addEventListener('input', function() { markDirty(); if (withHint) updateVlmCustomLint(); });
+            nameInput.addEventListener('input', function() { markDirty(); if (withHint) updateVlmCustomLint(root); });
 
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
             removeBtn.className = 'btn-danger';
             removeBtn.textContent = '×';
             removeBtn.title = 'Remove class';
-            removeBtn.onclick = function() { row.remove(); markDirty(); if (withHint) updateVlmCustomLint(); };
+            removeBtn.onclick = function() { row.remove(); markDirty(); if (withHint) updateVlmCustomLint(root); };
 
             if (!withHint) {
                 // Scene: single full-width class-name column + remove button (unchanged behaviour).
@@ -1372,7 +2322,7 @@
                     hintInput.focus();
                 }
                 markDirty();
-                updateVlmCustomLint();
+                updateVlmCustomLint(root);
             };
 
             col.appendChild(nameInput);
@@ -1386,19 +2336,19 @@
 
             container.appendChild(row);
             markDirty();
-            updateVlmCustomLint();
+            updateVlmCustomLint(root);
         }
 
-        function addVlmClassRow(containerId, name, hint) {
-            addClassRow(containerId, name, { hint: hint, withHint: true });
+        function addVlmClassRow(root, containerId, name, hint) {
+            addClassRow(root, containerId, name, { hint: hint, withHint: true });
         }
 
-        function collectClassRows(containerId, options) {
+        function collectClassRows(root, containerId, options) {
             options = options || {};
             const withHint = options.withHint !== false;
             const rowSelector = withHint ? '.vlm-class-row' : '.vif-class-row';
             const nameSelector = withHint ? '.vlm-class-name' : '.vif-class-name';
-            const rows = document.querySelectorAll('#' + containerId + ' ' + rowSelector);
+            const rows = field(root, containerId).querySelectorAll(rowSelector);
             const classNames = [];
             const classHints = {};
             rows.forEach(function(row) {
@@ -1415,11 +2365,11 @@
 
         // Read a repeater's rows -> {classNames:[...], classHints:{name:hint}}.
         // Used for both the Detect and Custom class lists.
-        function collectVlmClasses(containerId) {
-            return collectClassRows(containerId, { withHint: true });
+        function collectVlmClasses(root, containerId) {
+            return collectClassRows(root, containerId, { withHint: true });
         }
 
-        function populateClassRows(containerId, classNames, classHints, options) {
+        function populateClassRows(root, containerId, classNames, classHints, options) {
             options = options || {};
             const withHint = options.withHint !== false;
             const hints = classHints || {};
@@ -1428,7 +2378,7 @@
                 lowerHints[k.toLowerCase()] = hints[k];
             }
             for (const cn of (classNames || [])) {
-                addClassRow(containerId, cn, {
+                addClassRow(root, containerId, cn, {
                     hint: withHint ? (lowerHints[cn.toLowerCase()] || '') : undefined,
                     withHint: withHint
                 });
@@ -1437,34 +2387,224 @@
 
         // Populate a repeater (Detect or Custom) from a config's class_names +
         // class_hints. Inverse of collectVlmClasses().
-        function populateVlmClassRows(containerId, classNames, classHints) {
-            populateClassRows(containerId, classNames, classHints, { withHint: true });
+        function populateVlmClassRows(root, containerId, classNames, classHints) {
+            populateClassRows(root, containerId, classNames, classHints, { withHint: true });
         }
 
-        function carryOverVlmClasses(sourceId, targetId) {
-            const targetHasRows = document.querySelectorAll('#' + targetId + ' .vlm-class-row').length > 0;
+        function carryOverVlmClasses(root, sourceId, targetId) {
+            const targetHasRows = field(root, targetId).querySelectorAll('.vlm-class-row').length > 0;
             if (targetHasRows) return;
-            const source = collectVlmClasses(sourceId);
+            const source = collectVlmClasses(root, sourceId);
             if (source.classNames.length === 0) return;
-            populateVlmClassRows(targetId, source.classNames, source.classHints);
+            populateVlmClassRows(root, targetId, source.classNames, source.classHints);
         }
 
-        function toggleVlmAdvanced() {
-            const adv = document.getElementById('cfg-vlm-advanced');
-            const caret = document.getElementById('cfg-vlm-advanced-caret');
+        function toggleVlmAdvanced(root) {
+            const adv = field(root, 'cfg-vlm-advanced');
+            const caret = field(root, 'cfg-vlm-advanced-caret');
             const show = adv.style.display === 'none';
             adv.style.display = show ? 'block' : 'none';
             caret.innerHTML = show ? '&#9662;' : '&#9656;';
         }
 
-        function updateVlmCustomLint() {
-            const warn = document.getElementById('vlm-custom-classlist-warning');
+        function updateVlmCustomLint(root) {
+            const warn = field(root, 'vlm-custom-classlist-warning');
             if (!warn) return;
-            const hasClasses = collectVlmClasses('cfg-vlm-custom-classes').classNames.length > 0;
-            const sys = document.getElementById('cfg-vlm-system-prompt').value;
-            const usr = document.getElementById('cfg-vlm-user-prompt').value;
+            const hasClasses = collectVlmClasses(root, 'cfg-vlm-custom-classes').classNames.length > 0;
+            const sys = field(root, 'cfg-vlm-system-prompt').value;
+            const usr = field(root, 'cfg-vlm-user-prompt').value;
             const hasPlaceholder = sys.indexOf('{class_list}') !== -1 || usr.indexOf('{class_list}') !== -1;
             warn.style.display = (hasClasses && !hasPlaceholder) ? 'block' : 'none';
+        }
+
+        function readSections(root, detectorType) {
+            const sections = {};
+            if (fieldAppliesToDetector('ignore_untracked_objects', detectorType)) {
+                sections.ignore_untracked_objects = field(root, 'cfg-ignore-untracked-objects').checked;
+            }
+
+            if (detectorType === 'object') {
+                const classNames = Array.from(field(root, 'cfg-class-names').selectedOptions).map(o => o.value);
+
+                const trackingMethod = field(root, 'cfg-tracking-method').value;
+
+                const modelName = field(root, 'cfg-model-name').value;
+                sections.object_analysis = {
+                    class_names: classNames,
+                    model_name: modelName,
+                    confidence_threshold: readNumber(field(root, 'cfg-confidence-threshold'), false, 100),
+                    tracking_method: trackingMethod || null
+                };
+
+                if (modelName === 'custom') {
+                    sections.object_analysis.checkpoint_path = field(root, 'cfg-checkpoint-path').value || null;
+                }
+
+                if (trackingMethod === 'byte-track') {
+                    sections.object_analysis.byte_track_properties = {
+                        track_creation_minimum_confidence: readNumber(field(root, 'cfg-bt-min-confidence'), false, 100),
+                        max_lost_track_frames_before_track_removal: readNumber(field(root, 'cfg-bt-max-lost-frames'), true),
+                        minimum_consecutive_track_overlap: readNumber(field(root, 'cfg-bt-min-overlap'), false, 100),
+                        track_creation_minimum_consecutive_frames: readNumber(field(root, 'cfg-bt-min-frames'), true)
+                    };
+                }
+
+                const tilingEnabled = field(root, 'cfg-tiling-enabled').checked;
+                if (tilingEnabled) {
+                    const tilingMode = field(root, 'cfg-tiling-mode').value || 'fixed';
+                    sections.object_analysis.tiling_mode = tilingMode;
+                    const tilingProperties = {
+                        max_slice_rows: readNumber(field(root, 'cfg-tiling-max-rows'), true),
+                        max_slice_cols: readNumber(field(root, 'cfg-tiling-max-cols'), true),
+                        tile_coverage_cutoff: readNumber(field(root, 'cfg-tiling-coverage-cutoff'), false, 100)
+                    };
+                    if (tilingMode === 'gated') {
+                        tilingProperties.min_slice_rows = readNumber(field(root, 'cfg-tiling-min-rows'), true);
+                        tilingProperties.min_slice_cols = readNumber(field(root, 'cfg-tiling-min-cols'), true);
+                        // Gated always has the full-frame probe, so cluster suppression always applies.
+                        tilingProperties.cluster_suppression_min_children = readNumber(field(root, 'cfg-tiling-cluster-children'), true);
+                    } else {
+                        // Fixed mode: the full-frame pass is opt-in, and cluster suppression
+                        // is only meaningful (and only sent) when that pass is enabled.
+                        const fullFrame = field(root, 'cfg-tiling-full-frame').checked;
+                        tilingProperties.full_frame_detection = fullFrame;
+                        if (fullFrame) {
+                            tilingProperties.cluster_suppression_min_children = readNumber(field(root, 'cfg-tiling-cluster-children'), true);
+                        }
+                    }
+                    sections.object_analysis.tiling_properties = tilingProperties;
+                } else {
+                    // Tiling off — a single full-frame pass. tiling_mode 'none' is the
+                    // master switch; tiling_properties is omitted.
+                    sections.object_analysis.tiling_mode = 'none';
+                }
+            }
+
+            if (detectorType === 'scene') {
+                const sceneClassNames = collectClassRows(root, 'cfg-scene-class-names', { withHint: false }).classNames;
+
+                sections.scene_analysis = {
+                    class_names: sceneClassNames,
+                    sensitivity: readNumber(field(root, 'cfg-scene-sensitivity'), false),
+                    confidence_threshold: readNumber(field(root, 'cfg-scene-confidence-threshold'), false, 100),
+                };
+            }
+
+            if (detectorType === 'motion') {
+                const suppressGlobalChangesRaw = field(root, 'cfg-motion-suppress-global-changes').value;
+                sections.motion_analysis = {
+                    sensitivity: readNumber(field(root, 'cfg-motion-sensitivity'), true),
+                    min_displacement: readNumber(field(root, 'cfg-motion-min-displacement'), false, 100),
+                    merge_distance: readNumber(field(root, 'cfg-motion-merge-distance'), false, 100),
+                    suppress_global_changes: suppressGlobalChangesRaw === '' ? null : suppressGlobalChangesRaw === 'true',
+                };
+            }
+
+            if (detectorType === 'vlm') {
+                // Shared connection + advanced fields (every mode). Class/prompt keys
+                // are added per active mode below and ONLY for that mode, so VIS's
+                // field-presence mode inference stays unambiguous (mode-bleed guard).
+                const vlm = {
+                    model_name: readVlmModelName(root),
+                    endpoint_url: buildVlmEndpointUrl(root),
+                    api_key: secretSourceIsStored(root, 'cfg-vlm-api-key') ? null
+                        : field(root, 'cfg-vlm-api-key').value || null,
+                    api_key_secret: referenceValue(root, 'cfg-vlm-api-key'),
+                    request_timeout_seconds: readNumber(field(root, 'cfg-vlm-request-timeout'), false),
+                    temperature: readNumber(field(root, 'cfg-vlm-temperature'), false),
+                    max_tokens: readNumber(field(root, 'cfg-vlm-max-tokens'), true),
+                    // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
+                };
+                const vlmMode = getVlmMode(root);
+                if (vlmMode === 'detect') {
+                    // Per-class repeater -> class_names (+ class_hints for rows with a note).
+                    const detect = collectVlmClasses(root, 'cfg-vlm-detect-classes');
+                    vlm.class_names = detect.classNames;
+                    if (Object.keys(detect.classHints).length > 0) {
+                        vlm.class_hints = detect.classHints;
+                    }
+                    // High is the DEFAULT and rides as ABSENT — VIS treats a missing
+                    // reasoning_level as High. Only Low/Medium ride as explicit markers;
+                    // sending "high" explicitly would pin it and silently override a stream
+                    // (or fleet default) that means to stay on the default. VIS owns the
+                    // Low/Medium prompts/schema/sizing — the UI sends only the level.
+                    const reasoningLevel = getReasoningLevel(root);
+                    if (reasoningLevel === 'low' || reasoningLevel === 'medium') {
+                        vlm.reasoning_level = reasoningLevel;
+                    } else if (vlm.max_tokens === undefined) {
+                        // High + no operator override in Advanced -> auto-size max_tokens to
+                        // the class count so per-class reasoning isn't truncated. An explicit
+                        // Advanced value (read into vlm.max_tokens above) always wins and is
+                        // left untouched.
+                        vlm.max_tokens = highDetectMaxTokens(detect.classNames.length);
+                    }
+                } else if (vlmMode === 'custom') {
+                    // Operator prompts win; classes optional (feed {class_list}).
+                    // Prompts: send absent (null), never empty-string — VIS rejects ""
+                    // and inherits the built-in default only on field-absence.
+                    vlm.system_prompt = field(root, 'cfg-vlm-system-prompt').value.trim() || null;
+                    vlm.user_prompt = field(root, 'cfg-vlm-user-prompt').value.trim() || null;
+                    // Same per-class repeater as Detect: class_names (+ class_hints).
+                    const customCls = collectVlmClasses(root, 'cfg-vlm-custom-classes');
+                    if (customCls.classNames.length > 0) {
+                        vlm.class_names = customCls.classNames;
+                        if (Object.keys(customCls.classHints).length > 0) {
+                            vlm.class_hints = customCls.classHints;
+                        }
+                    }
+                    const responseSchema = withSchemaBuilder(root, function(builder) { return builder.outputSchemaForSave(); });
+                    if (responseSchema) {
+                        vlm.response_schema = responseSchema;
+                    }
+                }
+                // Describe mode: no class/prompt keys — VIS uses the descriptive default.
+                sections.vlm_analysis = vlm;
+            }
+
+            if (detectorType === 'verify') {
+                sections.vlm_analysis = {
+                    model_name: readVlmModelName(root),
+                    endpoint_url: buildVlmEndpointUrl(root),
+                    api_key: field(root, 'cfg-vlm-api-key').value || null,
+                    request_timeout_seconds: readNumber(field(root, 'cfg-vlm-request-timeout'), false),
+                };
+                sections.verify_analysis = {
+                    flag_threshold: readNumber(field(root, 'cfg-verify-flag-threshold'), false),
+                    strong_threshold: readNumber(field(root, 'cfg-verify-strong-threshold'), false),
+                };
+            }
+
+            if (detectorType === 'synthetic' || detectorType === 'verify') {
+                // Field names mirror the VIS WSSyntheticConfigMessage contract; blank => null
+                // so the global synthetic_analysis defaults (video-intelligence.json) apply.
+                const useTlsRaw = field(root, 'cfg-synthetic-use-tls').value;
+                const thresholdRaw = field(root, 'cfg-synthetic-classification-threshold').value.trim();
+                // NVCF-only credentials vs self-hosted-only cert paths: only the set that
+                // applies to the effective endpoint is serialized. The other set is hidden in
+                // the UI, and merely sending null would leave a previously-saved value in the
+                // stored config (synthetic_analysis is deep-merged, not replaced wholesale),
+                // so buildConfigJson() unsets it explicitly -- otherwise an NVCF api_key saved during
+                // evaluation would keep riding as a Bearer header to a self-hosted endpoint.
+                const nvcf = syntheticEndpointIsNvcf(root);
+                sections.synthetic_analysis = {
+                    endpoint: field(root, 'cfg-synthetic-endpoint').value.trim() || null,
+                    // '' => auto-detect (null); 'true'/'false' => explicit override.
+                    use_tls: useTlsRaw === '' ? null : useTlsRaw === 'true',
+                    tls_ca_cert: nvcf ? null : field(root, 'cfg-synthetic-tls-ca-cert').value.trim() || null,
+                    tls_client_cert: nvcf ? null : field(root, 'cfg-synthetic-tls-client-cert').value.trim() || null,
+                    tls_client_key: (nvcf || secretSourceIsStored(root, 'cfg-synthetic-tls-client-key')) ? null
+                        : field(root, 'cfg-synthetic-tls-client-key').value.trim() || null,
+                    tls_client_key_secret: nvcf ? null : referenceValue(root, 'cfg-synthetic-tls-client-key') || null,
+                    api_key: (nvcf && !secretSourceIsStored(root, 'cfg-synthetic-api-key'))
+                        ? field(root, 'cfg-synthetic-api-key').value || null : null,
+                    api_key_secret: nvcf ? referenceValue(root, 'cfg-synthetic-api-key') || null : null,
+                    function_id: nvcf ? field(root, 'cfg-synthetic-function-id').value.trim() || null : null,
+                };
+                if (detectorType === 'synthetic') {
+                    sections.synthetic_analysis.classification_threshold = thresholdRaw === '' ? null : parseFloat(thresholdRaw);
+                }
+            }
+            return sections;
         }
 
         function buildConfigJson() {
@@ -1493,7 +2633,9 @@
                 app_name: appName,
                 stream_name: streamName,
                 vi_service_url: document.getElementById('cfg-vi-service-url').value.trim() || null,
-                vi_service_api_key: document.getElementById('cfg-vi-service-api-key').value.trim() || null,
+                vi_service_api_key: secretSourceIsStored(null, 'cfg-vi-service-api-key') ? null
+                    : document.getElementById('cfg-vi-service-api-key').value.trim() || null,
+                vi_service_api_key_secret: referenceValue(null, 'cfg-vi-service-api-key'),
                 log_max_messages: readNumericInputValue('cfg-log-max-messages', true),
                 inference_video_height: getInferenceVideoHeight(),
                 use_transcoder: document.getElementById('cfg-use-transcoder').checked,
@@ -1518,7 +2660,7 @@
             }
             // catch_up_to_live (skip stale frames to live) is scene/VLM only — object can't skip
             // without breaking tracking.
-            if (detectorType === 'scene' || detectorType === 'vlm') {
+            if (detectorType === 'scene' || detectorType === 'vlm' || (detectorType === 'chain' && chainIsWindowed())) {
                 config.catch_up_to_live = document.getElementById('cfg-catch-up-to-live').checked;
                 // Optional: blank => null (backend derives ~2s). Don't use readNumericInputValue here —
                 // it substitutes the placeholder and so could never produce null.
@@ -1527,178 +2669,28 @@
             }
 
             config.rollup_batch_interval = readNumericInputValue('cfg-rollup-batch-interval', false);
-            if (fieldAppliesToDetector('ignore_untracked_objects', detectorType)) {
-                config.ignore_untracked_objects = document.getElementById('cfg-ignore-untracked-objects').checked;
-            }
-
-            if (detectorType === 'object') {
-                const classNames = Array.from(document.getElementById('cfg-class-names').selectedOptions).map(o => o.value);
-
-                const trackingMethod = document.getElementById('cfg-tracking-method').value;
-
-                const modelName = document.getElementById('cfg-model-name').value;
-                config.object_analysis = {
-                    class_names: classNames,
-                    model_name: modelName,
-                    confidence_threshold: readNumericInputValue('cfg-confidence-threshold', false, 100),
-                    tracking_method: trackingMethod || null
-                };
-
-                if (modelName === 'custom') {
-                    config.object_analysis.checkpoint_path = document.getElementById('cfg-checkpoint-path').value || null;
-                }
-
-                if (trackingMethod === 'byte-track') {
-                    config.object_analysis.byte_track_properties = {
-                        track_creation_minimum_confidence: readNumericInputValue('cfg-bt-min-confidence', false, 100),
-                        max_lost_track_frames_before_track_removal: readNumericInputValue('cfg-bt-max-lost-frames', true),
-                        minimum_consecutive_track_overlap: readNumericInputValue('cfg-bt-min-overlap', false, 100),
-                        track_creation_minimum_consecutive_frames: readNumericInputValue('cfg-bt-min-frames', true)
-                    };
-                }
-
-                const tilingEnabled = document.getElementById('cfg-tiling-enabled').checked;
-                if (tilingEnabled) {
-                    const tilingMode = document.getElementById('cfg-tiling-mode').value || 'fixed';
-                    config.object_analysis.tiling_mode = tilingMode;
-                    const tilingProperties = {
-                        max_slice_rows: readNumericInputValue('cfg-tiling-max-rows', true),
-                        max_slice_cols: readNumericInputValue('cfg-tiling-max-cols', true),
-                        tile_coverage_cutoff: readNumericInputValue('cfg-tiling-coverage-cutoff', false, 100)
-                    };
-                    if (tilingMode === 'gated') {
-                        tilingProperties.min_slice_rows = readNumericInputValue('cfg-tiling-min-rows', true);
-                        tilingProperties.min_slice_cols = readNumericInputValue('cfg-tiling-min-cols', true);
-                        // Gated always has the full-frame probe, so cluster suppression always applies.
-                        tilingProperties.cluster_suppression_min_children = readNumericInputValue('cfg-tiling-cluster-children', true);
-                    } else {
-                        // Fixed mode: the full-frame pass is opt-in, and cluster suppression
-                        // is only meaningful (and only sent) when that pass is enabled.
-                        const fullFrame = document.getElementById('cfg-tiling-full-frame').checked;
-                        tilingProperties.full_frame_detection = fullFrame;
-                        if (fullFrame) {
-                            tilingProperties.cluster_suppression_min_children = readNumericInputValue('cfg-tiling-cluster-children', true);
-                        }
-                    }
-                    config.object_analysis.tiling_properties = tilingProperties;
-                } else {
-                    // Tiling off — a single full-frame pass. tiling_mode 'none' is the
-                    // master switch; tiling_properties is omitted.
-                    config.object_analysis.tiling_mode = 'none';
-                }
-            }
-
-            if (detectorType === 'scene') {
-                const sceneClassNames = collectClassRows('cfg-scene-class-names', { withHint: false }).classNames;
-
-                config.scene_analysis = {
-                    class_names: sceneClassNames,
-                    sensitivity: readNumericInputValue('cfg-scene-sensitivity', false),
-                    confidence_threshold: readNumericInputValue('cfg-scene-confidence-threshold', false, 100),
-                };
-            }
-
-            if (detectorType === 'vlm') {
-                // Shared connection + advanced fields (every mode). Class/prompt keys
-                // are added per active mode below and ONLY for that mode, so VIS's
-                // field-presence mode inference stays unambiguous (mode-bleed guard).
-                const vlm = {
-                    model_name: readVlmModelName(),
-                    endpoint_url: buildVlmEndpointUrl(),
-                    api_key: document.getElementById('cfg-vlm-api-key').value || null,
-                    request_timeout_seconds: readNumericInputValue('cfg-vlm-request-timeout', false),
-                    temperature: readNumericInputValue('cfg-vlm-temperature', false),
-                    max_tokens: readNumericInputValue('cfg-vlm-max-tokens', true),
-                    // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
-                };
-                const vlmMode = getVlmMode();
-                if (vlmMode === 'detect') {
-                    // Per-class repeater -> class_names (+ class_hints for rows with a note).
-                    const detect = collectVlmClasses('cfg-vlm-detect-classes');
-                    vlm.class_names = detect.classNames;
-                    if (Object.keys(detect.classHints).length > 0) {
-                        vlm.class_hints = detect.classHints;
-                    }
-                    // High is the DEFAULT and rides as ABSENT — VIS treats a missing
-                    // reasoning_level as High. Only Low/Medium ride as explicit markers;
-                    // sending "high" explicitly would pin it and silently override a stream
-                    // (or fleet default) that means to stay on the default. VIS owns the
-                    // Low/Medium prompts/schema/sizing — the UI sends only the level.
-                    const reasoningLevel = getReasoningLevel();
-                    if (reasoningLevel === 'low' || reasoningLevel === 'medium') {
-                        vlm.reasoning_level = reasoningLevel;
-                    } else if (vlm.max_tokens === undefined) {
-                        // High + no operator override in Advanced -> auto-size max_tokens to
-                        // the class count so per-class reasoning isn't truncated. An explicit
-                        // Advanced value (read into vlm.max_tokens above) always wins and is
-                        // left untouched.
-                        vlm.max_tokens = highDetectMaxTokens(detect.classNames.length);
-                    }
-                } else if (vlmMode === 'custom') {
-                    // Operator prompts win; classes optional (feed {class_list}).
-                    // Prompts: send absent (null), never empty-string — VIS rejects ""
-                    // and inherits the built-in default only on field-absence.
-                    vlm.system_prompt = document.getElementById('cfg-vlm-system-prompt').value.trim() || null;
-                    vlm.user_prompt = document.getElementById('cfg-vlm-user-prompt').value.trim() || null;
-                    // Same per-class repeater as Detect: class_names (+ class_hints).
-                    const customCls = collectVlmClasses('cfg-vlm-custom-classes');
-                    if (customCls.classNames.length > 0) {
-                        vlm.class_names = customCls.classNames;
-                        if (Object.keys(customCls.classHints).length > 0) {
-                            vlm.class_hints = customCls.classHints;
-                        }
-                    }
-                    const responseSchema = window.vlmOutputSchemaForSave
-                        ? window.vlmOutputSchemaForSave()
-                        : collectVlmSchema();
-                    if (responseSchema) {
-                        vlm.response_schema = responseSchema;
-                    }
-                }
-                // Describe mode: no class/prompt keys — VIS uses the descriptive default.
-                config.vlm_analysis = vlm;
+            Object.assign(config, readSections(sectionsRoot, detectorType));
+            if (detectorType === 'chain') {
+                config.chain_detector = collectChain();
+                if (chainStoredDetector) config.chain_detector_stored = JSON.parse(JSON.stringify(chainStoredDetector));
             }
 
             let syntheticUnsets = [];
-            if (detectorType === 'synthetic') {
-                // Field names mirror the VIS WSSyntheticConfigMessage contract; blank => null
-                // so the global synthetic_analysis defaults (video-intelligence.json) apply.
-                const useTlsRaw = document.getElementById('cfg-synthetic-use-tls').value;
-                const thresholdRaw = document.getElementById('cfg-synthetic-classification-threshold').value.trim();
-                // NVCF-only credentials vs self-hosted-only cert paths: only the set that
-                // applies to the effective endpoint is serialized. The other set is hidden in
-                // the UI, and merely sending null would leave a previously-saved value in the
-                // stored config (synthetic_analysis is deep-merged, not replaced wholesale),
-                // so it is explicitly unset below -- otherwise an NVCF api_key saved during
-                // evaluation would keep riding as a Bearer header to a self-hosted endpoint.
-                const nvcf = syntheticEndpointIsNvcf();
-                config.synthetic_analysis = {
-                    endpoint: document.getElementById('cfg-synthetic-endpoint').value.trim() || null,
-                    // '' => auto-detect (null); 'true'/'false' => explicit override.
-                    use_tls: useTlsRaw === '' ? null : useTlsRaw === 'true',
-                    tls_ca_cert: nvcf ? null : document.getElementById('cfg-synthetic-tls-ca-cert').value.trim() || null,
-                    tls_client_cert: nvcf ? null : document.getElementById('cfg-synthetic-tls-client-cert').value.trim() || null,
-                    tls_client_key: nvcf ? null : document.getElementById('cfg-synthetic-tls-client-key').value.trim() || null,
-                    api_key: nvcf ? document.getElementById('cfg-synthetic-api-key').value || null : null,
-                    function_id: nvcf ? document.getElementById('cfg-synthetic-function-id').value.trim() || null : null,
-                    classification_threshold: thresholdRaw === '' ? null : parseFloat(thresholdRaw),
-                };
-                if (!isNewStream()) {
-                    syntheticUnsets = (nvcf
-                        ? ['synthetic_analysis.tls_ca_cert', 'synthetic_analysis.tls_client_cert', 'synthetic_analysis.tls_client_key']
-                        : ['synthetic_analysis.api_key', 'synthetic_analysis.function_id']
-                    ).filter(function(path) {
-                        const stored = getConfigValueAtPath(lastRawStreamConfig, path);
-                        return stored !== null && stored !== undefined;
-                    });
-                }
+            if ((detectorType === 'synthetic' || detectorType === 'verify') && !isNewStream()) {
+                syntheticUnsets = (syntheticEndpointIsNvcf(sectionsRoot)
+                    ? ['synthetic_analysis.tls_ca_cert', 'synthetic_analysis.tls_client_cert', 'synthetic_analysis.tls_client_key']
+                    : ['synthetic_analysis.api_key', 'synthetic_analysis.function_id']
+                ).filter(function(path) {
+                    const stored = getConfigValueAtPath(lastRawStreamConfig, path);
+                    return stored !== null && stored !== undefined;
+                });
             }
 
             config.vif_event_listeners = buildEventListenersJson();
 
             // syntheticUnsets can overlap collectUnsetFields (a gated-off field that is
             // also blank) -- dedupe the union.
-            const unsetFields = Array.from(new Set(collectUnsetFields().concat(syntheticUnsets)));
+            const unsetFields = Array.from(new Set(collectUnsetFields(sectionsRoot).concat(syntheticUnsets)));
             if (unsetFields.length > 0) {
                 config.unset_fields = unsetFields;
             }
@@ -1873,14 +2865,49 @@
                 }
             }
 
+            if (config.detector_type === 'motion') {
+                const ma = config.motion_analysis || {};
+                if (ma.sensitivity !== undefined && ma.sensitivity !== null
+                    && (!Number.isInteger(ma.sensitivity) || ma.sensitivity < 1 || ma.sensitivity > 10)) {
+                    errors.push('Motion sensitivity must be a whole number between 1 and 10.');
+                }
+                if (ma.min_displacement !== undefined && ma.min_displacement !== null
+                    && (!Number.isFinite(ma.min_displacement) || ma.min_displacement < 0 || ma.min_displacement > 1)) {
+                    errors.push('Min Displacement must be between 0 and 100.');
+                }
+                if (ma.merge_distance !== undefined && ma.merge_distance !== null
+                    && (!Number.isFinite(ma.merge_distance) || ma.merge_distance < 0 || ma.merge_distance > 0.5)) {
+                    errors.push('Merge Distance must be between 0 and 50.');
+                }
+            }
+
             if (config.detector_type === 'vlm') {
                 const va = config.vlm_analysis || {};
                 const effectiveModel = va.model_name
                     || (defaultConfig && defaultConfig.vlm_analysis && defaultConfig.vlm_analysis.model_name);
                 if (!effectiveModel) errors.push('No VLM model is configured. Select a model, or set vlm_defaults.model in Default.json on the Engine host.');
                 if (config.duration !== undefined && config.duration !== null
-                    && (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > 5)) {
-                    errors.push('Duration must be between 0 and 5 for VLM detection.');
+                    && (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > 8)) {
+                    errors.push('Duration must be between 0 and 8 for VLM detection.');
+                }
+                // One request carries Duration × Inference FPS images and the endpoint
+                // accepts at most VLM_TYPICAL_ENDPOINT_IMAGE_CAP: refuse a config that
+                // asks for more instead of letting the service silently thin it. A
+                // blank field resolves to the global default, the same value the
+                // Engine would run with; -1 (match source) is refused too, because a
+                // window at the source rate cannot be held to the cap.
+                const vlmFps = config.inference_fps !== undefined && config.inference_fps !== null ? config.inference_fps
+                    : (defaultConfig && Number.isFinite(defaultConfig.inference_fps) ? defaultConfig.inference_fps : null);
+                const vlmDur = config.duration !== undefined && config.duration !== null ? config.duration
+                    : (defaultConfig && Number.isFinite(defaultConfig.duration) ? defaultConfig.duration : null);
+                if (vlmFps === -1) {
+                    errors.push('Inference FPS -1 (match source) cannot hold a VLM window to the endpoint image cap of '
+                        + VLM_TYPICAL_ENDPOINT_IMAGE_CAP + ' images. Set a fixed rate; 1 or 2 covers most streams.');
+                } else if (Number.isFinite(vlmFps) && Number.isFinite(vlmDur)
+                    && vlmFps * vlmDur > VLM_TYPICAL_ENDPOINT_IMAGE_CAP) {
+                    errors.push('VLM sends Duration × Inference FPS images in one request, and the endpoint accepts at most '
+                        + VLM_TYPICAL_ENDPOINT_IMAGE_CAP + '. This config asks for ' + (Math.round(vlmFps * vlmDur * 100) / 100)
+                        + ' — lower Duration or Inference FPS.');
                 }
                 const inVlmCustomMode = ('user_prompt' in va) || ('system_prompt' in va) || ('response_schema' in va);
                 if (inVlmCustomMode && !(va.user_prompt && String(va.user_prompt).trim())) {
@@ -1889,7 +2916,7 @@
                 // Output Schema: only Raw JSON can be invalid (the Fields builder always
                 // emits valid JSON). One shared validator also refreshes the inline error.
                 if (inVlmCustomMode) {
-                    const schemaError = validateVlmSchema();
+                    const schemaError = withSchemaBuilder(sectionsRoot, function(builder) { return builder.validate(); });
                     if (schemaError) {
                         errors.push('VLM Output Schema is not valid JSON: ' + schemaError);
                     }
@@ -1908,6 +2935,36 @@
                                 errors.push('A class cannot be named "scene" at Medium reasoning level (it collides with the internal scene field). Rename the class or use another level.');
                             }
                         }
+                    }
+                }
+            }
+
+            if (config.detector_type === 'verify') {
+                const sy = config.synthetic_analysis || {};
+                const vf = config.verify_analysis || {};
+                const baseline = verifyBaseline();
+                const baselineEndpoint = baseline.svd && baseline.svd.endpoint;
+                if (!sy.endpoint && !baselineEndpoint) {
+                    errors.push('The scoring endpoint is required (gRPC host:port). Set it here, or in the Verify baseline of the Stream Config Defaults.');
+                } else if (sy.endpoint && /^https?:\/\//i.test(sy.endpoint)) {
+                    errors.push('The scoring endpoint must be a gRPC host:port (e.g. svd.docker:8001), not an http(s) URL.');
+                }
+                if (!!sy.tls_client_cert !== !!sy.tls_client_key) {
+                    errors.push('Mutual TLS requires both Client Certificate Path and Client Key Path (set both or neither).');
+                }
+                const unit = function(v) { return v === undefined || v === null || (Number.isFinite(v) && v >= 0 && v <= 1); };
+                if (!unit(vf.flag_threshold)) errors.push('Flag Threshold must be between 0.0 and 1.0.');
+                if (!unit(vf.strong_threshold)) errors.push('Strong Threshold must be between 0.0 and 1.0.');
+                const flag = Number.isFinite(vf.flag_threshold) ? vf.flag_threshold : baseline.flag_threshold;
+                const strong = Number.isFinite(vf.strong_threshold) ? vf.strong_threshold : baseline.strong_threshold;
+                if (Number.isFinite(flag) && Number.isFinite(strong) && strong < flag) {
+                    errors.push('Strong Threshold must not be below Flag Threshold.');
+                }
+                if (config.duration !== undefined && config.duration !== null) {
+                    if (!Number.isFinite(config.duration) || config.duration <= 0) {
+                        errors.push('Duration (window length, seconds) must be greater than 0 for Verify.');
+                    } else if (config.duration > 30) {
+                        errors.push('Duration (window length, seconds) must be between 0 and 30 for Verify.');
                     }
                 }
             }
@@ -1937,6 +2994,10 @@
                 }
             }
 
+            if (config.detector_type === 'chain') {
+                errors.push.apply(errors, chainValidationErrors(config));
+            }
+
             const listeners = config.vif_event_listeners || {};
             for (const [name, listener] of Object.entries(listeners)) {
                 if (!listener.class_name) {
@@ -1964,6 +3025,12 @@
                         errors.push(`Listener "${name}" cannot use ${formatEventMethodLabel(method)} for ${config.detector_type || 'this'} analysis. Allowed methods: ${allowedLabels}.`);
                     }
                 });
+                if (shortName === 'WebhookEvent2' && props.url !== undefined && props.url !== ''
+                        && !/^https?:\/\/[^\/\s]/i.test(String(props.url).trim())) {
+                    // The server refuses this too; catching it here means the operator is
+                    // told by the field's own name instead of by a 400 about a member.
+                    errors.push(`Listener "${name}" Destination URL must be an absolute http(s) URL with a host.`);
+                }
                 if (shortName === 'OverlayEvent' && props.fade_step !== undefined) {
                     if (!Number.isFinite(props.fade_step) || props.fade_step < 0 || props.fade_step > 30 || !Number.isInteger(props.fade_step)) {
                         errors.push(`Listener "${name}" Fade Step must be a whole number between 0 and 30.`);
@@ -1999,6 +3066,84 @@
             return errors;
         }
 
+        function resetSections(root) {
+            field(root, 'cfg-ignore-untracked-objects').checked = false;
+
+            // Object analysis
+            field(root, 'cfg-class-names').innerHTML = '';
+            field(root, 'cfg-model-name').value = '';
+            field(root, 'cfg-checkpoint-path').value = '';
+            field(root, 'cfg-confidence-threshold').value = '';
+            field(root, 'cfg-tracking-method').value = '';
+
+            // ByteTrack
+            field(root, 'cfg-bt-min-confidence').value = '';
+            field(root, 'cfg-bt-max-lost-frames').value = '';
+            field(root, 'cfg-bt-min-overlap').value = '';
+            field(root, 'cfg-bt-min-frames').value = '';
+
+            // Tiling
+            field(root, 'cfg-tiling-enabled').checked = false;
+            field(root, 'cfg-tiling-mode').value = 'fixed';
+            field(root, 'cfg-tiling-min-rows').value = '';
+            field(root, 'cfg-tiling-min-cols').value = '';
+            field(root, 'cfg-tiling-max-rows').value = '';
+            field(root, 'cfg-tiling-max-cols').value = '';
+            field(root, 'cfg-tiling-coverage-cutoff').value = '';
+            field(root, 'cfg-tiling-full-frame').checked = false;
+            field(root, 'cfg-tiling-cluster-children').value = '';
+
+            field(root, 'cfg-scene-class-names').innerHTML = '';
+            field(root, 'cfg-scene-sensitivity').value = '';
+            field(root, 'cfg-scene-confidence-threshold').value = '';
+
+            field(root, 'cfg-motion-sensitivity').value = '';
+            field(root, 'cfg-motion-min-displacement').value = '';
+            field(root, 'cfg-motion-merge-distance').value = '';
+            field(root, 'cfg-motion-suppress-global-changes').value = '';
+
+            // VLM analysis
+            setVlmModelName(root, VLM_KNOWN_MODELS[0]);
+            field(root, 'cfg-vlm-endpoint-url').value = '';
+            field(root, 'cfg-vlm-api-key').value = '';
+            syncSectionApiKeyToggle(root, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+            clearVlmEndpointTestResult(root);
+            field(root, 'cfg-vlm-detect-classes').innerHTML = '';
+            field(root, 'cfg-vlm-custom-classes').innerHTML = '';
+            field(root, 'cfg-vlm-system-prompt').value = '';
+            field(root, 'cfg-vlm-user-prompt').value = '';
+            withSchemaBuilder(root, function(builder) { builder.reset(); });
+            field(root, 'cfg-vlm-request-timeout').value = '';
+            field(root, 'cfg-vlm-temperature').value = '';
+            field(root, 'cfg-vlm-max-tokens').value = '';
+            field(root, 'cfg-vlm-advanced').style.display = 'none';
+            field(root, 'cfg-vlm-advanced-caret').innerHTML = '&#9656;';
+            field(root, 'vlm-custom-classlist-warning').style.display = 'none';
+            setReasoningLevel(root, 'low'); // default reasoning level
+            setVlmMode(root, 'detect');
+            // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
+
+            field(root, 'cfg-synthetic-endpoint').value = '';
+            field(root, 'cfg-synthetic-endpoint').dataset.globalDefault = '';
+            field(root, 'cfg-synthetic-use-tls').value = '';
+            ['cfg-synthetic-tls-ca-cert', 'cfg-synthetic-tls-client-cert', 'cfg-synthetic-tls-client-key'].forEach(function(id) {
+                const input = field(root, id);
+                input.value = '';
+                input.placeholder = '';
+            });
+            setSyntheticTlsCertsExpanded(root, false);
+            field(root, 'cfg-synthetic-api-key').value = '';
+            syncSectionApiKeyToggle(root, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+            field(root, 'cfg-synthetic-function-id').value = '';
+            field(root, 'cfg-synthetic-classification-threshold').value = '';
+            ['cfg-verify-flag-threshold', 'cfg-verify-strong-threshold'].forEach(function(id) {
+                const input = field(root, id);
+                if (input) input.value = '';
+            });
+            SECTION_SECRET_SOURCES.forEach(function(base) { setSecretSlot(root, base, null); });
+            updateSyntheticEndpointFields(root);
+        }
+
         function resetForm() {
             suppressDirtyTracking = true;
             touchedSecrets = {};
@@ -2012,7 +3157,6 @@
             document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
             document.getElementById('cfg-frame-grab').value = '';
             document.getElementById('cfg-rollup-batch-interval').value = '';
-            document.getElementById('cfg-ignore-untracked-objects').checked = false;
             document.getElementById('cfg-duration').value = '';
             document.getElementById('cfg-grayscaled').checked = false;
 
@@ -2026,177 +3170,51 @@
             document.getElementById('cfg-log-timing').value = '';
             document.getElementById('cfg-detector-type').value = '';
 
-            // Object analysis
-            document.getElementById('cfg-class-names').innerHTML = '';
-            document.getElementById('cfg-model-name').value = '';
-            document.getElementById('cfg-checkpoint-path').value = '';
-            document.getElementById('cfg-confidence-threshold').value = '';
-            document.getElementById('cfg-tracking-method').value = '';
-
-            // ByteTrack
-            document.getElementById('cfg-bt-min-confidence').value = '';
-            document.getElementById('cfg-bt-max-lost-frames').value = '';
-            document.getElementById('cfg-bt-min-overlap').value = '';
-            document.getElementById('cfg-bt-min-frames').value = '';
-
-            // Tiling
-            document.getElementById('cfg-tiling-enabled').checked = false;
-            document.getElementById('cfg-tiling-mode').value = 'fixed';
-            document.getElementById('cfg-tiling-min-rows').value = '';
-            document.getElementById('cfg-tiling-min-cols').value = '';
-            document.getElementById('cfg-tiling-max-rows').value = '';
-            document.getElementById('cfg-tiling-max-cols').value = '';
-            document.getElementById('cfg-tiling-coverage-cutoff').value = '';
-            document.getElementById('cfg-tiling-full-frame').checked = false;
-            document.getElementById('cfg-tiling-cluster-children').value = '';
-
-            document.getElementById('cfg-scene-class-names').innerHTML = '';
-            document.getElementById('cfg-scene-sensitivity').value = '';
-            document.getElementById('cfg-scene-confidence-threshold').value = '';
-
-            // VLM analysis
-            setVlmModelName(VLM_KNOWN_MODELS[0]);
-            document.getElementById('cfg-vlm-endpoint-url').value = '';
-            vlmStoredEndpointUrl = null; // a new stream stores nothing to probe by reference
-            document.getElementById('cfg-vlm-api-key').value = '';
-            syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
-            clearVlmEndpointTestResult();
-            document.getElementById('cfg-vlm-detect-classes').innerHTML = '';
-            document.getElementById('cfg-vlm-custom-classes').innerHTML = '';
-            document.getElementById('cfg-vlm-system-prompt').value = '';
-            document.getElementById('cfg-vlm-user-prompt').value = '';
-            if (typeof resetVlmSchemaBuilder === 'function') resetVlmSchemaBuilder();
-            document.getElementById('cfg-vlm-request-timeout').value = '';
-            document.getElementById('cfg-vlm-temperature').value = '';
-            document.getElementById('cfg-vlm-max-tokens').value = '';
-            document.getElementById('cfg-vlm-advanced').style.display = 'none';
-            document.getElementById('cfg-vlm-advanced-caret').innerHTML = '&#9656;';
-            document.getElementById('vlm-custom-classlist-warning').style.display = 'none';
-            setReasoningLevel('low'); // default reasoning level
-            setVlmMode('detect');
-            // max_concurrent_requests is JSON-only (Default.json); not exposed in the UI.
-
-            document.getElementById('cfg-synthetic-endpoint').value = '';
-            document.getElementById('cfg-synthetic-endpoint').dataset.globalDefault = '';
-            document.getElementById('cfg-synthetic-use-tls').value = '';
-            ['cfg-synthetic-tls-ca-cert', 'cfg-synthetic-tls-client-cert', 'cfg-synthetic-tls-client-key'].forEach(function(id) {
-                const input = document.getElementById(id);
-                input.value = '';
-                input.placeholder = '';
-            });
-            setSyntheticTlsCertsExpanded(false);
-            document.getElementById('cfg-synthetic-api-key').value = '';
-            syncApiKeyToggleState('cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
-            document.getElementById('cfg-synthetic-function-id').value = '';
-            document.getElementById('cfg-synthetic-classification-threshold').value = '';
-            updateSyntheticEndpointFields();
+            resetSections(sectionsRoot);
+            storedEndpoints.delete(sectionsRoot);
+            clearChain();
             suppressDirtyTracking = false;
         }
 
-        function populateForm(config) {
-            resetForm();
-            suppressDirtyTracking = true;
-
-            if (config.vi_service_url !== undefined) {
-                document.getElementById('cfg-vi-service-url').value = config.vi_service_url;
-            }
-            if (config.vi_service_api_key !== undefined) {
-                document.getElementById('cfg-vi-service-api-key').value = config.vi_service_api_key;
-            }
-            syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
-            if (config.active !== undefined) {
-                document.getElementById('cfg-active').checked = config.active;
-            }
-            if (config.log_max_messages !== undefined) {
-                document.getElementById('cfg-log-max-messages').value = config.log_max_messages;
-            }
-            if (config.inference_fps !== undefined) {
-                document.getElementById('cfg-inference-fps').value = config.inference_fps;
-            }
-    		setInferenceVideoHeightFromValue(config.inference_video_height);
-            if (config.use_transcoder !== undefined) {
-                document.getElementById('cfg-use-transcoder').checked = config.use_transcoder;
-                document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
-            }
-            else {
-                document.getElementById('cfg-use-transcoder').checked = true;
-                document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
-            }
-            // Baseline for applyDetectorTypeTranscoderSuggestion: a manual toggle later makes
-            // checked !== dataset.suggested, which tells the suggestion to back off.
-            document.getElementById('cfg-use-transcoder').dataset.suggested = String(document.getElementById('cfg-use-transcoder').checked);
-            if (config.frame_grab_interval !== undefined) {
-                document.getElementById('cfg-frame-grab').value = config.frame_grab_interval;
-            }
-            if (config.rollup_batch_interval !== undefined) {
-                document.getElementById('cfg-rollup-batch-interval').value = config.rollup_batch_interval;
-            }
+        function populateSections(root, config) {
             if (config.ignore_untracked_objects !== undefined) {
-                document.getElementById('cfg-ignore-untracked-objects').checked = config.ignore_untracked_objects;
-            }
-            if (config.duration !== undefined) {
-                document.getElementById('cfg-duration').value = config.duration;
-            }
-            if (config.grayscaled !== undefined) {
-                document.getElementById('cfg-grayscaled').checked = config.grayscaled;
-            }
-
-            // auto_frame_throttle (renamed from auto_scene_frame_throttle). Opt-in, default OFF for all
-            // modes. Prefer the new key; for scene/VLM fall back to the legacy auto_scene_frame_throttle
-            // key (where it originally applied); unset => off.
-            let autoFrameThrottle = config.auto_frame_throttle;
-            if (autoFrameThrottle === undefined && config.detector_type !== 'object') {
-                autoFrameThrottle = config.auto_scene_frame_throttle;
-            }
-            document.getElementById('cfg-auto-frame-throttle').checked = (autoFrameThrottle === true);
-            if (config.catch_up_to_live !== undefined) {
-                document.getElementById('cfg-catch-up-to-live').checked = config.catch_up_to_live;
-            }
-            // null/absent => leave blank so the "auto (~2s)" placeholder shows
-            if (config.catch_up_max_behind_seconds !== undefined && config.catch_up_max_behind_seconds !== null) {
-                document.getElementById('cfg-catch-up-max-behind').value = config.catch_up_max_behind_seconds;
-            }
-            if (config.log_timing !== undefined) {
-                document.getElementById('cfg-log-timing').value = config.log_timing;
-            }
-            if (config.detector_type !== undefined) {
-                document.getElementById('cfg-detector-type').value = config.detector_type;
+                field(root, 'cfg-ignore-untracked-objects').checked = config.ignore_untracked_objects;
             }
 
             if (config.object_analysis || isNewStream()) {
                 const oa = config.object_analysis || {};
                 if (oa.model_name) {
-                    document.getElementById('cfg-model-name').value = oa.model_name;
+                    field(root, 'cfg-model-name').value = oa.model_name;
                 }
                 if (oa.checkpoint_path) {
-                    populateCheckpointPaths(oa.checkpoint_path);
-                    document.getElementById('cfg-checkpoint-path').value = oa.checkpoint_path;
+                    populateCheckpointPaths(root, oa.checkpoint_path);
+                    field(root, 'cfg-checkpoint-path').value = oa.checkpoint_path;
                 }
-                updateClassNamesOptions();
+                updateClassNamesOptions(root);
                 if (oa.class_names && oa.class_names.length > 0) {
-                    const classSelect = document.getElementById('cfg-class-names');
+                    const classSelect = field(root, 'cfg-class-names');
                     const nameSet = new Set(oa.class_names);
                     Array.from(classSelect.options).forEach(opt => { opt.selected = nameSet.has(opt.value); });
                 }
                 if (oa.confidence_threshold !== undefined) {
-                    document.getElementById('cfg-confidence-threshold').value = Math.round(oa.confidence_threshold * 100);
+                    field(root, 'cfg-confidence-threshold').value = Math.round(oa.confidence_threshold * 100);
                 }
                 if (oa.tracking_method) {
-                    document.getElementById('cfg-tracking-method').value = oa.tracking_method;
+                    field(root, 'cfg-tracking-method').value = oa.tracking_method;
                 }
                 if (oa.byte_track_properties) {
                     const bt = oa.byte_track_properties;
                     if (bt.track_creation_minimum_confidence !== undefined) {
-                        document.getElementById('cfg-bt-min-confidence').value = Math.round(bt.track_creation_minimum_confidence * 100);
+                        field(root, 'cfg-bt-min-confidence').value = Math.round(bt.track_creation_minimum_confidence * 100);
                     }
                     if (bt.max_lost_track_frames_before_track_removal !== undefined) {
-                        document.getElementById('cfg-bt-max-lost-frames').value = bt.max_lost_track_frames_before_track_removal;
+                        field(root, 'cfg-bt-max-lost-frames').value = bt.max_lost_track_frames_before_track_removal;
                     }
                     if (bt.minimum_consecutive_track_overlap !== undefined) {
-                        document.getElementById('cfg-bt-min-overlap').value = Math.round(bt.minimum_consecutive_track_overlap * 100);
+                        field(root, 'cfg-bt-min-overlap').value = Math.round(bt.minimum_consecutive_track_overlap * 100);
                     }
                     if (bt.track_creation_minimum_consecutive_frames !== undefined) {
-                        document.getElementById('cfg-bt-min-frames').value = bt.track_creation_minimum_consecutive_frames;
+                        field(root, 'cfg-bt-min-frames').value = bt.track_creation_minimum_consecutive_frames;
                     }
                 }
                 // tiling_mode is the single switch now ('none' | 'fixed' | 'gated'); the
@@ -2207,30 +3225,30 @@
                 if (oa.tiling_enabled !== undefined) {
                     tilingOn = !!oa.tiling_enabled;
                 }
-                document.getElementById('cfg-tiling-enabled').checked = tilingOn;
+                field(root, 'cfg-tiling-enabled').checked = tilingOn;
                 if (tilingMode === 'fixed' || tilingMode === 'gated') {
-                    document.getElementById('cfg-tiling-mode').value = tilingMode;
+                    field(root, 'cfg-tiling-mode').value = tilingMode;
                 }
                 if (oa.tiling_properties) {
                     const tp = oa.tiling_properties;
                     if (tp.min_slice_rows !== undefined) {
-                        document.getElementById('cfg-tiling-min-rows').value = tp.min_slice_rows;
+                        field(root, 'cfg-tiling-min-rows').value = tp.min_slice_rows;
                     }
                     if (tp.min_slice_cols !== undefined) {
-                        document.getElementById('cfg-tiling-min-cols').value = tp.min_slice_cols;
+                        field(root, 'cfg-tiling-min-cols').value = tp.min_slice_cols;
                     }
                     if (tp.max_slice_rows !== undefined) {
-                        document.getElementById('cfg-tiling-max-rows').value = tp.max_slice_rows;
+                        field(root, 'cfg-tiling-max-rows').value = tp.max_slice_rows;
                     }
                     if (tp.max_slice_cols !== undefined) {
-                        document.getElementById('cfg-tiling-max-cols').value = tp.max_slice_cols;
+                        field(root, 'cfg-tiling-max-cols').value = tp.max_slice_cols;
                     }
                     if (tp.tile_coverage_cutoff !== undefined) {
-                        document.getElementById('cfg-tiling-coverage-cutoff').value = Math.round(tp.tile_coverage_cutoff * 100);
+                        field(root, 'cfg-tiling-coverage-cutoff').value = Math.round(tp.tile_coverage_cutoff * 100);
                     }
-                    document.getElementById('cfg-tiling-full-frame').checked = !!tp.full_frame_detection;
+                    field(root, 'cfg-tiling-full-frame').checked = !!tp.full_frame_detection;
                     if (tp.cluster_suppression_min_children !== undefined) {
-                        document.getElementById('cfg-tiling-cluster-children').value = tp.cluster_suppression_min_children;
+                        field(root, 'cfg-tiling-cluster-children').value = tp.cluster_suppression_min_children;
                     }
                 }
             }
@@ -2238,35 +3256,54 @@
             if (config.scene_analysis || isNewStream()) {
                 const sa = config.scene_analysis || {};
                 if (sa.class_names) {
-                    populateClassRows('cfg-scene-class-names', sa.class_names, null, { withHint: false });
+                    populateClassRows(root, 'cfg-scene-class-names', sa.class_names, null, { withHint: false });
                 }
                 if (sa.sensitivity !== undefined) {
-                    document.getElementById('cfg-scene-sensitivity').value = sa.sensitivity;
+                    field(root, 'cfg-scene-sensitivity').value = sa.sensitivity;
                 }
                 if (sa.confidence_threshold !== undefined) {
-                    document.getElementById('cfg-scene-confidence-threshold').value = Math.round(sa.confidence_threshold * 100);
+                    field(root, 'cfg-scene-confidence-threshold').value = Math.round(sa.confidence_threshold * 100);
                 }
+            }
+
+            if (config.motion_analysis) {
+                const ma = config.motion_analysis;
+                if (ma.sensitivity !== undefined) {
+                    field(root, 'cfg-motion-sensitivity').value = ma.sensitivity;
+                }
+                if (ma.min_displacement !== undefined) {
+                    field(root, 'cfg-motion-min-displacement').value = Math.round(ma.min_displacement * 1000) / 10;
+                }
+                if (ma.merge_distance !== undefined) {
+                    field(root, 'cfg-motion-merge-distance').value = Math.round(ma.merge_distance * 1000) / 10;
+                }
+                field(root, 'cfg-motion-suppress-global-changes').value =
+                    typeof ma.suppress_global_changes === 'boolean' ? String(ma.suppress_global_changes) : '';
             }
 
             {
                 const va = config.vlm_analysis || {};
-                const globalVa = (defaultConfig && defaultConfig.vlm_analysis) || {};
+                const verify = config.detector_type === 'verify';
+                const globalVa = verify
+                    ? (verifyBaseline().vlm || {})
+                    : ((defaultConfig && defaultConfig.vlm_analysis) || {});
 
-                setVlmModelName(va.model_name || globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name);
+                applyVlmModelChoicesForDetector(root, config.detector_type || '');
+                if (verify) setVerifyReviewModel(root, va.model_name);
+                else setVlmModelName(root, va.model_name || globalVa.model_name || VLM_FALLBACK_DEFAULTS.model_name);
 
-                const endpointInput = document.getElementById('cfg-vlm-endpoint-url');
+                const endpointInput = field(root, 'cfg-vlm-endpoint-url');
                 if (va.endpoint_url) endpointInput.value = va.endpoint_url;
-                vlmStoredEndpointUrl = va.endpoint_url || null;
                 const effectiveEndpoint = globalVa.endpoint_url || VLM_FALLBACK_DEFAULTS.endpoint_url;
                 if (effectiveEndpoint) endpointInput.placeholder = vlmEndpointPlaceholder(effectiveEndpoint);
-                clearVlmEndpointTestResult();
+                clearVlmEndpointTestResult(root);
 
                 if (va.api_key) {
-                    document.getElementById('cfg-vlm-api-key').value = va.api_key;
+                    field(root, 'cfg-vlm-api-key').value = va.api_key;
                 }
-                syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+                syncSectionApiKeyToggle(root, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
 
-                const timeoutInput = document.getElementById('cfg-vlm-request-timeout');
+                const timeoutInput = field(root, 'cfg-vlm-request-timeout');
                 if (va.request_timeout_seconds !== undefined && va.request_timeout_seconds !== null) {
                     timeoutInput.value = va.request_timeout_seconds;
                 }
@@ -2274,7 +3311,7 @@
                     timeoutInput.placeholder = String(globalVa.request_timeout_seconds);
                 }
 
-                const temperatureInput = document.getElementById('cfg-vlm-temperature');
+                const temperatureInput = field(root, 'cfg-vlm-temperature');
                 if (va.temperature !== undefined && va.temperature !== null) {
                     temperatureInput.value = va.temperature;
                 }
@@ -2282,7 +3319,7 @@
                     temperatureInput.placeholder = String(globalVa.temperature);
                 }
 
-                const maxTokensInput = document.getElementById('cfg-vlm-max-tokens');
+                const maxTokensInput = field(root, 'cfg-vlm-max-tokens');
                 // Detect/High auto-sizes max_tokens from the class count (highDetectMaxTokens).
                 // Don't surface that computed value as an operator choice — leaving it blank
                 // lets it re-scale when classes change. A stored value that differs from the
@@ -2329,51 +3366,49 @@
                 }
                 if (vlmMode === 'custom') {
                     if (va.system_prompt) {
-                        document.getElementById('cfg-vlm-system-prompt').value = va.system_prompt;
+                        field(root, 'cfg-vlm-system-prompt').value = va.system_prompt;
                     }
                     if (va.user_prompt) {
-                        document.getElementById('cfg-vlm-user-prompt').value = va.user_prompt;
+                        field(root, 'cfg-vlm-user-prompt').value = va.user_prompt;
                     }
                     if (hasClasses) {
-                        populateVlmClassRows('cfg-vlm-custom-classes', va.class_names, va.class_hints);
+                        populateVlmClassRows(root, 'cfg-vlm-custom-classes', va.class_names, va.class_hints);
                     }
                     // Pick the Output Schema kind from the loaded schema: absent -> Free-form,
                     // the live default class schema -> Per-class verdicts, anything else ->
                     // Custom (loaded into the Fields/Raw editor).
-                    if (window.applyVlmOutputSchema) {
-                        window.applyVlmOutputSchema(va.response_schema);
-                    } else if (va.response_schema) {
-                        loadVlmSchema(va.response_schema);
-                    }
+                    withSchemaBuilder(root, function(builder) { builder.applyOutputSchema(va.response_schema); });
                 } else if (vlmMode === 'detect') {
                     if (hasClasses) {
-                        populateVlmClassRows('cfg-vlm-detect-classes', va.class_names, va.class_hints);
+                        populateVlmClassRows(root, 'cfg-vlm-detect-classes', va.class_names, va.class_hints);
                     }
                 }
-                setVlmMode(vlmMode);
+                setVlmMode(root, vlmMode);
                 // After setVlmMode so the leaving-Detect reset in toggleVlmMode can't clobber
                 // it. Only Detect mode carries the loaded level. On the wire absent means
                 // High, so a stored config without a level must display (and re-save as)
                 // High; Low is the default for NEW configs only. Custom/Describe reset the
                 // hidden radio to that new-config default.
-                setReasoningLevel(vlmMode === 'detect' ? (reasoningLevel || 'high') : 'low');
+                setReasoningLevel(root, vlmMode === 'detect' ? (reasoningLevel || 'high') : 'low');
             }
 
             {
                 const sy = config.synthetic_analysis || {};
-                const globalSy = (defaultConfig && defaultConfig.synthetic_analysis) || {};
+                const globalSy = config.detector_type === 'verify'
+                    ? (verifyBaseline().svd || {})
+                    : ((defaultConfig && defaultConfig.synthetic_analysis) || {});
 
-                const endpointInput = document.getElementById('cfg-synthetic-endpoint');
+                const endpointInput = field(root, 'cfg-synthetic-endpoint');
                 if (sy.endpoint) endpointInput.value = sy.endpoint;
                 if (globalSy.endpoint) endpointInput.placeholder = globalSy.endpoint;
                 endpointInput.dataset.globalDefault = globalSy.endpoint || '';
-                updateSyntheticEndpointFields();
+                updateSyntheticEndpointFields(root);
 
                 // use_tls is a tri-state <select> ('' auto-detect / true / false), not a
                 // text/number input - it has no placeholder to show an effective default
                 // in, so an unset stream value leaves it on '' (auto-detect), same as before.
                 if (typeof sy.use_tls === 'boolean') {
-                    document.getElementById('cfg-synthetic-use-tls').value = String(sy.use_tls);
+                    field(root, 'cfg-synthetic-use-tls').value = String(sy.use_tls);
                 }
 
                 // Stream value in the field, global default as its placeholder (endpoint
@@ -2382,22 +3417,22 @@
                 [['cfg-synthetic-tls-ca-cert', 'tls_ca_cert'],
                  ['cfg-synthetic-tls-client-cert', 'tls_client_cert'],
                  ['cfg-synthetic-tls-client-key', 'tls_client_key']].forEach(function(pair) {
-                    const input = document.getElementById(pair[0]);
+                    const input = field(root, pair[0]);
                     if (sy[pair[1]]) input.value = sy[pair[1]];
                     if (globalSy[pair[1]]) input.placeholder = globalSy[pair[1]];
                     if (sy[pair[1]] || globalSy[pair[1]]) anyTlsCert = true;
                 });
-                setSyntheticTlsCertsExpanded(anyTlsCert);
+                setSyntheticTlsCertsExpanded(root, anyTlsCert);
 
                 if (sy.api_key) {
-                    document.getElementById('cfg-synthetic-api-key').value = sy.api_key;
+                    field(root, 'cfg-synthetic-api-key').value = sy.api_key;
                 }
-                syncApiKeyToggleState('cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+                syncSectionApiKeyToggle(root, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
                 if (sy.function_id) {
-                    document.getElementById('cfg-synthetic-function-id').value = sy.function_id;
+                    field(root, 'cfg-synthetic-function-id').value = sy.function_id;
                 }
 
-                const thresholdInput = document.getElementById('cfg-synthetic-classification-threshold');
+                const thresholdInput = field(root, 'cfg-synthetic-classification-threshold');
                 if (sy.classification_threshold !== undefined && sy.classification_threshold !== null) {
                     thresholdInput.value = sy.classification_threshold;
                 }
@@ -2406,13 +3441,110 @@
                 }
             }
 
+            {
+                const vf = config.verify_analysis || {};
+                const globalVf = verifyBaseline();
+                [['cfg-verify-flag-threshold', 'flag_threshold'],
+                 ['cfg-verify-strong-threshold', 'strong_threshold']].forEach(function(pair) {
+                    const input = field(root, pair[0]);
+                    if (!input) return;
+                    if (vf[pair[1]] !== undefined && vf[pair[1]] !== null) input.value = vf[pair[1]];
+                    if (globalVf[pair[1]] !== undefined && globalVf[pair[1]] !== null) input.placeholder = String(globalVf[pair[1]]);
+                });
+            }
+
+            // Which form each credential slot holds: a reference is readable and shows by
+            // name; anything else is the value mode, where a stored literal stays hidden.
+            setSecretSlot(root, 'cfg-vlm-api-key',
+                config.vlm_analysis && config.vlm_analysis.api_key_secret);
+            setSecretSlot(root, 'cfg-synthetic-api-key',
+                config.synthetic_analysis && config.synthetic_analysis.api_key_secret);
+            setSecretSlot(root, 'cfg-synthetic-tls-client-key',
+                config.synthetic_analysis && config.synthetic_analysis.tls_client_key_secret);
+
+            toggleByteTrack(root);
+            toggleCheckpointPath(root);
+            toggleTiling(root);
+        }
+
+        function populateForm(config) {
+            resetForm();
+            suppressDirtyTracking = true;
+
+            if (config.vi_service_url !== undefined) {
+                document.getElementById('cfg-vi-service-url').value = config.vi_service_url;
+            }
+            if (config.vi_service_api_key !== undefined) {
+                document.getElementById('cfg-vi-service-api-key').value = config.vi_service_api_key;
+            }
+            syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
+            if (config.active !== undefined) {
+                document.getElementById('cfg-active').checked = config.active;
+            }
+            if (config.log_max_messages !== undefined) {
+                document.getElementById('cfg-log-max-messages').value = config.log_max_messages;
+            }
+            if (config.inference_fps !== undefined) {
+                document.getElementById('cfg-inference-fps').value = config.inference_fps;
+            }
+    		setInferenceVideoHeightFromValue(config.inference_video_height);
+            if (config.use_transcoder !== undefined) {
+                document.getElementById('cfg-use-transcoder').checked = config.use_transcoder;
+                document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
+            }
+            else {
+                document.getElementById('cfg-use-transcoder').checked = true;
+                document.getElementById('cfg-use-transcoder-warning').style.display = 'none';
+            }
+            // Baseline for applyDetectorTypeTranscoderSuggestion: a manual toggle later makes
+            // checked !== dataset.suggested, which tells the suggestion to back off.
+            document.getElementById('cfg-use-transcoder').dataset.suggested = String(document.getElementById('cfg-use-transcoder').checked);
+            if (config.frame_grab_interval !== undefined) {
+                document.getElementById('cfg-frame-grab').value = config.frame_grab_interval;
+            }
+            if (config.rollup_batch_interval !== undefined) {
+                document.getElementById('cfg-rollup-batch-interval').value = config.rollup_batch_interval;
+            }
+            if (config.duration !== undefined) {
+                document.getElementById('cfg-duration').value = config.duration;
+            }
+            if (config.grayscaled !== undefined) {
+                document.getElementById('cfg-grayscaled').checked = config.grayscaled;
+            }
+
+            // auto_frame_throttle (renamed from auto_scene_frame_throttle). Opt-in, default OFF for all
+            // modes. Prefer the new key; for scene/VLM fall back to the legacy auto_scene_frame_throttle
+            // key (where it originally applied); unset => off.
+            let autoFrameThrottle = config.auto_frame_throttle;
+            if (autoFrameThrottle === undefined && config.detector_type !== 'object') {
+                autoFrameThrottle = config.auto_scene_frame_throttle;
+            }
+            document.getElementById('cfg-auto-frame-throttle').checked = (autoFrameThrottle === true);
+            if (config.catch_up_to_live !== undefined) {
+                document.getElementById('cfg-catch-up-to-live').checked = config.catch_up_to_live;
+            }
+            // null/absent => leave blank so the "auto (~2s)" placeholder shows
+            if (config.catch_up_max_behind_seconds !== undefined && config.catch_up_max_behind_seconds !== null) {
+                document.getElementById('cfg-catch-up-max-behind').value = config.catch_up_max_behind_seconds;
+            }
+            if (config.log_timing !== undefined) {
+                document.getElementById('cfg-log-timing').value = config.log_timing;
+            }
+            if (config.detector_type !== undefined) {
+                document.getElementById('cfg-detector-type').value = config.detector_type;
+            }
+
+            populateSections(sectionsRoot, config);
+            rememberStoredSections(config);
+            if (config.detector_type === 'chain' && config.chain_detector) loadChain(config.chain_detector);
+
             // Event listeners
             populateEventListeners(config.vif_event_listeners);
 
-            toggleByteTrack();
-            toggleCheckpointPath();
-            toggleTiling();
             toggleDetectorSection();
+            // The in-section slots are set by populateSections above; the service key's
+            // slot is the page's own.
+            setSecretSlot(null, 'cfg-vi-service-api-key', config.vi_service_api_key_secret);
             // Round 3: capture this stream's own raw `config` (as returned by GET, or
             // defaultConfig for a new stream) for buildConfigJson()'s collectUnsetFields() to
             // read stored values from at save time - not the layered/effective values the
@@ -2423,8 +3555,8 @@
             markClean(false);
         }
 
-        function populateCheckpointPaths(existingPath) {
-            var select = document.getElementById('cfg-checkpoint-path');
+        function populateCheckpointPaths(root, existingPath) {
+            var select = field(root, 'cfg-checkpoint-path');
             select.innerHTML = '';
             var models = (defaultConfig && defaultConfig.available_models && defaultConfig.available_models.models) || [];
             var customModels = models.filter(function(m) { return m.is_custom; });
@@ -2449,6 +3581,1630 @@
                 select.appendChild(opt);
             });
         }
+
+        var CHAIN_STAGE_LABELS = { object: 'Object', scene: 'Scene', vlm: 'VLM', synthetic: 'Synthetic', motion: 'Motion' };
+        var FRAME_SELECTION_LABELS = {
+            all: 'All frames', first: 'First frame', middle: 'Middle frame', last: 'Last frame', every_nth: 'Every Nth frame'
+        };
+        var STAGE_ANALYSIS = { object: 'object_analysis', scene: 'scene_analysis', vlm: 'vlm_analysis', synthetic: 'synthetic_analysis', motion: 'motion_analysis' };
+        var STAGE_SECRETS = {
+            vlm: ['vlm_analysis.api_key'],
+            synthetic: ['synthetic_analysis.api_key', 'synthetic_analysis.tls_client_key']
+        };
+        var STAGE_FLATTENERS = {
+            object: VIF.v2map.flatObjectAnalysis,
+            scene: VIF.v2map.flatSceneAnalysis,
+            vlm: VIF.v2map.flatVlmAnalysis,
+            synthetic: VIF.v2map.flatSyntheticAnalysis,
+            motion: VIF.v2map.flatMotionAnalysis
+        };
+        var STAGE_WRITERS = {
+            object: function(flat) { return VIF.v2map.writeObjectDetector(flat); },
+            scene: function(flat) { return VIF.v2map.writeSceneDetector(flat); },
+            vlm: function(flat) { return VIF.v2map.writeVlmDetector(flat, {}); },
+            synthetic: function(flat) { return VIF.v2map.writeSyntheticDetector(flat, {}); },
+            motion: function(flat) { return VIF.v2map.writeMotionDetector(flat); }
+        };
+        var CHAIN_NUMBER_RULES = {
+            'crop-min-confidence': { min: 0, max: 100, decimals: 1, label: 'Min Confidence %' },
+            'crop-padding': { min: 0, max: 100, decimals: 1, label: 'Padding %' },
+            'crop-max': { min: 1, max: 256, integer: true, label: 'Max Crops' },
+            'frame-stride': { min: 2, max: 1000, integer: true, label: 'Every Nth' }
+        };
+        var CROP_WHY = 'Tracking and tiling stay off while this stage crops: each crop is analyzed on its own.';
+
+        function chainTrackingWhy(blocker) {
+            const cause = {
+                entry: 'the ' + blocker.type + ' entry filters which frames reach this stage',
+                clip: 'a synthetic stage fixes the chain to clip windows',
+                window: 'the ' + blocker.type + ' stage gives the chain a multi-frame cadence and only the entry stage sees every window',
+                dynamic: 'a dynamic chain may revisit this stage and re-feed the tracker the same window',
+                selection: 'frame selection on this stage thins the frames the tracker must see',
+                route: 'a route re-enters this stage, re-feeding the tracker the same window'
+            }[blocker.reason];
+            return 'ByteTrack needs every captured frame to reach this stage exactly once, but ' + cause + '.';
+        }
+        var CHAIN_GATE_NUMBER_RULES = {
+            minConfidence: { min: 0, max: 100, decimals: 1, label: 'Min Confidence %' },
+            minCount: { min: 1, max: 100000, integer: true, label: 'Min Count' }
+        };
+        var CHAIN_LEVEL_NUMBER_RULES = {
+            'chain-max-rings': { min: 1, max: 64, integer: true, label: 'Max Executions' },
+            'chain-decision-timeout': { min: 0.001, max: 2147483.647, decimals: 3, label: 'Decision Timeout (seconds)' }
+        };
+        var CHAIN_LEVEL_LABELS = {
+            max_rings: 'Max executions',
+            'decision_listener.class_name': 'Decision listener class name',
+            decision_timeout_seconds: 'Decision timeout'
+        };
+        var CHAIN_MODE_LABELS = { linear: 'Linear', conditional: 'Conditional', dynamic: 'Dynamic' };
+        var CHAIN_EDITABLE = '.chain-stage, .chain-gate, #chain-decision-panel, #chain-advanced';
+        var CHAIN_TIPS = {
+            stageName: 'A unique name for this stage. Routes refer to stages by name, and stored API keys are kept per stage name — renaming a VLM or Synthetic stage clears its stored key, so re-enter it after a rename.',
+            ruleClasses: 'Comma-separated class names this rule looks for, matched ignoring case. A rule with no classes never matches.',
+            motionRuleClasses: 'Motion detections all carry the class motion, so a motion route always matches it.',
+            ruleMinConfidence: 'Detections below this confidence don’t count toward the rule. 0 counts every detection.',
+            ruleMinCount: 'The rule matches once this many qualifying detections appear across the window’s analyzed frames. 1 by default.',
+            match: 'Any rule: the route matches when one of its rules matches. All rules: every rule has to match.',
+            onMatch: 'What runs next when the route matches: another stage, or the end of the window.',
+            onNoMatch: 'What runs next when the route does not match. The end of the window unless you pick a stage.',
+            onDone: 'What always runs after this stage: another stage, or the end of the window. Ending here delivers this stage’s result.',
+            routeRules: 'Match rules against this stage’s detections and pick where a match and a miss go.',
+            routeAlways: 'Always go to one target after this stage runs, whatever it detected.',
+            routeRulesLocked: 'This stage returns free-form text with no classes to match, so its route always goes one way.',
+            frameSelection: 'Which of the window’s captured frames this stage analyzes — all of them unless you narrow it.',
+            crop: 'Analyze the boxes the previous stage detected instead of whole frames: one crop per box, filtered by class and confidence and padded by a share of the box size. Results keep full-frame coordinates.'
+        };
+        var CHAIN_STRIDE_HELP = 'Keeps frames 0, N, 2N and so on, plus the last frame.';
+        var CHAIN_SYNTHETIC_FRAMES_NOTE = 'A Synthetic stage always takes the whole clip.';
+        var CHAIN_OBJECT_LATENCY_NOTE = 'Object detection boxes render when the whole window completes, so they trail live video.';
+        var CHAIN_SVD_GATE_NOTE = 'The detector’s synthetic verdict needs a score strictly greater than its threshold; a rule’s Min Confidence includes equality.';
+        var CHAIN_DYNAMIC_END = 'The first stage is the entry point — after each run, the decision listener picks what runs next';
+
+        var chainState = null;
+        var chainStoredDetector = null;
+        var chainCards = {};
+        var chainUidSeq = 0;
+        var chainDrag = null;
+        var chainSuggestedEntryType = null;
+        var chainPropertyRows = [];
+        var chainPropertySeq = 0;
+        var chainPendingMode = null;
+
+        function chainStageTypes() {
+            return chainState ? chainState.stages.map(function(stage) { return (stage.detector || {}).type; }) : [];
+        }
+
+        function chainEntryType() {
+            return chainStageTypes()[0] || 'object';
+        }
+
+        function chainIsWindowed() {
+            const types = chainStageTypes();
+            return (types.indexOf('scene') !== -1 || types.indexOf('vlm') !== -1) && types.indexOf('synthetic') === -1;
+        }
+
+        function chainRuleDetectorTypeOf(types) {
+            if (types.indexOf('vlm') !== -1) return 'vlm';
+            if (types.indexOf('synthetic') !== -1) return 'synthetic';
+            return 'scene';
+        }
+
+        function chainRuleDetectorType() {
+            return chainRuleDetectorTypeOf(chainStageTypes());
+        }
+
+        function chainErrorText(error) {
+            const stage = /^stages\[(\d+)\]((?:\.[a-z_]+(?:\[\d+\])?)*):\s*(.*)$/.exec(error);
+            if (stage) {
+                const member = stage[2].replace(/^\./, '').replace(/^detector\./, '')
+                    .replace(/\.(mode|stride|stage)$/, '')
+                    .replace(/rules\[(\d+)\]/g, function(match, n) { return 'rule ' + (Number(n) + 1); })
+                    .replace(/[._]/g, ' ');
+                return 'Stage ' + (Number(stage[1]) + 1) + (member ? ' ' + member : '') + ': ' + stage[3];
+            }
+            const top = /^([a-z_.]+):\s*(.*)$/.exec(error);
+            if (top && CHAIN_LEVEL_LABELS[top[1]]) return CHAIN_LEVEL_LABELS[top[1]] + ': ' + top[2];
+            const text = error.replace(/^stages:\s*/, '');
+            return text.charAt(0).toUpperCase() + text.slice(1);
+        }
+
+        function assignStageUids(state) {
+            state.stages.forEach(function(stage) {
+                if (stage.uid === undefined) stage.uid = ++chainUidSeq;
+            });
+            return state;
+        }
+
+        function chainIndexOf(uid) {
+            for (let i = 0; i < chainState.stages.length; i++) {
+                if (chainState.stages[i].uid === uid) return i;
+            }
+            return -1;
+        }
+
+        function chainCardOfRoot(root) {
+            const uid = Object.keys(chainCards).filter(function(key) { return chainCards[key].root === root; })[0];
+            return uid ? chainCards[uid] : null;
+        }
+
+        function chainCardName(card) {
+            return card.nameInput.value.trim();
+        }
+
+        function stageFlat(detector) {
+            const type = detector.type;
+            const flat = { detector_type: type };
+            flat[STAGE_ANALYSIS[type]] = STAGE_FLATTENERS[type](detector);
+            if (type !== 'object') return flat;
+            const tracking = detector.tracking;
+            if (tracking && tracking.ignoreUntracked !== undefined && tracking.ignoreUntracked !== null) {
+                flat.ignore_untracked_objects = tracking.ignoreUntracked;
+            }
+            if (!flat.object_analysis.model_name) {
+                const baseline = (defaultConfig && defaultConfig.object_analysis) || {};
+                flat.object_analysis.model_name = baseline.model_name || 'medium';
+            }
+            return flat;
+        }
+
+        var OPAQUE_DETECTOR_MEMBERS = ['classHints', 'classSensitivity', 'responseSchema'];
+
+        function prunedDetector(value) {
+            const out = {};
+            Object.keys(value).forEach(function(key) {
+                let member = value[key];
+                if (member === null || member === undefined) return;
+                const opaque = OPAQUE_DETECTOR_MEMBERS.indexOf(key) !== -1;
+                if (!opaque && typeof member === 'object' && !Array.isArray(member)) {
+                    member = prunedDetector(member);
+                    if (Object.keys(member).length === 0) return;
+                }
+                out[key] = member;
+            });
+            return out;
+        }
+
+        function keepStageClasses(card, classes) {
+            const select = field(card.root, 'cfg-class-names');
+            (classes || []).forEach(function(name) {
+                let option = Array.from(select.options).filter(function(each) { return each.value === name; })[0];
+                if (!option) {
+                    option = chainEl('option', null, name);
+                    option.value = name;
+                    select.appendChild(option);
+                }
+                option.selected = true;
+            });
+        }
+
+        function deleteAtPath(object, path) {
+            const parts = path.split('.');
+            const parent = getConfigValueAtPath(object, parts.slice(0, -1).join('.'));
+            if (parent && typeof parent === 'object') delete parent[parts[parts.length - 1]];
+        }
+
+        function stageDetectorFromDom(card, stage) {
+            const writable = JSON.parse(JSON.stringify(readSections(card.root, card.type)));
+            (STAGE_SECRETS[card.type] || []).forEach(function(path) { deleteAtPath(writable, path); });
+            return prunedDetector(VIF.v2map.applyDetectorPatch(stage.detector, STAGE_WRITERS[card.type](writable)));
+        }
+
+        function readChainCard(card, stage) {
+            stage.name = chainCardName(card);
+            stage.detector = stageDetectorFromDom(card, stage);
+
+            const mode = card.frameMode.value;
+            if (mode !== 'all') {
+                stage.frameSelection = { mode: mode };
+                if (mode === 'every_nth') stage.frameSelection.stride = readNumber(card.strideInput, true);
+            } else if (!(stage.frameSelection && stage.frameSelection.mode === 'all')) {
+                delete stage.frameSelection;
+            }
+
+            if (VIF.chainEditor.chainMode(chainState) === 'conditional') readGate(card, stage);
+
+            if (!card.cropOn) {
+                delete stage.crop;
+                return;
+            }
+            const crop = {};
+            const classes = card.cropClasses.value.split(',').map(function(name) { return name.trim(); })
+                .filter(function(name) { return name !== ''; });
+            if (classes.length) crop.classes = classes;
+            const minConfidence = readNumber(card.cropMinConfidence, false, 100);
+            if (minConfidence !== undefined) crop.minConfidence = minConfidence;
+            const padding = readNumber(card.cropPadding, false, 100);
+            if (padding !== undefined) crop.padding = padding;
+            const maxCrops = readNumber(card.cropMax, true);
+            if (maxCrops !== undefined) crop.maxCrops = maxCrops;
+            stage.crop = crop;
+        }
+
+        function isPresent(value) {
+            return value !== undefined && value !== null;
+        }
+
+        function chainTrimmed(name) {
+            return typeof name === 'string' ? name.trim() : '';
+        }
+
+        function chainPercentText(value) {
+            return isPresent(value) ? String(Math.round(value * 1000) / 10) : '';
+        }
+
+        function chainPlainText(value) {
+            return isPresent(value) ? String(value) : '';
+        }
+
+        function chainCsvText(list) {
+            return isPresent(list) ? list.join(', ') : '';
+        }
+
+        function chainCsvList(text) {
+            return text.split(',').map(function(name) { return name.trim(); })
+                .filter(function(name) { return name !== ''; });
+        }
+
+        function chainKeptOrRead(input, base, text, read) {
+            return input.value === text(base) ? base : read(input);
+        }
+
+        function setOrDelete(object, key, value) {
+            if (isPresent(value)) object[key] = value;
+            else delete object[key];
+        }
+
+        function chainTargetValue(target, absent) {
+            if (!target) return absent;
+            if (target.end === true && !isPresent(target.stage)) return 'end';
+            if (typeof target.stage === 'string' && !isPresent(target.end)) return 's:' + target.stage.trim();
+            return absent;
+        }
+
+        function chainTargetOf(value) {
+            if (value === 'end') return { end: true };
+            if (value.indexOf('s:') === 0) return { stage: value.slice(2) };
+            return undefined;
+        }
+
+        function readGateRule(row) {
+            const base = row.base;
+            const rule = {};
+            const classes = chainKeptOrRead(row.classes, base.classes, chainCsvText, function(input) {
+                const list = chainCsvList(input.value);
+                return list.length ? list : undefined;
+            });
+            if (isPresent(classes)) rule.classes = classes.slice();
+            setOrDelete(rule, 'minConfidence', chainKeptOrRead(row.minConfidence, base.minConfidence, chainPercentText,
+                function(input) { return readNumber(input, false, 100); }));
+            setOrDelete(rule, 'minCount', chainKeptOrRead(row.minCount, base.minCount, chainPlainText,
+                function(input) { return readNumber(input, false); }));
+            return rule;
+        }
+
+        function readGate(card, stage) {
+            const gate = card.gate;
+            if (!card.routeOn) {
+                delete stage.routing;
+                return;
+            }
+            if (gate.kind === 'always') {
+                stage.routing = { onDone: chainTargetOf(gate.onDone.value) || { end: true } };
+                return;
+            }
+            const previous = stage.routing || {};
+            const routing = { rules: gate.rows.map(readGateRule) };
+            if (gate.match) routing.match = gate.match;
+            const onMatch = chainTargetOf(gate.onMatch.value);
+            if (onMatch) routing.onMatch = onMatch;
+            const keepsEnd = gate.onNoMatch.value === 'end' && chainTargetValue(previous.onNoMatch, 'end') === 'end';
+            const onNoMatch = keepsEnd ? previous.onNoMatch : chainTargetOf(gate.onNoMatch.value);
+            if (onNoMatch) routing.onNoMatch = JSON.parse(JSON.stringify(onNoMatch));
+            stage.routing = routing;
+        }
+
+        function readChainProperty(row) {
+            return row.hasBase && row.value.value === row.baseText ? row.base : row.value.value;
+        }
+
+        function readChainLevel(state) {
+            setOrDelete(state, 'maxRings', readNumber(document.getElementById('chain-max-rings'), false));
+            setOrDelete(state, 'resultMode', document.getElementById('chain-result-mode').value || undefined);
+            if (VIF.chainEditor.chainMode(state) !== 'dynamic') return;
+
+            const previous = state.decisionListener || {};
+            const listener = {};
+            const className = document.getElementById('chain-decision-class').value.trim();
+            if (className !== '') listener.className = className;
+            const named = chainPropertyRows.filter(function(row) { return row.key.value.trim() !== ''; });
+            if (named.length) {
+                listener.properties = {};
+                named.forEach(function(row) { listener.properties[row.key.value.trim()] = readChainProperty(row); });
+            } else if (previous.properties && Object.keys(previous.properties).length === 0) {
+                listener.properties = {};
+            }
+            setOrDelete(state, 'decisionListener', Object.keys(listener).length ? listener : undefined);
+            setOrDelete(state, 'decisionTimeoutSeconds', readNumber(document.getElementById('chain-decision-timeout'), false));
+            const dispatch = document.getElementById('chain-dispatch-intermediate').checked;
+            setOrDelete(state, 'dispatchIntermediateRings', dispatch ? true : (state.dispatchIntermediateRings === false ? false : undefined));
+        }
+
+        function syncChainFromCards() {
+            if (!chainState) return;
+            readChainLevel(chainState);
+            chainState.stages.forEach(function(stage) {
+                const card = chainCards[stage.uid];
+                if (!card) return;
+                readChainCard(card, stage);
+                if (lockGateToAlwaysOnFreeFormStage(card, stage)) readGate(card, stage);
+            });
+        }
+
+        function collectChain() {
+            ensureChain();
+            syncChainFromCards();
+            return VIF.chainEditor.collectChainDetector(chainState);
+        }
+
+        function collectChainStageSecrets() {
+            const secrets = {};
+            if (!chainState) return secrets;
+            chainState.stages.forEach(function(stage) {
+                const card = chainCards[stage.uid];
+                const collect = card && stageSecretsCollector(card);
+                if (!collect) return;
+                const collected = collect(chainCardName(card), readSections(card.root, card.type), card.touched);
+                // A slot in stored-secret mode holds the name; its literal is withdrawn
+                // entirely — the API refuses a write carrying both forms.
+                Object.keys(SECRET_INPUTS).forEach(function(path) {
+                    if (secretSourceIsStored(card.root, SECRET_INPUTS[path])) {
+                        delete collected[VIF.v2map.stageSecretPath(chainCardName(card), path)];
+                    }
+                });
+                Object.assign(secrets, collected);
+            });
+            return secrets;
+        }
+
+        function stageSecretsCollector(card) {
+            if (card.type === 'vlm') return VIF.v2map.stageSecretsForVlm;
+            if (card.type !== 'synthetic') return null;
+            return syntheticEndpointIsNvcf(card.root) ? VIF.v2map.stageSecretsForNvcfSvd : VIF.v2map.stageSecretsForSelfHostedSvd;
+        }
+
+        function rememberStoredSections(config) {
+            storedEndpoints.set(sectionsRoot, {
+                vlmUrl: (config.vlm_analysis || {}).endpoint_url || null,
+                vlmKeySecret: (config.vlm_analysis || {}).api_key_secret || null,
+                svdEndpoint: (config.synthetic_analysis || {}).endpoint || null,
+                svdKeySecret: (config.synthetic_analysis || {}).api_key_secret || null,
+                svdTlsKeySecret: (config.synthetic_analysis || {}).tls_client_key_secret || null
+            });
+        }
+
+        function rebaseChainStored() {
+            if (!chainState) return;
+            chainStoredDetector = JSON.parse(JSON.stringify(VIF.chainEditor.collectChainDetector(chainState)));
+            chainState.stages.forEach(function(stage) {
+                const card = chainCards[stage.uid];
+                if (card) rememberStoredStage(card, stage);
+            });
+            refreshChainView(false);
+        }
+
+        function rememberStoredStage(card, stage) {
+            const detector = stage.detector || {};
+            const endpoint = detector.endpoint || {};
+            card.stored = { name: stage.name, type: detector.type };
+            storedEndpoints.set(card.root, {
+                vlmUrl: detector.type === 'vlm' ? (endpoint.url || null) : null,
+                vlmKeySecret: detector.type === 'vlm' ? (endpoint.apiKeySecret || null) : null,
+                svdEndpoint: detector.type === 'synthetic' ? (endpoint.address || null) : null,
+                svdKeySecret: detector.type === 'synthetic' ? (endpoint.apiKeySecret || null) : null,
+                svdTlsKeySecret: detector.type === 'synthetic' ? ((endpoint.tls || {}).clientKeySecret || null) : null,
+                stage: stage.name,
+                type: detector.type
+            });
+        }
+
+        function chainValidationErrors(config) {
+            const state = VIF.chainEditor.initChain(config.chain_detector || { stages: [] });
+            const errors = VIF.chainEditor.validateChain(state).errors.map(chainErrorText);
+            const types = state.stages.map(function(stage) { return (stage.detector || {}).type; });
+            const cap = VIF.fieldRegistry.effectiveRule(VIF.fieldRegistry.getField('cfg-duration'), chainRuleDetectorTypeOf(types)).max;
+            if (config.duration !== undefined && config.duration !== null
+                && (!Number.isFinite(config.duration) || config.duration < 0 || config.duration > cap)) {
+                errors.push('Duration must be between 0 and ' + cap + ' for this chain.');
+            }
+            return errors;
+        }
+
+        function chainEl(tag, className, text) {
+            const el = document.createElement(tag);
+            if (className) el.className = className;
+            if (text !== undefined) el.textContent = text;
+            return el;
+        }
+
+        function chainButton(text, className, title) {
+            const button = chainEl('button', className, text);
+            button.type = 'button';
+            if (title) button.title = title;
+            return button;
+        }
+
+        function chainTip(text) {
+            const tip = chainEl('span', 'vif-help-tip');
+            tip.dataset.vifTip = text;
+            tip.setAttribute('aria-label', 'Help');
+            return tip;
+        }
+
+        function chainSummary(text, tip) {
+            const summary = chainEl('summary', null, text);
+            summary.prepend(chainEl('span', 'collapse-chevron', '▼'));
+            summary.appendChild(chainTip(tip));
+            return summary;
+        }
+
+        function chainFormGroup(labelText, control, tip) {
+            const group = chainEl('div', 'form-group');
+            const label = chainEl('label', null, labelText);
+            if (tip) label.appendChild(chainTip(tip));
+            group.appendChild(label);
+            if (control) group.appendChild(control);
+            return group;
+        }
+
+        function chainInput(type, id, placeholder) {
+            const input = chainEl('input');
+            input.type = type;
+            input.id = id;
+            if (placeholder !== undefined) input.placeholder = placeholder;
+            if (type === 'text') {
+                input.autocomplete = 'off';
+                input.spellcheck = false;
+            }
+            return input;
+        }
+
+        function buildFrameSelection(card) {
+            const prefix = card.prefix;
+            const box = chainEl('details', 'chain-disclosure');
+            box.id = prefix + 'frame-selection';
+            const summary = chainSummary('Frame selection', CHAIN_TIPS.frameSelection);
+            card.frameValue = chainEl('span', 'chain-disclosure-value');
+            card.frameValue.id = prefix + 'frame-value';
+            summary.insertBefore(card.frameValue, summary.querySelector('.vif-help-tip'));
+            box.appendChild(summary);
+            const body = chainEl('div', 'chain-disclosure-body');
+            card.frameMode = chainEl('select');
+            card.frameMode.id = prefix + 'frame-mode';
+            VIF.chainEditor.FRAME_SELECTION_MODES.forEach(function(mode) {
+                const option = chainEl('option', null, FRAME_SELECTION_LABELS[mode]);
+                option.value = mode;
+                card.frameMode.appendChild(option);
+            });
+            card.strideInput = chainInput('number', prefix + 'frame-stride', '2');
+            card.strideGroup = chainFormGroup('Every Nth', card.strideInput);
+            card.strideGroup.id = prefix + 'frame-stride-group';
+            card.strideGroup.appendChild(chainEl('div', 'field-help', CHAIN_STRIDE_HELP));
+            card.frameSyntheticNote = chainEl('div', 'field-help chain-note');
+            card.frameSyntheticNote.id = prefix + 'frame-synthetic-note';
+            body.append(card.frameSyntheticNote, chainFormGroup('Frames', card.frameMode), card.strideGroup);
+            box.appendChild(body);
+            card.frameBox = box;
+        }
+
+        function buildCrop(card) {
+            const prefix = card.prefix;
+            const box = chainEl('details', 'chain-disclosure');
+            box.id = prefix + 'crop';
+            box.appendChild(chainSummary('Crop from previous stage', CHAIN_TIPS.crop));
+            const body = chainEl('div', 'chain-disclosure-body chain-crop-rail');
+            card.cropError = chainEl('div', 'chain-stage-errors');
+            card.cropError.id = prefix + 'crop-error';
+            card.cropFields = chainEl('div');
+            card.cropFields.id = prefix + 'crop-fields';
+            card.cropClasses = chainInput('text', prefix + 'crop-classes', 'all classes');
+            card.cropMinConfidence = chainInput('number', prefix + 'crop-min-confidence', '0');
+            card.cropPadding = chainInput('number', prefix + 'crop-padding', '0');
+            card.cropMax = chainInput('number', prefix + 'crop-max', '16');
+            card.cropFields.append(
+                chainFormGroup('Classes', card.cropClasses),
+                chainFormGroup('Min Confidence %', card.cropMinConfidence),
+                chainFormGroup('Padding %', card.cropPadding),
+                chainFormGroup('Max Crops', card.cropMax));
+            const actions = chainEl('div', 'chain-crop-actions');
+            card.cropAdd = chainButton('Crop detections from the previous stage', 'btn-secondary');
+            card.cropAdd.id = prefix + 'crop-add';
+            card.cropRemove = chainButton('Remove crop', 'btn-danger');
+            card.cropRemove.id = prefix + 'crop-remove';
+            actions.append(card.cropAdd, card.cropRemove);
+            body.append(card.cropError, card.cropFields, actions);
+            box.appendChild(body);
+            card.cropBox = box;
+        }
+
+        function buildGate(card) {
+            const prefix = card.prefix;
+            const gate = { rows: [], rowSeq: 0, match: undefined, kind: 'rules', open: false, pendingMode: null };
+            gate.el = chainEl('div', 'chain-gate');
+            gate.el.id = prefix + 'gate';
+
+            gate.plain = chainEl('div', 'chain-gate-plain');
+            gate.slot = chainEl('div', 'chain-gate-slot');
+            gate.plainText = chainEl('span');
+            const slotText = chainEl('span', null, 'No route — ');
+            slotText.appendChild(gate.plainText);
+            gate.addRoute = chainButton('Add route');
+            gate.addRoute.id = prefix + 'route-add';
+            gate.slot.append(slotText, gate.addRoute);
+            gate.plain.appendChild(gate.slot);
+
+            gate.strip = chainEl('div', 'gstrip');
+            gate.strip.id = prefix + 'gate-strip';
+            gate.strip.tabIndex = 0;
+            gate.strip.setAttribute('role', 'button');
+            gate.summary = chainEl('span', 'gx');
+            gate.summary.id = prefix + 'gate-summary';
+            gate.toggle = chainEl('span', 'chain-gate-toggle');
+            gate.strip.append(chainEl('span', 'gl', 'Route'), gate.summary, gate.toggle);
+
+            gate.errors = chainEl('div', 'chain-stage-errors');
+            gate.errors.id = prefix + 'gate-errors';
+            gate.warnings = chainEl('div', 'inline-warning chain-warnings');
+            gate.warnings.id = prefix + 'gate-warnings';
+            gate.warnings.style.display = 'none';
+
+            gate.editor = chainEl('div', 'chain-gate-editor');
+            gate.editor.id = prefix + 'gate-editor';
+            gate.ruleHead = chainEl('div', 'chain-rule-head');
+            const ruleHeader = function(text, tip) {
+                const head = chainEl('span', null, text);
+                head.appendChild(chainTip(tip));
+                return head;
+            };
+            gate.minConfidenceHead = ruleHeader('Min Confidence %', CHAIN_TIPS.ruleMinConfidence);
+            gate.ruleHead.append(ruleHeader('Classes', CHAIN_TIPS.ruleClasses),
+                gate.minConfidenceHead,
+                ruleHeader('Min Count', CHAIN_TIPS.ruleMinCount), chainEl('span'));
+            gate.rules = chainEl('div', 'chain-rules');
+            gate.rules.id = prefix + 'rules';
+            gate.empty = chainEl('div', 'chain-rules-empty', 'No rules — always takes the No-match path');
+            gate.empty.id = prefix + 'rules-empty';
+            gate.addRule = chainButton('+ Add rule', 'btn-secondary');
+            gate.addRule.id = prefix + 'rule-add';
+            gate.removeRoute = chainButton('Remove route', 'btn-danger');
+            gate.removeRoute.id = prefix + 'route-remove';
+            const actions = chainEl('div', 'chain-gate-actions');
+            actions.append(gate.addRule, gate.removeRoute);
+            gate.matchSeg = chainEl('div', 'chain-seg');
+            gate.matchSeg.id = prefix + 'route-match';
+            gate.matchSeg.setAttribute('role', 'group');
+            [['any', 'Any rule'], ['all', 'All rules']].forEach(function(entry) {
+                const button = chainButton(entry[1]);
+                button.dataset.match = entry[0];
+                gate.matchSeg.appendChild(button);
+            });
+            gate.onMatch = chainEl('select');
+            gate.onMatch.id = prefix + 'route-on-match';
+            gate.onNoMatch = chainEl('select');
+            gate.onNoMatch.id = prefix + 'route-on-no-match';
+            gate.svdNote = chainEl('div', 'field-help chain-note');
+            gate.svdNote.id = prefix + 'gate-svd-note';
+            gate.svdNote.textContent = CHAIN_SVD_GATE_NOTE;
+            gate.kindSeg = chainEl('div', 'chain-seg');
+            gate.kindSeg.id = prefix + 'route-kind';
+            gate.kindSeg.setAttribute('role', 'group');
+            [['rules', 'Rules', CHAIN_TIPS.routeRules], ['always', 'Always', CHAIN_TIPS.routeAlways]].forEach(function(entry) {
+                const button = chainButton(entry[1], null, entry[2]);
+                button.dataset.kind = entry[0];
+                gate.kindSeg.appendChild(button);
+            });
+            gate.onDone = chainEl('select');
+            gate.onDone.id = prefix + 'route-on-done';
+            gate.matchGroup = chainFormGroup('Match', gate.matchSeg, CHAIN_TIPS.match);
+            gate.onMatchGroup = chainFormGroup('On Match', gate.onMatch, CHAIN_TIPS.onMatch);
+            gate.onNoMatchGroup = chainFormGroup('On No Match', gate.onNoMatch, CHAIN_TIPS.onNoMatch);
+            gate.onDoneGroup = chainFormGroup('Then', gate.onDone, CHAIN_TIPS.onDone);
+            gate.editor.append(chainFormGroup('Route', gate.kindSeg), gate.ruleHead, gate.rules, gate.empty, actions,
+                gate.matchGroup, gate.onMatchGroup, gate.onNoMatchGroup, gate.onDoneGroup, gate.svdNote);
+
+            gate.modeConfirm = chainEl('div', 'inline-warning chain-confirm');
+            gate.modeConfirm.id = prefix + 'gate-mode-confirm';
+            gate.modeConfirm.style.display = 'none';
+            gate.modeConfirmText = chainEl('span');
+            gate.modeConfirmText.id = prefix + 'gate-mode-confirm-text';
+            gate.modeConfirmYes = chainButton('', 'btn-danger');
+            gate.modeConfirmYes.id = prefix + 'gate-mode-confirm-yes';
+            gate.modeConfirmNo = chainButton('Cancel', 'btn-secondary');
+            gate.modeConfirmNo.id = prefix + 'gate-mode-confirm-no';
+            const confirmActions = chainEl('div', 'chain-confirm-actions');
+            confirmActions.append(gate.modeConfirmYes, gate.modeConfirmNo);
+            gate.modeConfirm.append(gate.modeConfirmText, confirmActions);
+            gate.el.append(gate.modeConfirm, gate.plain, gate.strip, gate.errors, gate.warnings, gate.editor);
+            card.gate = gate;
+        }
+
+        function addGateRuleRow(card, rule) {
+            const gate = card.gate;
+            const id = card.prefix + 'rule-' + (++gate.rowSeq) + '-';
+            const row = { base: rule ? JSON.parse(JSON.stringify(rule)) : {} };
+            row.el = chainEl('div', 'chain-rule');
+            row.classes = chainInput('text', id + 'classes', 'classes, comma-separated');
+            row.motionClasses = chainInput('text', id + 'motion-classes');
+            row.motionClasses.value = 'motion';
+            row.motionClasses.disabled = true;
+            row.motionClasses.title = CHAIN_TIPS.motionRuleClasses;
+            row.minConfidence = chainInput('number', id + 'min-confidence', '0');
+            row.minCount = chainInput('number', id + 'min-count', '1');
+            row.remove = chainButton('Remove', 'btn-danger', 'Remove this rule');
+            row.classes.value = chainCsvText(row.base.classes);
+            row.minConfidence.value = chainPercentText(row.base.minConfidence);
+            row.minCount.value = chainPlainText(row.base.minCount);
+            applyNumericRuleToInput(row.minConfidence, CHAIN_GATE_NUMBER_RULES.minConfidence);
+            applyNumericRuleToInput(row.minCount, CHAIN_GATE_NUMBER_RULES.minCount);
+            row.remove.addEventListener('click', function() {
+                gate.rows.splice(gate.rows.indexOf(row), 1);
+                row.el.remove();
+                refreshChainFromDom(true);
+                markDirty();
+            });
+            row.el.append(row.classes, row.motionClasses, row.minConfidence, row.minCount, row.remove);
+            lockGateRowForMotion(row, card.type === 'motion');
+            gate.rules.appendChild(row.el);
+            gate.rows.push(row);
+            return row;
+        }
+
+        function lockGateRowForMotion(row, motion) {
+            row.el.classList.toggle('chain-rule-motion', motion);
+            row.classes.style.display = motion ? 'none' : '';
+            row.motionClasses.style.display = motion ? '' : 'none';
+            row.minConfidence.style.display = motion ? 'none' : '';
+        }
+
+        function applyGateMotionLock(card) {
+            const motion = card.type === 'motion';
+            card.gate.ruleHead.classList.toggle('chain-rule-motion', motion);
+            card.gate.minConfidenceHead.style.display = motion ? 'none' : '';
+            card.gate.rows.forEach(function(row) { lockGateRowForMotion(row, motion); });
+        }
+
+        function fillChainTargets(card, select, value, noMatch) {
+            select.replaceChildren();
+            const add = function(optionValue, label) {
+                const option = chainEl('option', null, label);
+                option.value = optionValue;
+                select.appendChild(option);
+            };
+            if (!noMatch && value === '') add('', 'Choose a target');
+            const own = chainIndexOf(card.uid);
+            const all = chainState.stages.map(function(stage) { return chainTrimmed(stage.name); });
+            const offered = all.filter(function(name, index) {
+                return index !== own && name !== '' && all.indexOf(name) === index;
+            });
+            offered.forEach(function(name) { add('s:' + name, name); });
+            if (value.indexOf('s:') === 0 && offered.indexOf(value.slice(2)) === -1) {
+                const name = value.slice(2);
+                add(value, all.indexOf(name) !== -1 ? name : name + ' (no such stage)');
+            }
+            add('end', 'End of window');
+            select.value = value;
+        }
+
+        function fillGate(card, stage) {
+            const gate = card.gate;
+            const routing = stage.routing;
+            card.routeOn = !!routing;
+            gate.rows.forEach(function(row) { row.el.remove(); });
+            gate.rows = [];
+            gate.match = routing ? routing.match : undefined;
+            gate.kind = routing && routing.onDone ? 'always' : 'rules';
+            ((routing && routing.rules) || []).forEach(function(rule) { addGateRuleRow(card, rule); });
+            fillChainTargets(card, gate.onMatch, chainTargetValue(routing && routing.onMatch, ''), false);
+            fillChainTargets(card, gate.onNoMatch, chainTargetValue(routing && routing.onNoMatch, 'end'), true);
+            fillChainTargets(card, gate.onDone, chainTargetValue(routing && routing.onDone, 'end'), true);
+            applyGateMotionLock(card);
+            if (!routing) gate.open = false;
+        }
+
+        function nextStageTarget(card) {
+            const next = chainState.stages[chainIndexOf(card.uid) + 1];
+            const nextName = next ? chainTrimmed(next.name) : '';
+            return nextName ? { stage: nextName } : { end: true };
+        }
+
+        function setGateKind(card, kind) {
+            const gate = card.gate;
+            if (gate.kind === kind) return;
+            gate.kind = kind;
+            if (kind === 'always') {
+                fillChainTargets(card, gate.onDone, gate.onNoMatch.value, true);
+                return;
+            }
+            if (!gate.rows.length) addGateRuleRow(card);
+            if (gate.onMatch.value === '') fillChainTargets(card, gate.onMatch, chainTargetValue(nextStageTarget(card), ''), false);
+        }
+
+        function lockGateToAlwaysOnFreeFormStage(card, stage) {
+            if (!stage.routing || card.gate.kind === 'always' || !VIF.chainEditor.isFreeFormVlm(stage.detector)) return false;
+            setGateKind(card, 'always');
+            return true;
+        }
+
+        var VLM_MODE_LABELS = { detect: 'Detect', describe: 'Describe', custom: 'Custom' };
+
+        function isVlmModeRadio(el) {
+            return el.type === 'radio' && /vlm-mode$/.test(el.name || '');
+        }
+
+        function stageVlmMode(detector) {
+            if (detector.mode !== undefined && detector.mode !== null) return detector.mode;
+            if (detector.detect !== undefined && detector.detect !== null) return 'detect';
+            return detector.custom !== undefined && detector.custom !== null ? 'custom' : 'describe';
+        }
+
+        function hideGateModeConfirm(card) {
+            card.gate.pendingMode = null;
+            card.gate.modeConfirm.style.display = 'none';
+        }
+
+        /**
+         * Intercepts a stage-mode switch that would drop a rules route, before the switch's
+         * own handlers run: the radio is put back and the gate shows the same inline confirm
+         * the chain-mode switch uses. Returns true when the event must not propagate.
+         */
+        function deferVlmModeSwitchConfirm(target) {
+            if (!isVlmModeRadio(target) || target.value === 'detect') return false;
+            if (VIF.chainEditor.chainMode(chainState) !== 'conditional') return false;
+            const stageEl = target.closest('.chain-stage');
+            const stage = stageEl && chainState.stages.find(function(entry) {
+                const candidate = chainCards[entry.uid];
+                return candidate && candidate.el === stageEl;
+            });
+            const card = stage && chainCards[stage.uid];
+            if (!card || card.type !== 'vlm' || target.name !== sectionPrefix(card.root) + 'vlm-mode') return false;
+            if (!card.routeOn || card.gate.kind !== 'rules') return false;
+            const previous = stageVlmMode(stage.detector);
+            if (previous === target.value) return false;
+            if (target.value === 'custom') {
+                carryOverVlmClasses(card.root, 'cfg-vlm-detect-classes', 'cfg-vlm-custom-classes');
+                if (!VIF.chainEditor.isFreeFormVlm(stageDetectorFromDom(card, stage))) return false;
+            }
+            const previousRadio = field(card.root, 'cfg-vlm-mode').querySelector('input[value="' + previous + '"]');
+            if (!previousRadio) return false;
+            previousRadio.checked = true;
+            const gate = card.gate;
+            const label = VLM_MODE_LABELS[target.value];
+            gate.pendingMode = target.value;
+            gate.modeConfirmText.textContent = 'Switching to ' + label + " drops this stage's rules — its route becomes always → "
+                + chainTargetLabel(chainTargetOf(gate.onNoMatch.value) || { end: true }) + '.';
+            gate.modeConfirmYes.textContent = 'Switch to ' + label;
+            gate.modeConfirm.style.display = '';
+            gate.modeConfirmNo.focus();
+            return true;
+        }
+
+        function setGateOpen(card, open) {
+            card.gate.open = open;
+            refreshChainView(false);
+        }
+
+        function bindGate(card) {
+            const gate = card.gate;
+            gate.strip.addEventListener('click', function() { setGateOpen(card, !gate.open); });
+            gate.strip.addEventListener('keydown', function(event) {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                setGateOpen(card, !gate.open);
+            });
+            gate.slot.addEventListener('click', function(event) {
+                if (event.target !== gate.addRoute) gate.addRoute.click();
+            });
+            gate.addRoute.addEventListener('click', function() {
+                const stage = chainState.stages[chainIndexOf(card.uid)];
+                const freeForm = VIF.chainEditor.isFreeFormVlm(stage.detector);
+                fillGate(card, { routing: freeForm ? { onDone: { end: true } } : { rules: [{}], onMatch: nextStageTarget(card) } });
+                gate.open = true;
+                refreshChainFromDom(true);
+                markDirty();
+                if (freeForm) gate.onDone.focus();
+                else gate.rows[0].classes.focus();
+            });
+            gate.kindSeg.addEventListener('click', function(event) {
+                const button = event.target.closest('button');
+                if (!button || button.disabled || gate.kind === button.dataset.kind) return;
+                setGateKind(card, button.dataset.kind);
+                refreshChainFromDom(true);
+                markDirty();
+            });
+            gate.removeRoute.addEventListener('click', function() {
+                fillGate(card, {});
+                refreshChainFromDom(true);
+                markDirty();
+            });
+            gate.modeConfirmNo.addEventListener('click', function() { hideGateModeConfirm(card); });
+            gate.modeConfirmYes.addEventListener('click', function() {
+                const requested = gate.pendingMode;
+                hideGateModeConfirm(card);
+                if (!requested) return;
+                const radio = field(card.root, 'cfg-vlm-mode').querySelector('input[value="' + requested + '"]');
+                if (!radio) return;
+                radio.checked = true;
+                toggleVlmMode(card.root);
+                refreshChainFromDom(true);
+            });
+            gate.addRule.addEventListener('click', function() {
+                const row = addGateRuleRow(card);
+                refreshChainFromDom(true);
+                markDirty();
+                row.classes.focus();
+            });
+            gate.matchSeg.addEventListener('click', function(event) {
+                const button = event.target.closest('button');
+                if (!button || gate.match === button.dataset.match) return;
+                gate.match = button.dataset.match;
+                refreshChainFromDom(true);
+                markDirty();
+            });
+        }
+
+        function chainRuleSummary(rule) {
+            rule = rule || {};
+            let text = rule.classes && rule.classes.length ? rule.classes.join(', ') : 'no classes';
+            if (isPresent(rule.minConfidence)) text += ' at ' + chainPercentText(rule.minConfidence) + '%+';
+            if (isPresent(rule.minCount)) text += ' · count ' + rule.minCount + '+';
+            return text;
+        }
+
+        function chainTargetLabel(target) {
+            const value = chainTargetValue(target, '');
+            if (value === 'end') return 'end of window';
+            return value ? value.slice(2) : 'no target';
+        }
+
+        function chainGateSummary(routing) {
+            if (routing.onDone) return 'always → ' + chainTargetLabel(routing.onDone);
+            const rules = routing.rules || [];
+            const noMatch = routing.onNoMatch ? chainTargetLabel(routing.onNoMatch) : 'end of window';
+            if (!rules.length) return 'no rules · always → ' + noMatch;
+            let condition = rules.map(chainRuleSummary).join('; ');
+            if (rules.length > 1) condition = (routing.match === 'all' ? 'all of: ' : 'any of: ') + condition;
+            return condition + ' → ' + chainTargetLabel(routing.onMatch) + ' · else → ' + noMatch;
+        }
+
+        function routingAsSaved(card, routing) {
+            if (card.type !== 'motion' || routing.onDone) return routing;
+            return Object.assign({}, routing, { rules: (routing.rules || []).map(VIF.chainEditor.lockedMotionRule) });
+        }
+
+        function refreshGate(card, stage, index, routeErrors, showStageErrors) {
+            const gate = card.gate;
+            const last = index === chainState.stages.length - 1;
+            if (gate.pendingMode && (!card.routeOn || gate.kind !== 'rules')) hideGateModeConfirm(card);
+            gate.plain.style.display = card.routeOn ? 'none' : '';
+            gate.plainText.textContent = last ? 'falls through to the end of the window' : 'falls through to the next stage';
+            gate.strip.style.display = card.routeOn ? '' : 'none';
+            gate.summary.textContent = stage.routing ? chainGateSummary(routingAsSaved(card, stage.routing)) : '';
+            gate.toggle.textContent = gate.open ? 'Close' : 'Edit';
+            gate.strip.setAttribute('aria-expanded', String(card.routeOn && gate.open));
+            gate.el.classList.toggle('is-open', card.routeOn && gate.open);
+            const always = gate.kind === 'always';
+            const freeForm = VIF.chainEditor.isFreeFormVlm(stage.detector);
+            Array.from(gate.kindSeg.children).forEach(function(button) {
+                const active = button.dataset.kind === gate.kind;
+                const locked = freeForm && button.dataset.kind === 'rules';
+                button.classList.toggle('is-active', active);
+                button.setAttribute('aria-pressed', String(active));
+                button.disabled = locked;
+                button.title = locked ? CHAIN_TIPS.routeRulesLocked
+                    : (button.dataset.kind === 'rules' ? CHAIN_TIPS.routeRules : CHAIN_TIPS.routeAlways);
+            });
+            gate.ruleHead.style.display = !always && gate.rows.length ? '' : 'none';
+            gate.rules.style.display = always ? 'none' : '';
+            gate.empty.style.display = !always && !gate.rows.length ? '' : 'none';
+            gate.addRule.style.visibility = always ? 'hidden' : '';
+            [gate.matchGroup, gate.onMatchGroup, gate.onNoMatchGroup].forEach(function(group) {
+                group.style.display = always ? 'none' : '';
+            });
+            gate.onDoneGroup.style.display = always ? '' : 'none';
+            gate.svdNote.style.display = !always && card.type === 'synthetic' ? '' : 'none';
+            const match = gate.match || 'any';
+            Array.from(gate.matchSeg.children).forEach(function(button) {
+                const active = button.dataset.match === match;
+                button.classList.toggle('is-active', active);
+                button.setAttribute('aria-pressed', String(active));
+            });
+            fillChainTargets(card, gate.onMatch, gate.onMatch.value, false);
+            fillChainTargets(card, gate.onNoMatch, gate.onNoMatch.value, true);
+            fillChainTargets(card, gate.onDone, gate.onDone.value, true);
+            if (!showStageErrors) return;
+            gate.errors.textContent = routeErrors.map(chainErrorText).join('\n');
+            gate.el.classList.toggle('has-error', routeErrors.length > 0);
+        }
+
+        function fillStageExtras(card, stage) {
+            const selection = stage.frameSelection || {};
+            card.frameMode.value = selection.mode || 'all';
+            card.strideInput.value = selection.stride !== undefined && selection.stride !== null ? selection.stride : '';
+            const crop = stage.crop || {};
+            card.cropOn = !!stage.crop;
+            card.cropClasses.value = (crop.classes || []).join(', ');
+            card.cropMinConfidence.value = chainPercentText(crop.minConfidence);
+            card.cropPadding.value = chainPercentText(crop.padding);
+            card.cropMax.value = crop.maxCrops !== undefined && crop.maxCrops !== null ? crop.maxCrops : '';
+            card.cropBox.open = card.cropOn;
+            card.frameBox.open = !!selection.mode && selection.mode !== 'all';
+        }
+
+        function loadChainCardSections(card, stage) {
+            const wasSuppressed = suppressDirtyTracking;
+            suppressDirtyTracking = true;
+            resetSections(card.root);
+            populateSections(card.root, stageFlat(stage.detector));
+            toggleSections(card.root, card.type);
+            refreshEffectiveDefaultPlaceholders(card.root);
+            if (card.type === 'object') keepStageClasses(card, stage.detector.classes);
+            fillStageExtras(card, stage);
+            suppressDirtyTracking = wasSuppressed;
+        }
+
+        function setChainCardExpanded(card, expanded) {
+            card.body.classList.toggle('expanded', expanded);
+            card.chevron.textContent = expanded ? '▼' : '▶';
+            if (expanded && window.vlmAutoGrowAll) window.vlmAutoGrowAll();
+        }
+
+        function createChainCard(stage, stored, expanded) {
+            const prefix = 'cfg-s' + stage.uid + '-';
+            const card = { uid: stage.uid, prefix: prefix, type: stage.detector.type, touched: {}, stored: null, cropOn: false };
+
+            const item = chainEl('div', 'array-item chain-stage');
+            item.id = prefix + 'stage';
+            const header = chainEl('div', 'array-item-header chain-stage-header');
+            card.chevron = chainEl('span', 'array-item-chevron');
+            card.badge = chainEl('span', 'dbadge');
+            card.nameLabel = chainEl('span', 'chain-stage-name');
+            card.typeTag = chainEl('span', 'chain-stage-type');
+            card.summary = chainEl('span', 'chain-stage-summary');
+            const grip = chainEl('span', 'chain-grip');
+            grip.title = 'Drag to reorder';
+            const actions = chainEl('div', 'array-item-actions');
+            card.upBtn = chainButton('Up', null, 'Move this stage up');
+            card.downBtn = chainButton('Down', null, 'Move this stage down');
+            card.removeBtn = chainButton('Remove', 'btn-danger', 'Remove this stage');
+            actions.append(card.upBtn, card.downBtn, card.removeBtn);
+            header.append(card.chevron, card.badge, card.nameLabel, card.typeTag, card.summary, grip, actions);
+
+            const body = chainEl('div', 'array-item-body chain-stage-body');
+            card.errors = chainEl('div', 'chain-stage-errors');
+            card.errors.id = prefix + 'stage-errors';
+            card.nameInput = chainInput('text', prefix + 'stage-name', 'e.g. detect');
+            card.nameInput.value = stage.name || '';
+            card.nameNote = chainEl('div', 'field-help chain-note');
+            card.nameNote.id = prefix + 'stage-name-note';
+            const nameGroup = chainFormGroup('Stage Name', card.nameInput, CHAIN_TIPS.stageName);
+            nameGroup.appendChild(card.nameNote);
+            card.typeSelect = chainEl('select');
+            card.typeSelect.id = prefix + 'stage-type';
+            VIF.chainEditor.STAGE_TYPES.forEach(function(type) {
+                const option = chainEl('option', null, CHAIN_STAGE_LABELS[type]);
+                option.value = type;
+                card.typeSelect.appendChild(option);
+            });
+            card.typeSelect.value = card.type;
+            card.typeSelect.dataset.chainRole = 'type';
+            card.root = chainEl('div', 'chain-stage-form');
+            card.root.appendChild(VIF.detectorSections.instantiate(prefix, card.root));
+            buildFrameSelection(card);
+            buildCrop(card);
+            buildGate(card);
+            card.committedName = chainTrimmed(stage.name);
+            body.append(card.errors, nameGroup, chainFormGroup('Detector Type', card.typeSelect), card.root, card.frameBox, card.cropBox);
+            item.append(header, body);
+            card.el = item;
+            card.header = header;
+            card.body = body;
+
+            const tracking = field(card.root, 'cfg-tracking-method');
+            card.trackingNote = chainEl('div', 'field-help chain-note');
+            tracking.parentElement.appendChild(card.trackingNote);
+            field(card.root, 'tiling-enable-group').style.display = tilingUiEnabled ? '' : 'none';
+            populateCheckpointPaths(card.root);
+            initializeStaticFieldRules(card.root);
+            Object.keys(CHAIN_NUMBER_RULES).forEach(function(id) {
+                applyNumericRuleToInput(card.el.querySelector('#' + CSS.escape(prefix + id)), CHAIN_NUMBER_RULES[id]);
+            });
+            watchSecretInputs(card.root, function() { return card.touched; });
+            syncSectionApiKeyToggle(card.root, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+            syncSectionApiKeyToggle(card.root, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+
+            bindChainCard(card);
+            bindGate(card);
+            loadChainCardSections(card, stage);
+            fillGate(card, stage);
+            if (stored) rememberStoredStage(card, stage);
+            setChainCardExpanded(card, expanded);
+            chainCards[card.uid] = card;
+            return card;
+        }
+
+        function bindChainCard(card) {
+            card.header.addEventListener('click', function(event) {
+                if (card.suppressClick || event.target.closest('.array-item-actions')) return;
+                setChainCardExpanded(card, !card.body.classList.contains('expanded'));
+            });
+            card.upBtn.addEventListener('click', function() { moveChainStage(card, -1); });
+            card.downBtn.addEventListener('click', function() { moveChainStage(card, 1); });
+            card.removeBtn.addEventListener('click', function() {
+                const index = chainIndexOf(card.uid);
+                applyChainTransition(function(state) { return VIF.chainEditor.removeStage(state, index); });
+            });
+            card.typeSelect.addEventListener('change', function() { changeChainStageType(card, card.typeSelect.value); });
+            card.nameInput.addEventListener('change', function() { renameChainStage(card); });
+            card.cropAdd.addEventListener('click', function() {
+                card.cropOn = true;
+                if (card.type === 'object') {
+                    const tracking = field(card.root, 'cfg-tracking-method');
+                    const tiling = field(card.root, 'cfg-tiling-enabled');
+                    if (tracking.value !== 'none') { tracking.value = 'none'; toggleByteTrack(card.root); }
+                    if (tiling.checked) { tiling.checked = false; toggleTiling(card.root); }
+                }
+                refreshChainFromDom(true);
+                markDirty();
+                card.cropClasses.focus();
+            });
+            card.cropRemove.addEventListener('click', function() {
+                card.cropOn = false;
+                [card.cropClasses, card.cropMinConfidence, card.cropPadding, card.cropMax].forEach(function(input) { input.value = ''; });
+                refreshChainFromDom(true);
+                markDirty();
+            });
+            card.header.addEventListener('pointerdown', function(event) {
+                if (event.button !== 0 || event.target.closest('button, input, select, textarea, a')) return;
+                chainDrag = { card: card, startY: event.clientY, active: false, to: null };
+                try { card.header.setPointerCapture(event.pointerId); } catch (error) { /* capture is a nicety */ }
+            });
+            card.header.addEventListener('pointermove', function(event) {
+                if (!chainDrag || chainDrag.card !== card) return;
+                if (!chainDrag.active) {
+                    if (Math.abs(event.clientY - chainDrag.startY) < 6) return;
+                    chainDrag.active = true;
+                    card.el.classList.add('is-dragging');
+                }
+                chainDrag.to = chainDropIndex(card, event.clientY);
+                markChainDrop(card, chainDrag.to);
+            });
+            card.header.addEventListener('pointerup', function() { finishChainDrag(card, true); });
+            card.header.addEventListener('pointercancel', function() { finishChainDrag(card, false); });
+        }
+
+        function chainOtherCards(card) {
+            return chainState.stages.filter(function(stage) { return stage.uid !== card.uid; })
+                .map(function(stage) { return chainCards[stage.uid]; });
+        }
+
+        function chainDropIndex(card, clientY) {
+            let index = 0;
+            chainOtherCards(card).forEach(function(other) {
+                const rect = other.el.getBoundingClientRect();
+                if (clientY > rect.top + rect.height / 2) index++;
+            });
+            return index;
+        }
+
+        function markChainDrop(card, to) {
+            const others = chainOtherCards(card);
+            others.forEach(function(other) { other.el.classList.remove('drop-before', 'drop-after'); });
+            if (to < others.length) others[to].el.classList.add('drop-before');
+            else if (others.length) others[others.length - 1].el.classList.add('drop-after');
+        }
+
+        function finishChainDrag(card, commit) {
+            if (!chainDrag || chainDrag.card !== card) return;
+            const drag = chainDrag;
+            chainDrag = null;
+            card.el.classList.remove('is-dragging');
+            chainOtherCards(card).forEach(function(other) { other.el.classList.remove('drop-before', 'drop-after'); });
+            if (!drag.active) return;
+            card.suppressClick = true;
+            setTimeout(function() { card.suppressClick = false; }, 0);
+            const from = chainIndexOf(card.uid);
+            if (commit && drag.to !== null && drag.to !== from) {
+                applyChainTransition(function(state) { return VIF.chainEditor.moveStage(state, from, drag.to - from); });
+            }
+        }
+
+        function moveChainStage(card, delta) {
+            const index = chainIndexOf(card.uid);
+            applyChainTransition(function(state) { return VIF.chainEditor.moveStage(state, index, delta); });
+            const button = delta < 0 ? card.upBtn : card.downBtn;
+            (button.disabled ? (delta < 0 ? card.downBtn : card.upBtn) : button).focus();
+        }
+
+        function changeChainStageType(card, type) {
+            syncChainFromCards();
+            chainState = VIF.chainEditor.setStageType(chainState, chainIndexOf(card.uid), type);
+            card.type = type;
+            loadChainCardSections(card, chainState.stages[chainIndexOf(card.uid)]);
+            applyGateMotionLock(card);
+            refreshChainView(true);
+            markDirty();
+        }
+
+        function insertChainStage(at) {
+            applyChainTransition(function(state) { return VIF.chainEditor.addStage(state, 'object', at); });
+            const card = chainCards[chainState.stages[at].uid];
+            if (card) card.nameInput.focus();
+        }
+
+        function refillChainFromState() {
+            chainState.stages.forEach(function(stage) {
+                const card = chainCards[stage.uid];
+                if (card) fillGate(card, stage);
+            });
+            fillChainLevel();
+        }
+
+        function applyChainTransition(transition) {
+            syncChainFromCards();
+            chainState = assignStageUids(transition(chainState));
+            refillChainFromState();
+            renderChain();
+            markDirty();
+        }
+
+        function renameChainStage(card) {
+            const name = card.nameInput.value;
+            if (chainTrimmed(name) === '' || chainTrimmed(name) === card.committedName) return;
+            const index = chainIndexOf(card.uid);
+            syncChainFromCards();
+            chainState.stages[index].name = card.committedName;
+            chainState = VIF.chainEditor.renameStage(chainState, index, name);
+            card.committedName = chainTrimmed(name);
+            refillChainFromState();
+            refreshChainView(true);
+        }
+
+        function chainModeDrops(mode) {
+            const current = VIF.chainEditor.chainMode(chainState);
+            const drops = [];
+            if (mode !== 'conditional') {
+                const routed = [];
+                chainState.stages.forEach(function(stage, index) {
+                    if (stage.routing) routed.push(chainTrimmed(stage.name) || 'stage ' + (index + 1));
+                });
+                if (routed.length) drops.push((routed.length === 1 ? 'the route on ' : 'the routes on ') + chainJoinList(routed));
+            }
+            if (current === 'dynamic' && mode !== 'dynamic') {
+                const listener = chainState.decisionListener;
+                if (listener) drops.push('the decision listener' + (listener.className ? ' ' + listener.className : ''));
+                if (isPresent(chainState.decisionTimeoutSeconds)) drops.push('the decision timeout');
+                if (isPresent(chainState.dispatchIntermediateRings)) drops.push('the dispatch intermediate setting');
+            }
+            return drops;
+        }
+
+        function chainJoinList(items) {
+            if (items.length < 2) return items.join('');
+            return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+        }
+
+        function hideChainModeConfirm() {
+            chainPendingMode = null;
+            document.getElementById('chain-mode-confirm').style.display = 'none';
+        }
+
+        function switchChainMode(mode) {
+            hideChainModeConfirm();
+            applyChainTransition(function(state) { return VIF.chainEditor.switchMode(state, mode); });
+        }
+
+        function requestChainMode(mode) {
+            if (!chainState) return;
+            hideChainModeConfirm();
+            if (mode === VIF.chainEditor.chainMode(chainState)) return;
+            syncChainFromCards();
+            const drops = chainModeDrops(mode);
+            if (!drops.length) {
+                switchChainMode(mode);
+                return;
+            }
+            chainPendingMode = mode;
+            document.getElementById('chain-mode-confirm-text').textContent =
+                'Switching to ' + CHAIN_MODE_LABELS[mode] + ' drops ' + chainJoinList(drops) + '.';
+            document.getElementById('chain-mode-confirm-yes').textContent = 'Switch to ' + CHAIN_MODE_LABELS[mode];
+            document.getElementById('chain-mode-confirm').style.display = '';
+            document.getElementById('chain-mode-confirm-no').focus();
+        }
+
+        function addChainPropertyRow(key, value, hasBase) {
+            const id = 'chain-property-' + (++chainPropertySeq) + '-';
+            const row = { base: value, hasBase: !!hasBase };
+            row.el = chainEl('div', 'chain-prop');
+            row.key = chainInput('text', id + 'key', 'key');
+            row.value = chainInput('text', id + 'value', 'value');
+            row.key.value = key || '';
+            row.baseText = row.hasBase ? (typeof value === 'string' ? value : JSON.stringify(value)) : '';
+            row.value.value = row.baseText;
+            row.remove = chainButton('Remove', 'btn-danger', 'Remove this property');
+            row.remove.addEventListener('click', function() {
+                chainPropertyRows.splice(chainPropertyRows.indexOf(row), 1);
+                row.el.remove();
+                refreshChainFromDom(true);
+                markDirty();
+            });
+            row.el.append(row.key, row.value, row.remove);
+            document.getElementById('chain-decision-properties').appendChild(row.el);
+            chainPropertyRows.push(row);
+            return row;
+        }
+
+        function fillChainLevel() {
+            const state = chainState || {};
+            const listener = state.decisionListener || {};
+            document.getElementById('chain-max-rings').value = chainPlainText(state.maxRings);
+            document.getElementById('chain-result-mode').value = state.resultMode || '';
+            document.getElementById('chain-decision-class').value = listener.className || '';
+            document.getElementById('chain-decision-timeout').value = chainPlainText(state.decisionTimeoutSeconds);
+            document.getElementById('chain-dispatch-intermediate').checked = state.dispatchIntermediateRings === true;
+            chainPropertyRows.forEach(function(row) { row.el.remove(); });
+            chainPropertyRows = [];
+            const properties = listener.properties || {};
+            Object.keys(properties).forEach(function(key) { addChainPropertyRow(key, properties[key], true); });
+        }
+
+        function chainConnector(at) {
+            const connector = chainEl('div', 'chain-connector');
+            const trailing = at === (chainState ? chainState.stages.length : 0);
+            const insert = trailing
+                ? chainButton('+ Add stage', 'chain-insert chain-insert-end', 'Add a stage at the end')
+                : chainButton('+', 'chain-insert', 'Insert a stage here');
+            insert.addEventListener('click', function() { insertChainStage(at); });
+            connector.appendChild(insert);
+            return connector;
+        }
+
+        function renderChain(options) {
+            options = options || {};
+            const list = document.getElementById('chain-stages');
+            const stages = chainState ? chainState.stages : [];
+            const live = {};
+            stages.forEach(function(stage) { live[stage.uid] = true; });
+            Object.keys(chainCards).forEach(function(uid) {
+                if (live[uid]) return;
+                chainCards[uid].el.remove();
+                chainCards[uid].gate.el.remove();
+                delete chainCards[uid];
+            });
+            Array.from(list.querySelectorAll(':scope > .chain-connector')).forEach(function(connector) { connector.remove(); });
+            const routed = VIF.chainEditor.chainMode(chainState || {}) === 'conditional';
+            stages.forEach(function(stage, index) {
+                const card = chainCards[stage.uid] || createChainCard(stage, !!options.stored, options.expandNew !== false);
+                list.appendChild(card.el);
+                if (routed) list.appendChild(card.gate.el);
+                else card.gate.el.remove();
+                list.appendChild(chainConnector(index + 1));
+            });
+            if (!stages.length) list.appendChild(chainConnector(0));
+            refreshChainView(true);
+        }
+
+        function chainStageSummary(stage) {
+            const detector = stage.detector || {};
+            const parts = [];
+            const classes = detector.classes || (detector.detect && detector.detect.classes)
+                || (detector.custom && detector.custom.classes);
+            if (classes && classes.length) parts.push(classes.join(', '));
+            if (detector.type === 'vlm' && detector.mode) parts.push(detector.mode);
+            const selection = stage.frameSelection;
+            if (selection && selection.mode && selection.mode !== 'all') {
+                parts.push(selection.mode === 'every_nth' && selection.stride
+                    ? 'one frame in ' + selection.stride
+                    : (FRAME_SELECTION_LABELS[selection.mode] || selection.mode).toLowerCase());
+            }
+            if (stage.crop) parts.push('crop');
+            return parts.join(' · ');
+        }
+
+        function chainOrdinal(n) {
+            const tens = n % 100;
+            if (tens >= 11 && tens <= 13) return n + 'th';
+            return n + ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+        }
+
+        function chainFrameSelectionText(mode, strideText) {
+            if (mode !== 'every_nth') return FRAME_SELECTION_LABELS[mode] || '';
+            const stride = Number(String(strideText).trim());
+            return Number.isInteger(stride) && stride > 0 ? 'Every ' + chainOrdinal(stride) : 'Every Nth';
+        }
+
+        function refreshChainCard(card, stage, index, errors, warnings, showStageErrors) {
+            const stages = chainState.stages;
+            const mode = VIF.chainEditor.chainMode(chainState);
+            const name = chainCardName(card);
+            card.badge.textContent = String(index + 1);
+            card.nameLabel.textContent = name || 'Unnamed stage';
+            card.typeTag.textContent = CHAIN_STAGE_LABELS[card.type] || card.type;
+            card.summary.textContent = chainStageSummary(stage);
+            card.upBtn.disabled = index === 0;
+            card.downBtn.disabled = index === stages.length - 1;
+            const renamed = !!card.stored && !!STAGE_SECRETS[card.stored.type] && name !== card.stored.name;
+            card.nameNote.textContent = renamed ? 'Renaming clears this stage’s stored API key.' : '';
+
+            const frameMode = card.frameMode.value;
+            card.frameBox.style.display = card.type !== 'synthetic' || frameMode !== 'all' ? '' : 'none';
+            card.strideGroup.style.display = frameMode === 'every_nth' ? 'flex' : 'none';
+            const frameText = chainFrameSelectionText(frameMode, card.strideInput.value);
+            card.frameValue.textContent = frameText ? ' · ' + frameText : '';
+            card.frameSyntheticNote.textContent = card.type === 'synthetic' ? CHAIN_SYNTHETIC_FRAMES_NOTE : '';
+
+            const cropOffered = VIF.chainEditor.offersCrop(chainState, index);
+            const own = 'stages[' + index + '].';
+            const cropErrors = errors.filter(function(error) {
+                return error.indexOf(own + 'crop') === 0
+                    || (card.cropOn && (error.indexOf(own + 'detector.tracking') === 0 || error.indexOf(own + 'detector.tiling') === 0));
+            });
+            card.cropBox.style.display = cropOffered || card.cropOn ? '' : 'none';
+            card.cropFields.style.display = card.cropOn ? '' : 'none';
+            card.cropAdd.style.display = !card.cropOn && cropOffered ? '' : 'none';
+            card.cropRemove.style.display = card.cropOn ? '' : 'none';
+            card.cropError.textContent = cropErrors.map(chainErrorText).join('\n');
+            if (cropErrors.length) card.cropBox.open = true;
+
+            const lock = card.type === 'object' && card.cropOn;
+            const tracking = field(card.root, 'cfg-tracking-method');
+            const tiling = field(card.root, 'cfg-tiling-enabled');
+            const blocker = card.type === 'object' ? VIF.chainEditor.trackingBlocker(chainState, index) : null;
+            if (blocker && !tracking.value) {
+                tracking.value = 'none';
+                toggleByteTrack(card.root);
+                stage.detector.tracking = { method: 'none' };
+            }
+            Array.from(tracking.options).forEach(function(option) {
+                if (option.value === 'byte-track') option.disabled = !!blocker;
+            });
+            tracking.disabled = lock && tracking.value === 'none';
+            tiling.disabled = lock && !tiling.checked;
+            card.trackingNote.textContent = lock ? CROP_WHY : (blocker ? chainTrackingWhy(blocker) : '');
+
+            Array.from(card.typeSelect.options).forEach(function(option) {
+                if (option.value !== 'synthetic') return;
+                const excluded = mode === 'dynamic' && card.type !== 'synthetic';
+                option.hidden = excluded;
+                option.disabled = excluded;
+            });
+
+            const routeOf = function(message) { return message.indexOf(own + 'routing') === 0; };
+            const routeErrors = mode !== 'conditional' ? [] : errors.filter(routeOf);
+            showChainWarnings(card.gate.warnings, warnings.filter(routeOf));
+            refreshGate(card, stage, index, routeErrors, showStageErrors);
+
+            if (!showStageErrors) return;
+            const stageErrors = errors.filter(function(error) {
+                return error.indexOf(own) === 0 && cropErrors.indexOf(error) === -1 && routeErrors.indexOf(error) === -1;
+            });
+            card.errors.textContent = stageErrors.map(chainErrorText).join('\n');
+            card.el.classList.toggle('has-error', stageErrors.length + cropErrors.length > 0);
+        }
+
+        function updateChainCadence() {
+            const line = document.getElementById('chain-cadence');
+            const types = chainStageTypes();
+            if (!types.length) { line.textContent = ''; return; }
+            const input = document.getElementById('cfg-duration');
+            const seconds = parseFloat((input.value || '').trim() || input.placeholder || '');
+            const windowText = (Number.isFinite(seconds) ? seconds : 2) + ' s';
+            const synthetic = types.indexOf('synthetic') !== -1;
+            let windowType = null;
+            for (let i = 0; i < types.length && !windowType; i++) {
+                if (types[i] === 'scene' || types[i] === 'vlm') windowType = types[i];
+            }
+            if (!synthetic && !windowType) {
+                line.textContent = 'Captures per-frame — only Object and Motion stages';
+                return;
+            }
+            let text = synthetic
+                ? 'Captures ' + windowText + ' clip windows — a Synthetic stage is present'
+                : 'Captures ' + windowText + ' windows — a ' + CHAIN_STAGE_LABELS[windowType] + ' stage is present';
+            if (types.indexOf('object') !== -1) text += '. ' + CHAIN_OBJECT_LATENCY_NOTE;
+            line.textContent = text;
+        }
+
+        function chainStatusChip(errors, warnings) {
+            if (errors.length) return { kind: 'error', text: '✗ ' + chainErrorText(errors[0]) };
+            if (warnings.length) {
+                return { kind: 'warn', text: '⚠ ' + warnings.length + (warnings.length === 1 ? ' warning' : ' warnings') };
+            }
+            return { kind: 'ok', text: '✓ Valid' };
+        }
+
+        function isChainLevelWarning(warning) {
+            return !/^stages\[\d+\]/.test(warning);
+        }
+
+        function refreshChainView(showStageErrors) {
+            if (!chainState) return;
+            const result = VIF.chainEditor.validateChain(chainState);
+            const errors = result.errors;
+            chainState.stages.forEach(function(stage, index) {
+                const card = chainCards[stage.uid];
+                if (card) refreshChainCard(card, stage, index, errors, result.warnings, showStageErrors);
+            });
+
+            const status = chainStatusChip(errors, result.warnings);
+            const chip = document.getElementById('chain-status');
+            chip.className = 'chain-status ' + status.kind;
+            chip.textContent = status.text;
+            document.getElementById('chain-vod-only').style.display = VIF.chainEditor.hasSyntheticStage(chainState) ? '' : 'none';
+            showChainWarnings(document.getElementById('chain-warnings'), result.warnings.filter(isChainLevelWarning));
+
+            const mode = VIF.chainEditor.chainMode(chainState);
+            document.querySelectorAll('#chain-mode > button').forEach(function(button) {
+                const active = button.dataset.mode === mode;
+                button.classList.toggle('is-active', active);
+                button.setAttribute('aria-pressed', String(active));
+                button.disabled = false;
+            });
+            VIF.chainEditor.MODES.forEach(function(each) {
+                const help = document.getElementById('chain-mode-help-' + each);
+                if (help) help.style.display = each === mode ? '' : 'none';
+            });
+            document.getElementById('chain-decision-panel').style.display = mode === 'dynamic' ? '' : 'none';
+            const end = document.getElementById('chain-end');
+            end.textContent = mode === 'dynamic' ? CHAIN_DYNAMIC_END : 'End of window';
+            end.classList.toggle('is-sentence', mode === 'dynamic');
+            if (showStageErrors) refreshChainLevelErrors(errors);
+
+            updateChainCadence();
+            document.getElementById('chain-json-body').textContent =
+                JSON.stringify(VIF.sdk.toWire(VIF.chainEditor.collectChainDetector(chainState)), null, 2);
+
+            if (document.getElementById('cfg-detector-type').value !== 'chain') return;
+            applyChainCaptureGroups();
+            updateSyntheticOverlayWarning();
+            suggestFromChainEntryStage();
+        }
+
+        function showChainWarnings(box, warnings) {
+            box.textContent = warnings.map(chainErrorText).join('\n');
+            box.style.display = warnings.length ? '' : 'none';
+        }
+
+        function refreshChainLevelErrors(errors) {
+            const text = function(prefixes) {
+                return errors.filter(function(error) {
+                    return prefixes.some(function(prefix) { return error.indexOf(prefix) === 0; });
+                }).map(chainErrorText).join('\n');
+            };
+            document.getElementById('chain-decision-errors').textContent = text(['decision_listener', 'decision_timeout_seconds']);
+            const advanced = text(['max_rings']);
+            document.getElementById('chain-advanced-errors').textContent = advanced;
+            if (advanced) document.getElementById('chain-advanced').open = true;
+        }
+
+        function refreshChainFromDom(showStageErrors) {
+            syncChainFromCards();
+            refreshChainView(showStageErrors);
+        }
+
+        function applyChainCaptureGroups() {
+            const duration = VIF.fieldRegistry.getField('cfg-duration');
+            FIELD_RULES[duration.id] = VIF.fieldRegistry.effectiveRule(duration, chainRuleDetectorType());
+            applyNumericRuleToInput(document.getElementById(duration.id), FIELD_RULES[duration.id]);
+            const stages = document.getElementById('chain-stages');
+            const focused = document.activeElement;
+            const anchor = stages && focused && stages.contains(focused) ? focused : stages;
+            const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+            const display = chainIsWindowed() ? 'flex' : 'none';
+            let toggled = false;
+            ['catch_up_to_live', 'catch_up_max_behind_seconds'].forEach(function(path) {
+                const group = document.getElementById(VIF.fieldRegistry.getFieldByPath(path).group);
+                if (!group || group.style.display === display) return;
+                group.style.display = display;
+                toggled = true;
+            });
+            if (!toggled || !anchor) return;
+            const shift = anchor.getBoundingClientRect().top - anchorTop;
+            if (shift !== 0) window.scrollBy(0, shift);
+        }
+
+        function suggestFromChainEntryStage() {
+            const entry = chainEntryType();
+            if (chainSuggestedEntryType === null) chainSuggestedEntryType = entry;
+            if (entry === chainSuggestedEntryType || !isNewStream()) return;
+            chainSuggestedEntryType = entry;
+            applyDetectorTypeInferenceFpsSuggestion('chain');
+            applyDetectorTypeTranscoderSuggestion('chain');
+            applyDetectorTypeDurationSuggestion('chain');
+            updateChainCadence();
+        }
+
+        function loadChain(detector) {
+            clearChain();
+            chainState = assignStageUids(VIF.chainEditor.withFreeFormRoutesAsOnDone(VIF.chainEditor.initChain(detector)));
+            const stored = !isNewStream();
+            chainStoredDetector = stored ? JSON.parse(JSON.stringify(detector)) : null;
+            fillChainLevel();
+            renderChain({ stored: stored, expandNew: false });
+        }
+
+        function ensureChain() {
+            if (chainState) return;
+            chainState = assignStageUids(VIF.chainEditor.newChain());
+            fillChainLevel();
+            renderChain({ expandNew: true });
+        }
+
+        function clearChain() {
+            Object.keys(chainCards).forEach(function(uid) {
+                chainCards[uid].el.remove();
+                chainCards[uid].gate.el.remove();
+            });
+            chainCards = {};
+            chainState = null;
+            chainStoredDetector = null;
+            hideChainModeConfirm();
+            fillChainLevel();
+            document.getElementById('chain-advanced').open = false;
+            ['chain-decision-errors', 'chain-advanced-errors'].forEach(function(id) {
+                document.getElementById(id).textContent = '';
+            });
+            document.getElementById('chain-decision-panel').style.display = 'none';
+            const end = document.getElementById('chain-end');
+            end.textContent = 'End of window';
+            end.classList.remove('is-sentence');
+            chainSuggestedEntryType = null;
+            document.getElementById('chain-stages').replaceChildren();
+            const chip = document.getElementById('chain-status');
+            chip.className = 'chain-status';
+            chip.textContent = '';
+            document.getElementById('chain-vod-only').style.display = 'none';
+            showChainWarnings(document.getElementById('chain-warnings'), []);
+            document.getElementById('chain-cadence').textContent = '';
+            document.getElementById('chain-json-body').textContent = '';
+        }
+
+        (function bindChainSection() {
+            const section = document.getElementById('chain-pipeline-section');
+            // A mode radio fires input before change; both are deferred to the capture
+            // listener below so a switch that needs confirming converts nothing first.
+            section.addEventListener('change', function(event) {
+                if (!chainState || !event.target.closest(CHAIN_EDITABLE)) return;
+                if (deferVlmModeSwitchConfirm(event.target)) event.stopPropagation();
+            }, true);
+            section.addEventListener('input', function(event) {
+                if (!chainState || !event.target.closest(CHAIN_EDITABLE)) return;
+                if (isVlmModeRadio(event.target)) return;
+                refreshChainFromDom(false);
+            });
+            section.addEventListener('change', function(event) {
+                if (!chainState || !event.target.closest(CHAIN_EDITABLE)) return;
+                if (event.target.dataset.chainRole === 'type') return;
+                refreshChainFromDom(true);
+            });
+            document.getElementById('chain-mode').addEventListener('click', function(event) {
+                const button = event.target.closest('button[data-mode]');
+                if (button) requestChainMode(button.dataset.mode);
+            });
+            document.getElementById('chain-mode-confirm-yes').addEventListener('click', function() {
+                if (chainPendingMode) switchChainMode(chainPendingMode);
+            });
+            document.getElementById('chain-mode-confirm-no').addEventListener('click', hideChainModeConfirm);
+            document.getElementById('chain-property-add').addEventListener('click', function() {
+                if (!chainState) return;
+                const row = addChainPropertyRow('', '', false);
+                refreshChainFromDom(true);
+                markDirty();
+                row.key.focus();
+            });
+            Object.keys(CHAIN_LEVEL_NUMBER_RULES).forEach(function(id) {
+                applyNumericRuleToInput(document.getElementById(id), CHAIN_LEVEL_NUMBER_RULES[id]);
+            });
+        })();
 
         function showDetectorHelp(prefix, detectorType, types) {
             types.forEach(function(t) {
@@ -2490,38 +5246,67 @@
             }
         }
 
+        function showSectionHelp(root, prefix, detectorType, types) {
+            types.forEach(function(t) {
+                const el = field(root, prefix + '-' + t);
+                if (el) el.style.display = (t === detectorType) ? 'inline' : 'none';
+            });
+        }
+
+        function toggleSections(root, detectorType) {
+            VIF.fieldRegistry.sections.forEach(function(section) {
+                const el = field(root, section.group);
+                if (el) el.style.display = section.detectors.indexOf(detectorType) !== -1 ? 'block' : 'none';
+            });
+            // Keep the VLM mode panels in sync with the selected mode whenever the
+            // section becomes visible.
+            if (detectorType === 'vlm') toggleVlmMode(root);
+            showSectionHelp(root, 'synthetic-title', detectorType, ['synthetic', 'verify']);
+            showSectionHelp(root, 'synthetic-help', detectorType, ['synthetic', 'verify']);
+            showSectionHelp(root, 'vlm-title', detectorType, ['vlm', 'verify']);
+            showSectionHelp(root, 'vlm-help', detectorType, ['vlm', 'verify']);
+            showSectionHelp(root, 'vlm-model-help', detectorType, ['vlm', 'verify']);
+            field(root, 'vlm-analysis-prompting').style.display = detectorType === 'verify' ? 'none' : '';
+            applyVlmModelChoicesForDetector(root, detectorType);
+            applyStagePlaceholdersForDetector(root, detectorType);
+            updateVerifyGateLine(root);
+            VIF.fieldRegistry.fields.forEach(function(entry) {
+                const groupEl = entry.group && field(root, entry.group);
+                if (groupEl) groupEl.style.display = entry.detectors.indexOf(detectorType) !== -1 ? 'flex' : 'none';
+            });
+        }
+
         function toggleDetectorSection() {
             const detectorTypeSelect = document.getElementById('cfg-detector-type');
             const detectorType = detectorTypeSelect.value;
             const useTranscoder = document.getElementById('cfg-use-transcoder').checked;
 
-            VIF.fieldRegistry.sections.forEach(function(section) {
-                const el = document.getElementById(section.group);
-                if (el) el.style.display = section.detectors.indexOf(detectorType) !== -1 ? 'block' : 'none';
-            });
-            // Keep the VLM mode panels in sync with the selected mode whenever the
-            // section becomes visible.
-            if (detectorType === 'vlm') toggleVlmMode();
+            if (detectorType === 'chain') ensureChain();
+            toggleSections(sectionsRoot, detectorType);
 
-            VIF.fieldRegistry.fields.forEach(function(field) {
-                if (field.group) {
-                    let visible = field.detectors.indexOf(detectorType) !== -1;
+            VIF.fieldRegistry.fields.forEach(function(entry) {
+                if (entry.group && !field(sectionsRoot, entry.group)) {
+                    let visible = entry.detectors.indexOf(detectorType) !== -1;
                     // cfg-inference-fps-group / cfg-frame-grab-group also gate on Use
                     // Transcoder (synthetic taps the source H.264 directly - no transcode, no
                     // JPEG sampling or keyframe thumbnailing - so neither control applies
                     // there regardless of the checkbox, which `detectors` above already
-                    // excludes synthetic from).
-                    if (field.transcoderGate === 'on') visible = visible && useTranscoder;
-                    if (field.transcoderGate === 'off') visible = visible && !useTranscoder;
-                    const groupEl = document.getElementById(field.group);
+                    // excludes synthetic from). A type that never runs live has no frame source
+                    // to choose, so the gate does not speak for it either.
+                    if (VIF.fieldRegistry.runsLive(detectorType)) {
+                        if (entry.transcoderGate === 'on') visible = visible && useTranscoder;
+                        if (entry.transcoderGate === 'off') visible = visible && !useTranscoder;
+                    }
+                    const groupEl = document.getElementById(entry.group);
                     if (groupEl) groupEl.style.display = visible ? 'flex' : 'none';
                 }
-                if (field.rule && field.rule.byDetector) {
-                    FIELD_RULES[field.id] = VIF.fieldRegistry.effectiveRule(field, detectorType);
-                    applyNumericRuleToInput(document.getElementById(field.id), FIELD_RULES[field.id]);
+                if (entry.rule && entry.rule.byDetector) {
+                    FIELD_RULES[entry.id] = VIF.fieldRegistry.effectiveRule(entry,
+                        detectorType === 'chain' ? chainRuleDetectorType() : detectorType);
+                    applyNumericRuleToInput(document.getElementById(entry.id), FIELD_RULES[entry.id]);
                 }
-                if (field.help) {
-                    showDetectorHelp(field.help.prefix, detectorType, field.help.detectors);
+                if (entry.help) {
+                    showDetectorHelp(entry.help.prefix, detectorType, entry.help.detectors);
                 }
             });
 
@@ -2530,12 +5315,16 @@
                 updateEventMethodOptions(current.class_name, current.methods);
                 updatePropertiesVisibility();
             }
+            if (detectorType === 'chain') applyChainCaptureGroups();
             updateSyntheticOverlayWarning();
             updateVlmImagesMeter();
             detectorTypeSelect.dataset.previousValue = detectorType;
         }
 
         document.getElementById('cfg-duration').addEventListener('input', updateVlmImagesMeter);
+        document.getElementById('cfg-duration').addEventListener('input', function() {
+            if (chainState) updateChainCadence();
+        });
         document.getElementById('cfg-inference-fps').addEventListener('input', updateVlmImagesMeter);
 
         document.getElementById('cfg-vi-service-api-key').addEventListener('input', function() {
@@ -2543,39 +5332,10 @@
         });
         syncApiKeyToggleState('cfg-vi-service-api-key', 'cfg-vi-service-api-key-toggle');
 
-        document.getElementById('cfg-synthetic-api-key').addEventListener('input', function() {
-            syncApiKeyToggleState('cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
-        });
-        syncApiKeyToggleState('cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
-
-        document.getElementById('cfg-synthetic-endpoint').addEventListener('input', updateSyntheticEndpointFields);
-        updateSyntheticEndpointFields();
-
-        document.getElementById('cfg-vlm-api-key').addEventListener('input', function() {
-            syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
-        });
-        syncApiKeyToggleState('cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
-
-        // A stale probe result no longer describes an edited endpoint, model, or API
-        // key — clear it (which also invalidates any in-flight probe).
-        document.getElementById('cfg-vlm-endpoint-url').addEventListener('input', clearVlmEndpointTestResult);
-        document.getElementById('cfg-vlm-model-name').addEventListener('change', clearVlmEndpointTestResult);
-        document.getElementById('cfg-vlm-model-name-other').addEventListener('input', clearVlmEndpointTestResult);
-        document.getElementById('cfg-vlm-api-key').addEventListener('input', clearVlmEndpointTestResult);
-
-        // Populate the model dropdown from VLM_MODEL_OPTIONS, ahead of the fixed "Other…"
-        // option (guarded in case the script re-evaluates over an already-populated DOM).
-        (function() {
-            const select = document.getElementById('cfg-vlm-model-name');
-            if (select.querySelector('option[value="' + VLM_MODEL_OPTIONS[0].value + '"]')) return;
-            const otherOption = select.querySelector('option[value="' + VLM_MODEL_OTHER + '"]');
-            VLM_MODEL_OPTIONS.forEach(function(o) {
-                const option = document.createElement('option');
-                option.value = o.value;
-                option.textContent = o.label;
-                select.insertBefore(option, otherOption);
-            });
-        })();
+        syncSectionApiKeyToggle(sectionsRoot, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+        updateSyntheticEndpointFields(sectionsRoot);
+        syncSectionApiKeyToggle(sectionsRoot, 'cfg-vlm-api-key', 'cfg-vlm-api-key-toggle');
+        window.testSvdEndpoint = onStandaloneSections(testSvdEndpoint);
 
         document.getElementById('cfg-detector-type').addEventListener('change', async function() {
             syncListenerFields();
@@ -2610,6 +5370,10 @@
 
             applyDetectorTypeInferenceFpsSuggestion(nextDetectorType);
             applyDetectorTypeTranscoderSuggestion(nextDetectorType);
+            applyDetectorTypeDurationSuggestion(nextDetectorType);
+            applyDetectorTypeApplicationSuggestion(nextDetectorType);
+            applyDetectorTypeStreamNameSuggestion(nextDetectorType);
+            applyDetectorTypeStageFieldSuggestions(nextDetectorType);
             toggleDetectorSection();
             markDirty();
         });
@@ -2665,6 +5429,15 @@
             }, 240);
         }
 
+        // hideStatus keeps the old text for the 240ms fade - right for a
+        // dismissal, wrong after a successful save, where a stale validation
+        // error must not outlive the success toast even for a blink.
+        function clearStatusNow() {
+            hideStatus();
+            const el = document.getElementById('status-message');
+            if (el) { el.className = ''; el.textContent = ''; }
+        }
+
         async function getConfig() {
             const resource = getSelectedResource();
             if (!resource) return;
@@ -2682,6 +5455,18 @@
                 suppressDirtyTracking = false;
                 updateIncomingStreamPanelState();
             }
+        }
+
+        function toastChainWarnings(detector) {
+            const warnings = VIF.chainEditor.validateChain(VIF.chainEditor.initChain(detector)).warnings;
+            if (warnings.length) VIF.core.toast('Saved with warnings: ' + warnings.map(chainErrorText).join(' '), 'warn');
+        }
+
+        function clearNvcfFieldsOffNvcf(root) {
+            if (syntheticEndpointIsNvcf(root)) return;
+            field(root, 'cfg-synthetic-api-key').value = '';
+            syncSectionApiKeyToggle(root, 'cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
+            field(root, 'cfg-synthetic-function-id').value = '';
         }
 
         async function saveConfig() {
@@ -2705,6 +5490,7 @@
                 setSavingState(true);
                 const persist = VIF.core.client().persist;
                 const secrets = collectSecrets(config);
+                let savedDocument = null;
                 if (isNew) {
                     await persist.streamGroupConfigs.create(VIF.v2map.groupFromFlat(config, { secrets: secrets }));
                 } else {
@@ -2715,7 +5501,7 @@
                         { previousListeners: previousListeners, secrets: secrets });
                     // The re-read inside the attempt is what carries a fresh revision, so
                     // a lost race retries once.
-                    await VIF.core.withConflictRetry(async function() {
+                    savedDocument = await VIF.core.withConflictRetry(async function() {
                         if (resource.kind === 'override') {
                             const override = persist.streams.ref(resource.app, resource.stream);
                             await override.get();
@@ -2726,17 +5512,30 @@
                     });
                 }
 
-                showStatus(isNew ? 'Stream config created successfully' : 'Config saved successfully', false);
+                // Success rides the shared toast; a sticky validation banner from
+                // before the save still needs the explicit clear.
+                clearStatusNow();
+                VIF.core.toast(isNew ? 'Stream config created successfully' : 'Config saved successfully');
+                if (config.detector_type === 'chain') toastChainWarnings(config.chain_detector);
                 lockListenerTypesAfterSave();
                 markClean(true);
+                if (!isNew && config.detector_type === 'chain') rebaseChainStored();
+                // Verify probes by reference against what is stored, so the snapshot follows the
+                // save — from the document the write answered, and only while it is still shown.
+                if (!isNew && savedDocument && getSelectedResource() === resource) {
+                    rememberStoredSections(resource.kind === 'override'
+                        ? VIF.v2map.flatFromOverride(resource.app, resource.stream, savedDocument)
+                        : VIF.v2map.flatFromGroup(savedDocument));
+                }
 
                 // A committed save with a non-NVCF endpoint dropped the NVCF credentials from
                 // the config (nulled + unset in buildConfigJson); clear them from the form too
                 // so the secrets don't linger hidden in the DOM.
-                if (document.getElementById('cfg-detector-type').value === 'synthetic' && !syntheticEndpointIsNvcf()) {
-                    document.getElementById('cfg-synthetic-api-key').value = '';
-                    syncApiKeyToggleState('cfg-synthetic-api-key', 'cfg-synthetic-api-key-toggle');
-                    document.getElementById('cfg-synthetic-function-id').value = '';
+                if (document.getElementById('cfg-detector-type').value === 'synthetic') clearNvcfFieldsOffNvcf(sectionsRoot);
+                if (config.detector_type === 'chain') {
+                    Object.keys(chainCards).forEach(function(uid) {
+                        if (chainCards[uid].type === 'synthetic') clearNvcfFieldsOffNvcf(chainCards[uid].root);
+                    });
                 }
 
                 if (isNew) {
@@ -2782,7 +5581,8 @@
                     return persist.streamGroupConfigs.delete(resource.name);
                 });
 
-                showStatus('Stream config deleted successfully', false);
+                clearStatusNow();
+                VIF.core.toast('Stream config deleted successfully');
                 markClean(false);
                 await loadStreams();
 
@@ -2830,38 +5630,48 @@
         }
 
         window.onStreamSelected = onStreamSelected;
+        window.updateVerifyGateLine = onStandaloneSections(updateVerifyGateLine);
         window.updateMatchOverlapNote = updateMatchOverlapNote;
         window.saveConfig = saveConfig;
         window.cloneConfig = cloneConfig;
         window.deleteConfig = deleteConfig;
         window.togglePanel = togglePanel;
-        window.toggleCheckpointPath = toggleCheckpointPath;
-        window.updateClassNamesOptions = updateClassNamesOptions;
-        window.toggleByteTrack = toggleByteTrack;
-        window.toggleTiling = toggleTiling;
-        window.toggleTilingMode = toggleTilingMode;
-        window.toggleFullFrameDetection = toggleFullFrameDetection;
-        window.toggleVlmMode = toggleVlmMode;
-        window.addVlmClassRow = addVlmClassRow;
-        window.addClassRow = addClassRow;
-        window.updateVlmCustomLint = updateVlmCustomLint;
-        window.toggleVlmAdvanced = toggleVlmAdvanced;
-        window.toggleSyntheticTlsCerts = toggleSyntheticTlsCerts;
+        window.toggleCheckpointPath = onStandaloneSections(toggleCheckpointPath);
+        window.updateClassNamesOptions = onStandaloneSections(updateClassNamesOptions);
+        window.toggleByteTrack = onStandaloneSections(toggleByteTrack);
+        window.toggleTiling = onStandaloneSections(toggleTiling);
+        window.toggleTilingMode = onStandaloneSections(toggleTilingMode);
+        window.toggleFullFrameDetection = onStandaloneSections(toggleFullFrameDetection);
+        window.toggleVlmMode = onStandaloneSections(toggleVlmMode);
+        window.addVlmClassRow = onStandaloneSections(addVlmClassRow);
+        window.addClassRow = onStandaloneSections(addClassRow);
+        window.updateVlmCustomLint = onStandaloneSections(updateVlmCustomLint);
+        window.toggleVlmAdvanced = onStandaloneSections(toggleVlmAdvanced);
+        window.toggleSyntheticTlsCerts = onStandaloneSections(toggleSyntheticTlsCerts);
         window.toggleVisServiceApiKeyVisibility = toggleVisServiceApiKeyVisibility;
         window.clearVisServiceApiKey = clearVisServiceApiKey;
-        window.toggleSyntheticApiKeyVisibility = toggleSyntheticApiKeyVisibility;
-        window.toggleVlmApiKeyVisibility = toggleVlmApiKeyVisibility;
-        window.toggleVlmModelNameOther = toggleVlmModelNameOther;
-        window.testVlmEndpoint = testVlmEndpoint;
+        window.toggleSyntheticApiKeyVisibility = onStandaloneSections(toggleSyntheticApiKeyVisibility);
+        window.toggleVlmApiKeyVisibility = onStandaloneSections(toggleVlmApiKeyVisibility);
+        // The in-template slots go through SECTION_HANDLERS; these page-scoped wrappers
+        // serve the one slot outside the sections, the VIS service key.
+        window.secretSourceChanged = function(base) { secretSourceChanged(null, base); };
+        window.promptStoreSecret = function(base) { promptStoreSecret(null, base); };
+        window.cancelStoreSecret = function(base) { cancelStoreSecret(null, base); };
+        window.confirmStoreSecret = function(base) { confirmStoreSecret(null, base); };
+        window.toggleVlmModelNameOther = onStandaloneSections(toggleVlmModelNameOther);
+        window.testVlmEndpoint = onStandaloneSections(testVlmEndpoint);
 
         // (c) cross-file: exposed because vif-listeners.js's applyTextRuleToInput()/
-        //     renderScalarField() and the vlm-*.js modules (markDirty from both
-        //     vlm-schema-builder.js and vlm-prompt-guide.js; updateVlmCustomLint from
-        //     vlm-prompt-guide.js's useTemplate(), guarded there with `typeof`) call
-        //     these directly. (updateVlmCustomLint is also markup-exposed above.)
+        //     renderScalarField() and vlm-schema-builder.js (markDirty) call these
+        //     directly. (updateVlmCustomLint is also markup-exposed above.)
+        //     getSelectedResource is how vif-listeners.js's webhook test button names the
+        //     listener it fires - by the app and stream the selected document is keyed by,
+        //     which is the only place that pairing is known. It guards with `typeof`,
+        //     since the listener panel is a subsystem and this page is one of its hosts.
         window.markDirty = markDirty;
         window.isValidCssColor = isValidCssColor;
         window.applyNumericRuleToInput = applyNumericRuleToInput;
+        window.getSelectedResource = getSelectedResource;
 
         // Spec-facing API (plan P2-T3 sub-step 4): the qa_automation baseline
         // specs and baselines.cjs prepare scripts call these four via
@@ -2872,6 +5682,7 @@
         VIF.streamConfig.buildConfigJson = buildConfigJson;
         VIF.streamConfig.collectValidationErrors = collectValidationErrors;
         VIF.streamConfig.populateForm = populateForm;
+        VIF.streamConfig.chainStageTypes = chainStageTypes;
 
         // vif-listeners.js's own init() sets up the listener-subsystem state
         // (eventListenersData/activeListenerName) and DOM bindings (evt-class-name,
@@ -2882,16 +5693,17 @@
         // Initialize
         console.log(`VIF ${new Date().toISOString().slice(0, 10)}`);
 
-        var tilingEnableGroupEl = document.getElementById('tiling-enable-group');
+        var tilingEnableGroupEl = field(sectionsRoot, 'tiling-enable-group');
         var tilingUiEnabled = new URLSearchParams(window.location.search).get('tiling') === 'true';
         if (tilingUiEnabled) tilingEnableGroupEl.style.display = '';
 
-        initializeStaticFieldRules();
+        initializeStaticFieldRules(sectionsRoot);
         initializeStaticFieldTooltips();
-        watchSecretInputs();
-        toggleByteTrack();
-        toggleCheckpointPath();
-        toggleTiling();
+        watchSecretInputs(sectionsRoot, function() { return touchedSecrets; });
+        loadSecretNames();
+        toggleByteTrack(sectionsRoot);
+        toggleCheckpointPath(sectionsRoot);
+        toggleTiling(sectionsRoot);
         toggleDetectorSection();
         updateListenerTip('', '');
         markClean();

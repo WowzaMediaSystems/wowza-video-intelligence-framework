@@ -41,35 +41,13 @@ VIF.vod = VIF.vod || {};
 		setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 	}
 
-	/** POST the raw bytes; the target name rides the query string. XHR rather than the SDK's
-	    own upload because this one has to be abortable — the xhr rides the promise as .xhr,
-	    and progress arrives as a 0..1 fraction. */
+	/** POST the raw bytes; the target name rides the query string. The promise carries
+	    abort(), and progress arrives as a 0..1 fraction. */
 	function upload(relPath, file, onProgress) {
-		const xhr = new XMLHttpRequest();
-		const promise = new Promise((resolve, reject) => {
-			xhr.open('POST', vif().raw.vodFileUploadUrl(relPath));
-			xhr.setRequestHeader('Authorization', 'Basic ' + VIF.core.resolveServer().encodedCredentials);
-			xhr.setRequestHeader('Content-Type', 'video/mp4');
-			if (onProgress) xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
-			xhr.onload = () => {
-				const type = xhr.getResponseHeader('Content-Type') || '';
-				let body = null;
-				if (/[\/+]json\b/.test(type)) {
-					try { body = JSON.parse(xhr.responseText); } catch (e) { /* malformed refusal body */ }
-				} else if (xhr.responseText) {
-					body = { message: xhr.responseText };
-				}
-				if (xhr.status >= 200 && xhr.status < 300) resolve(body);
-				else reject(VIF.sdk.errorFor(xhr.status, body, type, xhr.statusText));
-			};
-			xhr.onerror = () => reject(new VIF.sdk.VifError(
-				'The upload could not reach the Engine — connection lost or refused.', 0, null));
-			xhr.onabort = () => reject(Object.assign(
-				new VIF.sdk.VifError('Upload cancelled.', 0, null), { cancelled: true }));
-			xhr.send(file);
+		return vif().vod.files.upload(relPath, file, {
+			contentType: 'video/mp4',
+			onProgress: (loaded, total) => { if (onProgress && total) onProgress(loaded / total); },
 		});
-		promise.xhr = xhr;
-		return promise;
 	}
 
 	function blank(value) {
@@ -106,6 +84,9 @@ VIF.vod = VIF.vod || {};
 			fromMs: blank(p && p.from_ms), toMs: blank(p && p.to_ms),
 		}),
 
+		/** The assembled verification report of a verify job; 404 until rows are stored. */
+		verifyReport: (id) => vif().vod.jobs.verifyReport(id),
+
 		/** Streams the stored NDJSON into a browser download. */
 		downloadJsonl: async (id) => download(await vif().vod.jobs.resultsFile(id), id + '.jsonl'),
 
@@ -127,6 +108,9 @@ VIF.vod = VIF.vod || {};
 
 		secretNames: async () => (store.secretNames = (await vif().persist.secrets().get()).names),
 
+		/** One test status event to the lifecycle webhook; {} tests the saved settings. */
+		probeLifecycleWebhook: async (request) => vif().probes.lifecycleWebhook(request),
+
 		streamGroups: async () => (store.groups = await vif().persist.streamGroupConfigs.list()),
 
 		defaultConfig: async () => (store.defaults = await vif().persist.streamGroupConfigs.default().get()),
@@ -135,7 +119,8 @@ VIF.vod = VIF.vod || {};
 
 		/** Server-side probe of an OpenAI-compatible endpoint — the browser cannot reach
 		    compose-internal hostnames. */
-		vlmTest: (url, apiKey) => vif().probes.vlmEndpoint({ url: url, apiKey: blank(apiKey) }),
+		vlmTest: (url, apiKey, apiKeySecret) => vif().probes.vlmEndpoint(
+			{ url: url, apiKey: blank(apiKey), apiKeySecret: blank(apiKeySecret) }),
 	};
 
 	V.api = api;
