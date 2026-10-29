@@ -195,8 +195,9 @@ Sometimes the whole-picture change is the event you want:
 
 For these, set `suppress_global_changes` to `false`. In the Manager UI it is
 the **Global Changes** field of the **Motion Analysis** section, with the
-choices **Suppress** (the default) and **Report**; left blank, a stream
-inherits the value of the default configuration. On the v2 API it is
+choices **Suppress** and **Report**; the preselected choice names the value an
+unset stream follows — **Default (Suppress)**, or **Default (Report)** when
+your default configuration reports. On the v2 API it is
 `"detector": {"type": "motion", "suppress_global_changes": false}`, and in the
 stream configuration JSON `motion_analysis.suppress_global_changes`.
 
