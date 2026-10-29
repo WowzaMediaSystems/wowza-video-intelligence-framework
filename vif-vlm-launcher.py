@@ -264,6 +264,7 @@ THE STATE VOLUME, shared with VIS and every other engine:
                                   refused before it started
   <state dir>/phase/<key>         where a load in progress is (written here)
   <state dir>/sized/<key>         how the last load was sized (written here)
+  <state dir>/measured/<key>      what that load held         (written here)
   <state dir>/logs/<key>.log      this engine's output        (written here)
 
 The awake marker is created after a load that is not followed by a sleep and
@@ -335,6 +336,32 @@ card: ...") and written to `sized/<key>` as JSON: the digests of the spec it
 sized, `measured`, `approved`, the `utilization` vLLM was started with, the
 card's numbers and the `reason`.
 
+The headroom and extra are the catalog's until VIS has measured this engine
+on this card, and a first-load margin (`first_load_margin_mib`) comes off what
+is left for the pool too -- never below `weights_mib`, so it makes a load
+smaller and never refuses one. Then `load_sizing.calibrated` carries
+the measured ones and the fingerprint they were measured under: a digest of
+the spec's launch (its args less the utilization and the address, its env,
+sleep mode and tensor-parallel size), the vLLM and launcher revisions, and the
+card's name and NVML total. This script computes its own fingerprint and sizes
+with the calibrated numbers only when the two are the same.
+
+EVERY SIZED LOAD IS MEASURED, and written to `measured/<key>` as JSON, which
+is what VIS calibrates from. Under the load lock nothing else loads, so what
+the card lost since the reading the load was sized from is what this engine
+holds: sampled every 0.25 s until /health answers (the load's peak, its
+warm-up included), and once more then (its steady footprint). A neighbour that
+changes state meanwhile (its spec, its ready/ or awake/ marker) makes that
+reading another engine's too, and the load is not reported. While it serves,
+the engine's own processes are read from NVML every 5 s -- its child's
+descendants, else the processes that appeared on the card during its load --
+and their growth since the load is added to the steady footprint; that is
+where an engine's runtime growth shows without the card's other tenants. When
+NVML does not attribute processes (some container setups), what the card gets
+back when an awake engine is stopped stands in, under the same neighbour
+check. Every number is reported over the pool vLLM was started with
+(`*_over_mib`), the terms of `extra_mib`.
+
 AN EMPTY VALUE COUNTS AS UNSET, for every variable above, as it did for the
 bash entrypoint's ${VAR:-default}. A value that does not parse (VLM_PORT=abc)
 is a configuration error, exit 78, naming the variable.
@@ -347,6 +374,7 @@ else is vLLM's own.
 
 import fcntl
 import hashlib
+import importlib.metadata
 import json
 import math
 import os
@@ -368,7 +396,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-26.1"
+LAUNCHER_REVISION: str = "2026-10-29.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -396,6 +424,7 @@ ENGINE_LOADING_DIRNAME: str = "loading"
 ENGINE_CRASHED_DIRNAME: str = "crashed"
 ENGINE_PHASE_DIRNAME: str = "phase"
 ENGINE_SIZED_DIRNAME: str = "sized"
+ENGINE_MEASURED_DIRNAME: str = "measured"
 ENGINE_SLOTS_DIRNAME: str = "slots"
 SLOT_ASSIGNMENT_SUFFIX: str = ".assignment.json"
 ACTIVE_MODEL_FILENAME: str = "active-model"
@@ -525,6 +554,15 @@ def warn(message: str) -> None:
 
 
 @dataclass(frozen=True)
+class CalibratedSizing:
+    """What VIS measured this engine holding, and under which fingerprint."""
+
+    fingerprint: str
+    headroom_mib: int
+    extra_mib: int
+
+
+@dataclass(frozen=True)
 class LoadSizing:
     """The spec's `load_sizing`: VIS's inputs for sizing a load from the card."""
 
@@ -532,6 +570,9 @@ class LoadSizing:
     headroom_mib: int
     extra_mib: int
     weights_mib: int
+    # What also comes off a load VIS has not measured yet, down to the weights.
+    first_load_margin_mib: int = 0
+    calibrated: CalibratedSizing | None = None
 
 
 @dataclass(frozen=True)
@@ -571,6 +612,10 @@ class LaunchPlan:
     # runs `args` as they are. Spec path only.
     sized_dir: str = ""
     load_sizing: LoadSizing | None = None
+    # Where each sized load's measurement is reported, and the digest of the
+    # launch it measures (see `launch_digest`). Spec path only.
+    measured_dir: str = ""
+    launch_digest: str = ""
     # Taken out of the deployment by the catalog overlay: parked for good.
     disabled: bool = False
     # Sized by VIS to load beside the engines serving on its card: the load
@@ -632,6 +677,13 @@ class LaunchPlan:
         if not self.sized_dir:
             return ""
         return str(Path(self.sized_dir) / engine_key(self.model))
+
+    @property
+    def measured_file(self) -> str:
+        """This engine's memory report, or "" when there is nowhere."""
+        if not self.measured_dir:
+            return ""
+        return str(Path(self.measured_dir) / engine_key(self.model))
 
     @property
     def watches(self) -> bool:
@@ -1005,6 +1057,11 @@ class SizedLoad:
     usable_mib: int
     predicted_peak_mib: int
     reason: str
+    # The headroom and extra it was sized with: the calibrated ones or the spec's.
+    headroom_mib: int = 0
+    extra_mib: int = 0
+    calibrated: bool = False
+    first_load_margin_mib: int = 0
 
 
 def load_sizing_from_spec(document: dict[str, Any]) -> LoadSizing | None:
@@ -1013,13 +1070,24 @@ def load_sizing_from_spec(document: dict[str, Any]) -> LoadSizing | None:
     if raw is None:
         return None
     try:
+        measured: Any = raw.get("calibrated")
         sizing: LoadSizing = LoadSizing(
             max_utilization=float(raw["max_utilization"]),
             headroom_mib=int(raw["headroom_mib"]),
             extra_mib=int(raw["extra_mib"]),
             weights_mib=int(raw["weights_mib"]),
+            first_load_margin_mib=int(raw.get("first_load_margin_mib") or 0),
+            calibrated=(
+                None
+                if measured is None
+                else CalibratedSizing(
+                    fingerprint=str(measured["fingerprint"]),
+                    headroom_mib=int(measured["headroom_mib"]),
+                    extra_mib=int(measured["extra_mib"]),
+                )
+            ),
         )
-    except (TypeError, KeyError, ValueError):
+    except (AttributeError, TypeError, KeyError, ValueError):
         raise ConfigError(f"engine spec load_sizing={raw!r} is not usable.") from None
     if not 0.0 < sizing.max_utilization <= 1.0:
         raise ConfigError(
@@ -1029,14 +1097,65 @@ def load_sizing_from_spec(document: dict[str, Any]) -> LoadSizing | None:
     return sizing
 
 
-def size_load(model: str, sizing: LoadSizing, card: CardMemory) -> SizedLoad:
+def least_pool_mib(weights_mib: int, total_mib: int) -> int:
+    """The smallest pool at a two-decimal utilization that holds `weights_mib`."""
+    scale: int = 10**_UTILIZATION_DECIMALS
+    steps: int = -(-weights_mib * scale // total_mib)
+    return -(-steps * total_mib // scale)
+
+
+def _margin_words(room: int, usable: int, margin: int) -> str:
+    """How much of the first-load margin came off `room`, and what is left."""
+    if not margin or usable == room:
+        return ""
+    if room - usable == margin:
+        return f", less a {margin} MiB first-load margin = {usable} MiB"
+    return (
+        f", less {room - usable} MiB of a {margin} MiB first-load margin, as "
+        f"far as its pool can shrink = {usable} MiB"
+    )
+
+
+def size_load(
+    model: str, sizing: LoadSizing, card: CardMemory, fingerprint: str = ""
+) -> SizedLoad:
     """
     `(free - headroom - extra) / total`, floored to two decimals and capped.
 
-    A copy of the Video Intelligence Service's own, reason string included:
-    VIS decides the formula, and its tests pin this one to it.
+    The headroom and extra are the spec's calibrated ones when `fingerprint`
+    (this load's) is the one they were measured under; otherwise the
+    first-load margin comes off what is left too, never below the weights. A
+    copy of the Video Intelligence Service's own, reason string included: VIS
+    decides the formula, and its tests pin this one to it.
     """
-    usable: int = card.free_mib - sizing.headroom_mib - sizing.extra_mib
+    measured: CalibratedSizing | None = sizing.calibrated
+    calibrated: bool = (
+        measured is not None
+        and bool(fingerprint)
+        and measured.fingerprint == fingerprint
+    )
+    headroom: int = sizing.headroom_mib
+    extra: int = sizing.extra_mib
+    margin: int = sizing.first_load_margin_mib
+    terms: str = (
+        f"{headroom} MiB cold-load headroom - {extra} MiB the engine holds "
+        "outside its pool"
+    )
+    if calibrated and measured is not None:
+        headroom = measured.headroom_mib
+        extra = measured.extra_mib
+        margin = 0
+        terms = (
+            f"{headroom} MiB load headroom - {extra} MiB the engine holds "
+            "outside its pool, both as measured on this card"
+        )
+    room: int = card.free_mib - headroom - extra
+    approved: bool = room >= sizing.weights_mib
+    usable: int = room
+    if approved:
+        usable = max(
+            room - margin, min(room, least_pool_mib(sizing.weights_mib, card.total_mib))
+        )
     factor: int = 10**_UTILIZATION_DECIMALS
     utilization: float = min(
         math.floor(max(usable, 0) / card.total_mib * factor) / factor,
@@ -1044,13 +1163,11 @@ def size_load(model: str, sizing: LoadSizing, card: CardMemory) -> SizedLoad:
     )
     # vLLM's own rounding of its request.
     pool: int = math.ceil(utilization * card.total_mib)
-    predicted: int = pool + sizing.extra_mib + sizing.headroom_mib
+    predicted: int = pool + extra + headroom
     arithmetic: str = (
-        f"{card.free_mib} MiB free as CUDA reports it - "
-        f"{sizing.headroom_mib} MiB cold-load headroom - {sizing.extra_mib} MiB "
-        f"the engine holds outside its pool = {usable} MiB for its pool"
+        f"{card.free_mib} MiB free as CUDA reports it - {terms} = {room} MiB"
+        f"{_margin_words(room, usable, margin)} for its pool"
     )
-    approved: bool = usable >= sizing.weights_mib
     reason: str
     if not approved:
         reason = (
@@ -1074,6 +1191,10 @@ def size_load(model: str, sizing: LoadSizing, card: CardMemory) -> SizedLoad:
         usable_mib=usable,
         predicted_peak_mib=predicted,
         reason=reason,
+        headroom_mib=headroom,
+        extra_mib=extra,
+        calibrated=calibrated,
+        first_load_margin_mib=margin,
     )
 
 
@@ -1142,6 +1263,285 @@ def with_utilization(args: list[str], utilization: float) -> list[str]:
     if not any(arg.startswith(UTILIZATION_FLAG) for arg in args):
         return [*args, flag]
     return [flag if arg.startswith(UTILIZATION_FLAG) else arg for arg in args]
+
+
+# ── memory: what a sized load really holds on the card ─────────────────────
+
+# Fast enough to catch a warm-up spike of a few seconds.
+MEMORY_LOAD_SAMPLE_SECONDS: float = 0.25
+MEMORY_SERVING_SAMPLE_SECONDS: float = 5.0
+# A serving engine's report is rewritten once it has grown by this much.
+MEMORY_REPORT_STEP_MIB: int = 64
+# Flags that move no memory, left out of a launch's digest. VIS's own list.
+LAUNCH_DIGEST_IGNORED_FLAGS: tuple[str, ...] = (
+    "--gpu-memory-utilization=",
+    "--port=",
+    "--host=",
+)
+
+
+def launch_digest(
+    model: str,
+    args: list[str],
+    env: dict[str, str],
+    sleep_mode: bool,
+    tensor_parallel_size: int,
+) -> str:
+    """What a load's memory depends on in its spec. VIS's copy is pinned to this."""
+    document: dict[str, Any] = {
+        "model": model,
+        "args": [
+            arg for arg in args if not arg.startswith(LAUNCH_DIGEST_IGNORED_FLAGS)
+        ],
+        "env": env,
+        "sleep_mode": sleep_mode,
+        "tensor_parallel_size": tensor_parallel_size,
+    }
+    return hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def memory_fingerprint(
+    launch: str, vllm: str, revision: str, gpu_name: str, gpu_total_mib: int
+) -> str:
+    """What a measurement holds for: the launch, the software and the card."""
+    document: dict[str, Any] = {
+        "launch_digest": launch,
+        "vllm_version": vllm,
+        "launcher_revision": revision,
+        "gpu_name": gpu_name,
+        "gpu_total_mib": gpu_total_mib,
+    }
+    return hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def installed_vllm_version() -> str:
+    """The vLLM this image runs, or "" when it is not installed here."""
+    try:
+        return importlib.metadata.version("vllm")
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
+@dataclass(frozen=True)
+class CardIdentity:
+    """The card a measurement holds for: its name and NVML's total."""
+
+    name: str
+    total_mib: int
+
+
+def read_card_identity(gpu_ids: str) -> CardIdentity | None:
+    """The engine's (first) card, or None when NVML cannot say."""
+    try:
+        import pynvml
+    except ImportError:
+        return None
+    try:
+        pynvml.nvmlInit()
+    except Exception:  # nvmlInit raises NVMLError, which needs the import
+        return None
+    try:
+        handle: Any = pynvml.nvmlDeviceGetHandleByIndex(_gpu_indices(gpu_ids, 1)[0])
+        name: Any = pynvml.nvmlDeviceGetName(handle)
+        return CardIdentity(
+            name=name.decode() if isinstance(name, bytes) else str(name),
+            total_mib=int(pynvml.nvmlDeviceGetMemoryInfo(handle).total)
+            // BYTES_PER_MIB,
+        )
+    except Exception:
+        return None
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+
+
+def read_gpu_processes(gpu_ids: str) -> dict[int, int] | None:
+    """
+    The compute processes on the engine's (first) card, PID to MiB, as NVML
+    charges them; None when NVML cannot attribute memory to processes here.
+    The PIDs are whatever NVML reports: the host's, under some containers.
+    """
+    try:
+        import pynvml
+    except ImportError:
+        return None
+    try:
+        pynvml.nvmlInit()
+    except Exception:  # nvmlInit raises NVMLError, which needs the import
+        return None
+    try:
+        handle: Any = pynvml.nvmlDeviceGetHandleByIndex(_gpu_indices(gpu_ids, 1)[0])
+        processes: dict[int, int] = {}
+        for process in pynvml.nvmlDeviceGetComputeRunningProcesses(handle):
+            used: Any = process.usedGpuMemory
+            if used is None:
+                return None
+            processes[int(process.pid)] = int(used) // BYTES_PER_MIB
+        return processes
+    except Exception:
+        return None
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+
+
+def descendants_of(root: int, proc: Path = Path("/proc")) -> set[int]:
+    """`root` and every process below it, from /proc; just `root` without one."""
+    parents: dict[int, int] = {}
+    try:
+        entries: list[Path] = list(proc.iterdir())
+    except OSError:
+        return {root}
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat: str = (entry / "stat").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # The command name is in parentheses and may hold spaces.
+        fields: list[str] = stat.rsplit(")", 1)[-1].split()
+        if len(fields) > 1 and fields[1].isdigit():
+            parents[int(entry.name)] = int(fields[1])
+    found: set[int] = {root}
+    grew: bool = True
+    while grew:
+        grew = False
+        for pid, parent in parents.items():
+            if parent in found and pid not in found:
+                found.add(pid)
+                grew = True
+    return found
+
+
+class MemorySource(StrEnum):
+    """What last raised a measurement's steady footprint."""
+
+    LOAD = "load"
+    PROCESS = "process"
+    RELEASE = "release"
+
+
+class MemoryWatch:
+    """
+    What one sized load's engine holds on the card, for as long as it runs.
+
+    `free_before_mib` is the reading the load was sized from, taken under the
+    load lock; until the load answers /health, what the card lost since then
+    is this engine's. From then on its own processes' growth, or what the card
+    gets back when it stops, raises the steady footprint.
+    """
+
+    def __init__(
+        self, free_before_mib: int, pool_mib: int, processes_before: set[int] | None
+    ) -> None:
+        self.free_before_mib: int = free_before_mib
+        self.pool_mib: int = pool_mib
+        self.processes_before: set[int] | None = processes_before
+        self.load_peak_mib: int | None = None
+        self.steady_mib: int | None = None
+        self.loaded: bool = False
+        self.source: MemorySource = MemorySource.LOAD
+        self.owned: frozenset[int] = frozenset()
+        # What the owned processes held when the load ended, and the steady
+        # footprint then.
+        self._process_base_mib: int | None = None
+        self._steady_at_load_mib: int | None = None
+        self._reported_steady_mib: int | None = None
+        self._lock: threading.Lock = threading.Lock()
+
+    def sample_load(self, free_mib: int | None) -> None:
+        """One reading of the card while the engine loads."""
+        if free_mib is None:
+            return
+        used: int = self.free_before_mib - free_mib
+        with self._lock:
+            if self.load_peak_mib is None or used > self.load_peak_mib:
+                self.load_peak_mib = used
+
+    def finish_load(
+        self,
+        free_mib: int | None,
+        processes: dict[int, int] | None,
+        descendants: set[int],
+    ) -> None:
+        """The load answered /health: what it holds now is its steady footprint."""
+        self.sample_load(free_mib)
+        if free_mib is None:
+            return
+        self.steady_mib = self._steady_at_load_mib = self.free_before_mib - free_mib
+        self.loaded = True
+        if processes is None:
+            return
+        owned: set[int] = {pid for pid in processes if pid in descendants}
+        if not owned and self.processes_before is not None:
+            owned = set(processes) - self.processes_before
+        self.owned = frozenset(owned)
+        if owned:
+            self._process_base_mib = sum(processes[pid] for pid in owned)
+
+    def sample_serving(self, processes: dict[int, int] | None) -> None:
+        """One reading of the engine's own processes while it serves."""
+        if (
+            not self.loaded
+            or processes is None
+            or self._process_base_mib is None
+            or self._steady_at_load_mib is None
+        ):
+            return
+        present: list[int] = [pid for pid in self.owned if pid in processes]
+        if not present:
+            return
+        grown: int = sum(processes[pid] for pid in present) - self._process_base_mib
+        self._raise_steady(self._steady_at_load_mib + grown, MemorySource.PROCESS)
+
+    def released(self, free_before_stop_mib: int, free_after_mib: int) -> None:
+        """What the card got back when the awake engine stopped."""
+        if self.loaded:
+            self._raise_steady(
+                free_after_mib - free_before_stop_mib, MemorySource.RELEASE
+            )
+
+    def _raise_steady(self, candidate: int, source: MemorySource) -> None:
+        if self.steady_mib is None or candidate > self.steady_mib:
+            self.steady_mib = candidate
+            self.source = source
+
+    def report_due(self) -> bool:
+        """Whether the steady footprint grew enough since the last report."""
+        if self.steady_mib is None:
+            return False
+        return (
+            self._reported_steady_mib is None
+            or self.steady_mib - self._reported_steady_mib >= MEMORY_REPORT_STEP_MIB
+        )
+
+    def reported(self) -> None:
+        self._reported_steady_mib = self.steady_mib
+
+    def numbers(self) -> dict[str, Any]:
+        """The measurement, held and over the pool, as the report carries it."""
+        with self._lock:
+            peak: int | None = self.load_peak_mib
+        return {
+            "pool_mib": self.pool_mib,
+            "source": self.source.value,
+            "loaded": self.loaded,
+            "load_peak_mib": peak,
+            "load_peak_over_mib": None if peak is None else peak - self.pool_mib,
+            "steady_mib": self.steady_mib,
+            "steady_over_mib": (
+                None if self.steady_mib is None else self.steady_mib - self.pool_mib
+            ),
+        }
 
 
 # ── source 1: the engine spec VIS writes ───────────────────────────────────
@@ -1303,6 +1703,16 @@ def plan_from_spec(document: dict[str, Any], environ: dict[str, str]) -> LaunchP
         hf_token_file=str(Path(state_dir) / HF_TOKEN_FILE) if state_dir else "",
         sized_dir=str(Path(state_dir) / ENGINE_SIZED_DIRNAME) if state_dir else "",
         load_sizing=load_sizing_from_spec(document),
+        measured_dir=(
+            str(Path(state_dir) / ENGINE_MEASURED_DIRNAME) if state_dir else ""
+        ),
+        launch_digest=launch_digest(
+            model,
+            [str(arg) for arg in document["args"]],
+            {str(k): str(v) for k, v in (document.get("env") or {}).items()},
+            sleep_mode,
+            spec_int(document, "tensor_parallel_size", 1),
+        ),
         disabled=disabled,
         gpu_shared=document.get("gpu_shared") is True,
         gpu_ids=gpu_ids,
@@ -1745,6 +2155,14 @@ class Engine:
         # What the running load holds on the card once loaded (its approved
         # sizing's pool and outside-pool memory), or None when it was not sized.
         self._held_mib: int | None = None
+        # The measurement of the running sized load, what its report says it
+        # was measured under, and the neighbours' state when it started.
+        self._memory: MemoryWatch | None = None
+        self._memory_identity: dict[str, Any] = {}
+        self._memory_neighbours: tuple[tuple[str, ...], ...] = ()
+        self._memory_sampler: threading.Thread | None = None
+        self._memory_stop: threading.Event = threading.Event()
+        self._memory_next_sample: float = 0.0
         self._gate_announced: str = ""
         self._starting_file: str = env_value(
             environ, "VIF_STARTING_FILE", DEFAULT_STARTING_FILE
@@ -2319,6 +2737,7 @@ class Engine:
         """
         sizing: LoadSizing | None = self.plan.load_sizing
         self._held_mib = None
+        self._memory = None
         if sizing is None:
             self._remove_marker(self.plan.sized_file)
             return self.plan.argv
@@ -2353,11 +2772,28 @@ class Engine:
                 "load sizing",
             )
             return self.plan.argv
-        sized: SizedLoad = size_load(self.plan.model, sizing, card)
+        identity: CardIdentity | None = read_card_identity(self.plan.gpu_ids)
+        fingerprint: str = (
+            ""
+            if identity is None
+            else memory_fingerprint(
+                self.plan.launch_digest,
+                installed_vllm_version(),
+                LAUNCHER_REVISION,
+                identity.name,
+                identity.total_mib,
+            )
+        )
+        sized: SizedLoad = size_load(self.plan.model, sizing, card, fingerprint)
         self._write_json_marker(
             self.plan.sized_file,
             {
                 **record,
+                "headroom_mib": sized.headroom_mib,
+                "extra_mib": sized.extra_mib,
+                "first_load_margin_mib": sized.first_load_margin_mib,
+                "calibrated": sized.calibrated,
+                "fingerprint": fingerprint,
                 "measured": True,
                 "approved": sized.approved,
                 "utilization": sized.utilization if sized.approved else None,
@@ -2388,11 +2824,148 @@ class Engine:
                 "activating the model again sizes it anew."
             )
             return None
-        self._held_mib = sized.predicted_peak_mib - sizing.headroom_mib
+        self._held_mib = sized.predicted_peak_mib - sized.headroom_mib
         log(f"load sized from the card: {sized.reason}")
+        if identity is not None:
+            self.watch_memory(card, sized.utilization, identity, fingerprint)
         return replace(
             self.plan, args=with_utilization(self.plan.args, sized.utilization)
         ).argv
+
+    # -- memory -------------------------------------------------------------
+
+    def watch_memory(
+        self,
+        card: CardMemory,
+        utilization: float,
+        identity: CardIdentity,
+        fingerprint: str,
+    ) -> None:
+        """Measure the load about to start against the card it was sized from."""
+        processes: dict[int, int] | None = read_gpu_processes(self.plan.gpu_ids)
+        self._memory = MemoryWatch(
+            free_before_mib=card.free_mib,
+            pool_mib=math.ceil(utilization * card.total_mib),
+            processes_before=None if processes is None else set(processes),
+        )
+        self._memory_identity = {
+            "spec_digest": self._spec_file_digest(),
+            "fingerprint": fingerprint,
+            "launch_digest": self.plan.launch_digest,
+            "vllm_version": installed_vllm_version(),
+            "launcher_revision": LAUNCHER_REVISION,
+            "gpu_name": identity.name,
+            "gpu_total_mib": identity.total_mib,
+            "sleep_mode": self.plan.sleep_mode,
+            "utilization": utilization,
+        }
+        self._memory_neighbours = self.neighbours()
+
+    def neighbours(self) -> tuple[tuple[str, ...], ...]:
+        """
+        The other engines on this card as their specs and markers stand: a
+        change while a card reading is attributed to this engine makes it
+        theirs too.
+        """
+        state: list[tuple[str, ...]] = []
+        for peer in self._peer_specs():
+            if peer.desired is not None and not same_card(
+                self.plan.gpu_ids, peer.gpu_ids
+            ):
+                continue
+            state.append(
+                (
+                    engine_key(peer.model),
+                    "" if peer.desired is None else peer.desired.value,
+                    str(bool(self.plan.ready_dir) and self._peer_loaded(peer)),
+                    str(self._peer_awake(peer)),
+                )
+            )
+        return tuple(state)
+
+    def _sample_load_memory(self) -> None:
+        while not self._memory_stop.is_set():
+            card, _why = read_card_memory(
+                self.plan.gpu_ids, self.plan.tensor_parallel_size
+            )
+            if self._memory is not None:
+                self._memory.sample_load(None if card is None else card.free_mib)
+            self._memory_stop.wait(MEMORY_LOAD_SAMPLE_SECONDS)
+
+    def start_memory_sampler(self) -> None:
+        if self._memory is None:
+            return
+        self._memory_stop.clear()
+        self._memory_sampler = threading.Thread(
+            target=self._sample_load_memory, daemon=True, name="memory-sampler"
+        )
+        self._memory_sampler.start()
+
+    def stop_memory_sampler(self) -> None:
+        self._memory_stop.set()
+        if self._memory_sampler is not None:
+            self._memory_sampler.join(timeout=10)
+            self._memory_sampler = None
+
+    def finish_memory(self, answered: bool) -> None:
+        """
+        The load ended: report what it held, unless a neighbour moved while
+        the card's readings were taken as this engine's.
+        """
+        self.stop_memory_sampler()
+        memory: MemoryWatch | None = self._memory
+        if memory is None:
+            return
+        if self.neighbours() != self._memory_neighbours:
+            log(
+                "another engine on this card changed state during the load; "
+                "its memory is not reported."
+            )
+            self._memory = None
+            return
+        if answered:
+            card, _why = read_card_memory(
+                self.plan.gpu_ids, self.plan.tensor_parallel_size
+            )
+            memory.finish_load(
+                None if card is None else card.free_mib,
+                read_gpu_processes(self.plan.gpu_ids),
+                (set() if self.child is None else descendants_of(self.child.pid)),
+            )
+        self.report_memory(measured=True)
+        if not answered:
+            self._memory = None
+
+    def sample_serving_memory(self) -> None:
+        """Every MEMORY_SERVING_SAMPLE_SECONDS while awake: its processes' growth."""
+        memory: MemoryWatch | None = self._memory
+        if (
+            memory is None
+            or not memory.loaded
+            or not memory.owned
+            or self.state is not DesiredState.AWAKE
+            or time.monotonic() < self._memory_next_sample
+        ):
+            return
+        self._memory_next_sample = time.monotonic() + MEMORY_SERVING_SAMPLE_SECONDS
+        memory.sample_serving(read_gpu_processes(self.plan.gpu_ids))
+        if memory.report_due():
+            self.report_memory(measured=False)
+
+    def report_memory(self, measured: bool) -> None:
+        """Write `measured/<key>`; `measured` stamps the end of the load."""
+        memory: MemoryWatch | None = self._memory
+        if memory is None or not self.plan.measured_file:
+            return
+        now: float = time.time()
+        if measured:
+            self._memory_identity["measured_at"] = now
+        self._write_json_marker(
+            self.plan.measured_file,
+            {**self._memory_identity, **memory.numbers(), "at": now},
+            "memory measurement",
+        )
+        memory.reported()
 
     # -- health -------------------------------------------------------------
 
@@ -2664,6 +3237,15 @@ class Engine:
         if self.child is None:
             return
         was_awake: bool = self.state is DesiredState.AWAKE
+        memory: MemoryWatch | None = (
+            self._memory
+            if was_awake and self._memory is not None and self._memory.loaded
+            else None
+        )
+        neighbours: tuple[tuple[str, ...], ...] = (
+            () if memory is None else self.neighbours()
+        )
+        self.stop_memory_sampler()
         before, _ = read_card_memory(self.plan.gpu_ids, self.plan.tensor_parallel_size)
         if self.child.poll() is None:
             self.child.terminate()
@@ -2678,24 +3260,39 @@ class Engine:
         self._join_tee()
         self.child = None
         if before is not None:
-            self.await_card_released(
-                before.free_mib, self._held_mib if was_awake else None
+            after: int | None = self.await_card_released(
+                before.free_mib,
+                self._held_mib if was_awake else None,
+                settle=memory is not None,
             )
+            if (
+                memory is not None
+                and after is not None
+                and self.neighbours() == neighbours
+            ):
+                memory.released(before.free_mib, after)
+                if memory.report_due():
+                    self.report_memory(measured=False)
+        self._memory = None
         self.clear_awake()
         self.clear_ready()
         # The lock is never held across a park: whoever loads next must not
         # wait on an engine that no longer exists.
         self.release_load_lock()
 
-    def await_card_released(self, free_before_mib: int, held_mib: int | None) -> None:
+    def await_card_released(
+        self, free_before_mib: int, held_mib: int | None, settle: bool = False
+    ) -> int | None:
         """
-        Poll the card until it has an exited engine's memory back.
+        Poll the card until it has an exited engine's memory back, and return
+        the last free reading (None when the card could not be read).
 
         With `held_mib` (an awake engine with an approved sizing), back is free
         memory up by CARD_RELEASED_FRACTION of it since `free_before_mib`;
-        otherwise two reads in a row that agree within CARD_SETTLED_MIB. Past
-        CARD_RELEASE_SECONDS, or on a stop, it warns or returns and the park
-        goes ahead.
+        otherwise two reads in a row that agree within CARD_SETTLED_MIB.
+        `settle` asks for both: an engine being measured may hold more than it
+        was sized to. Past CARD_RELEASE_SECONDS, or on a stop, it warns or
+        returns and the park goes ahead.
         """
         target: int | None = (
             None
@@ -2709,24 +3306,26 @@ class Engine:
                 self.plan.gpu_ids, self.plan.tensor_parallel_size
             )
             if card is None:
-                return
-            if (target is not None and card.free_mib >= target) or (
-                target is None
-                and previous is not None
+                return previous
+            settled: bool = (
+                previous is not None
                 and abs(card.free_mib - previous) <= CARD_SETTLED_MIB
-            ):
+            )
+            reached: bool = target is not None and card.free_mib >= target
+            if (reached and (settled or not settle)) or (target is None and settled):
                 log(
                     f"the card has the engine's memory back ({card.free_mib} MiB free)."
                 )
-                return
+                return card.free_mib
             previous = card.free_mib
             if pause(CARD_RELEASE_POLL_SECONDS):
-                return
+                return previous
         warn(
             f"the card did not get the engine's memory back within "
             f"{CARD_RELEASE_SECONDS}s of its exit ({previous} MiB free); "
             "parking anyway."
         )
+        return previous
 
     def _join_tee(self) -> None:
         if self._tee is None:
@@ -2781,12 +3380,14 @@ class Engine:
             return None
         self.mark_loading()
         self.start(argv)
+        self.start_memory_sampler()
         # A stop that landed while the child was being spawned found no child
         # to forward to; hand it over now.
         if self.terminating and not self._forwarded and self.child is not None:
             self.child.terminate()
             self._forwarded = True
         health: int = self.wait_for_health()
+        self.finish_memory(answered=health == 0)
         if health == 1:
             # The same posture as a load that dies: without a crash note the
             # restarted launcher would load the same spec again and hold the
@@ -2906,6 +3507,7 @@ class Engine:
         while not self.terminating:
             if self.child is not None and self.child.poll() is not None:
                 return self.await_child()
+            self.sample_serving_memory()
             if self.plan.watches:
                 if self.state is DesiredState.PARKED:
                     self.forget_gate_of_another_token()
@@ -2919,6 +3521,7 @@ class Engine:
         return 0
 
     def close(self) -> None:
+        self.stop_memory_sampler()
         self.clear_awake()
         self.clear_ready()
         self.clear_starting()
