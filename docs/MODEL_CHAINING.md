@@ -225,6 +225,15 @@ conditional stage without routing falls through to the next stage. Omitting
 `max_rings` limits executions per window to 8 by default, with a range of
 1–64. It is a loop bound, not the number of configured stages.
 
+Routing has a second, unconditional shape: `on_done` alone, combined with no
+rule member — a target taken whatever the stage returned. Ending through
+`on_done` is an answer, not a filter: the window reports
+`end_reason: "completed"` and delivers the stage's detections. A free-form VLM
+stage (`describe` mode, or `custom` without a `response_schema`) produces no
+classes for rules to match, so `on_done` is the only routing it accepts. The
+`describe` stage above ends the chain by being last; give such a stage
+`"routing": {"on_done": {"stage": ...}}` to continue past it instead.
+
 A window that ends on a miss was **filtered out**, and under the default
 `result_mode: final` its event listeners receive the gate stage's response type
 with no detections — not the detections the routing judged uninteresting. The
@@ -829,7 +838,7 @@ produce an answer, or stop short, and why?
 
 | `end_reason` | The chain stopped because | `final` mode delivers |
 |---|---|---|
-| `completed` | it ran past the last stage | the last stage's detections |
+| `completed` | it ran past the last stage, or ended through an `on_done` | the last stage's detections |
 | `match_end` | a rule **fired** into `{"end": true}` — stopping is the answer | that stage's detections |
 | `no_match` | a rule **missed** — the window was filtered out | the gate's type, no detections |
 | `max_rings` | the execution cap cut it off — the result is truncated | the last ring's detections |
