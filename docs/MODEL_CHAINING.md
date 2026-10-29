@@ -314,9 +314,11 @@ To run a stage on the preceding execution's boxes, add this to its stage wrapper
 }
 ```
 
-Crop defaults are all classes, confidence 0, padding 0 and at most 16 crops per
-source frame. When there are more boxes, the highest-confidence boxes are kept.
-No matching boxes produces an empty stage result.
+Crop defaults are all classes, confidence 0, padding 0 and a `max_crops` budget
+of 16 per **window**: the highest-confidence boxes across all of the window's
+source frames are kept. When the parent object ring tracks, each track is
+cropped once per window — its highest-confidence box — so the budget counts
+objects, not appearances. No matching boxes produces an empty stage result.
 
 The first stage, motion stages and synthetic stages cannot crop. In linear mode, the preceding
 stage must be an object or motion detector, the two types whose detections carry boxes.
