@@ -848,6 +848,7 @@ produce an answer, or stop short, and why?
 | `match_end` | a rule **fired** into `{"end": true}` — stopping is the answer | that stage's detections |
 | `no_match` | a rule **missed** — the window was filtered out | the gate's type, no detections |
 | `max_rings` | the execution cap cut it off — the result is truncated | the last ring's detections |
+| `degraded` | the gate stage that ended it could not decide — its endpoint was down, so the window was neither answered nor filtered | the gate's ring as analyzed, its `degraded` flag intact: an outage reads as "AI offline", never as a quiet scene |
 | *(absent)* | nothing routing-related ended it: a dynamic chain your decision listener ends, or an older service | the last ring's detections, as before the field existed |
 
 `match_end` and `no_match` come from which routing branch fired, not from the
