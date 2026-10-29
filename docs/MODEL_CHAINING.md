@@ -265,9 +265,9 @@ chain above window cadence: motion compares each consecutive pair of frames with
 window, carrying its state across windows, and `describe` is asked once per window
 that moved — here with the window's middle frame, per its `frame_selection`; omit
 that to send every captured frame. Motion is only supported as the entry stage
-(`stages[0]`) and cannot be cropped onto. Object tracking requires a chain of only
-object stages: the motion entry filters which frames reach later stages, so track IDs
-would be unreliable. An object stage behind it must set `"tracking": {"method": "none"}`.
+(`stages[0]`) and cannot be cropped onto. Object stages behind a motion entry run
+untracked: the entry filters which frames reach them, so track IDs would be
+unreliable. An object stage behind it must set `"tracking": {"method": "none"}`.
 
 The gate and the expensive stage need not analyze at the same rate. The capture
 rate is set once, in `config.processing`; each stage's `frame_selection` then
@@ -322,10 +322,14 @@ The first stage, motion stages and synthetic stages cannot crop. In linear mode,
 stage must be an object or motion detector, the two types whose detections carry boxes.
 A stage after a motion entry crops to the moving regions, with `min_confidence`
 gating parents by their net displacement. A cropped object stage must disable tracking
-and tiling. Object tracking also requires every captured frame to reach its object
-stage, which only a chain of object stages can provide; set
-`"tracking": {"method": "none"}` when a stage's inherited tracking would otherwise
-violate that requirement.
+and tiling. Object tracking also requires every captured frame to reach the tracking
+stage exactly once. A chain of only object stages provides that on every stage; a
+scene or VLM stage anywhere puts the chain at window cadence, where only the entry
+stage still sees every captured frame, so only an object entry may track — with
+`frame_selection` left at `all`, and not on a dynamic chain, whose listener may
+revisit the entry. A chain with a synthetic stage, or one whose entry is not an
+object stage, cannot track at all. Set `"tracking": {"method": "none"}` where a
+stage's inherited tracking would otherwise violate these rules.
 
 Crop child coordinates refer to the original full frame. The result's
 `source_ring_index` and `source_detection_index` identify the parent execution
@@ -877,8 +881,9 @@ costs its slowest stage; dynamic chains emit each ring as it completes while
 the window stays open. Overlay boxes are composited onto the live frame at the
 moment results arrive, with no frame matching, so boxes computed from a window
 trail the live video by roughly the chain's processing time plus the window's
-age in the buffer. Put the object stage first when box timeliness matters, the
-same ordering tracking requires. `auto_frame_throttle` lowers the inference FPS
+age in the buffer. Put the object stage first when box timeliness matters — the
+ordering tracking requires anyway once a scene or VLM stage gives the chain
+window cadence. `auto_frame_throttle` lowers the inference FPS
 when the stages cannot keep up.
 
 ## Live streams
