@@ -8,7 +8,54 @@
     // workflow - see the comment there), used below to version the
     // dynamically-constructed listeners/<ClassName>.js script URLs
     // (ensureListenerScriptLoaded).
-    var UI_VERSION = '1.1.0';
+    var UI_VERSION = '1.2.0';
+
+    /** A webhook listener's stored or typed settings, compared field by field. */
+    VIF.listeners.webhookSettingsOf = function (properties) {
+        var props = properties || {};
+        return {
+            url: (props.url || '').trim(),
+            credential_secret: (props.credential_secret || '').trim(),
+            credential_header: (props.credential_header || '').trim()
+        };
+    };
+
+    /**
+     * The probe request for what the form shows, saved or not, or null when there is no
+     * destination to send to. A selected stream stamps the event the way its deliveries are.
+     */
+    VIF.listeners.webhookTestRequest = function (typed, resource) {
+        if (!typed.url) {
+            return null;
+        }
+        var request = { url: typed.url };
+        if (typed.credential_secret) request.credentialSecret = typed.credential_secret;
+        if (typed.credential_header) request.credentialHeader = typed.credential_header;
+        if (resource) {
+            request.app = resource.app;
+            request.stream = resource.stream;
+        }
+        return request;
+    };
+
+    /** What the operator reads after a test fire, including whether the credential went. */
+    VIF.listeners.webhookTestOutcome = function (result, typed) {
+        var credential;
+        if (result.credential === 'sent') {
+            credential = 'with the credential under ' + (typed.credential_header || 'Authorization');
+        } else if (result.credential === 'unresolved') {
+            credential = "without a credential: secret '" + typed.credential_secret + "' is not configured";
+        } else {
+            credential = 'without a credential';
+        }
+        if (result.delivered) {
+            return { ok: true, message: '\u2713 Delivered'
+                + (result.status ? ' (HTTP ' + result.status + ')' : '') + ', ' + credential };
+        }
+        var reason = result.error || 'the destination did not accept it';
+        return { ok: false, message: '\u2717 '
+            + (result.credential === 'unresolved' ? reason : reason + ' (sent ' + credential + ')') };
+    };
 
     VIF.listeners.init = function () {
         var NEW_LISTENER_PRESET_TYPES = ['OverlayEvent', 'Id3Event', 'LogFileEvent', 'WebhookEvent2', 'ObjectTracking'];
@@ -26,6 +73,13 @@
             { value: 'rollup', label: 'Rollup' }
         ];
         var isAddingNewListener = false;
+        // The secret names the Authorization picker offers, read once for the page: the
+        // Secrets page is where they are managed, and a picker that re-read them per
+        // render would issue a request every time a listener is selected. null until the
+        // first read lands, which is what tells a render to go and get them.
+        var secretNames = null;
+        var secretNamesPromise = null;
+        var secretNamesUnreadable = false;
         var LISTENER_PROPERTY_RULES = {
             OverlayEvent: {
                 fade_step: { min: 0, max: 30, integer: true, label: 'Fade Step' }
@@ -272,7 +326,22 @@
             const hasOverlay = Object.keys(eventListenersData || {}).some(function(name) {
                 return resolveClassName((eventListenersData[name] || {}).class_name || '') === 'OverlayEvent';
             });
-            if (detectorType === 'synthetic' && hasOverlay && !useTranscoder) {
+            const hasLiveOnlyListener = Object.keys(eventListenersData || {}).some(function(name) {
+                const shortName = resolveClassName((eventListenersData[name] || {}).class_name || '');
+                return shortName === 'OverlayEvent' || shortName === 'Id3Event';
+            });
+            const chainTypes = detectorType === 'chain' && VIF.streamConfig && VIF.streamConfig.chainStageTypes
+                ? VIF.streamConfig.chainStageTypes() : [];
+            if (detectorType === 'verify' && hasLiveOnlyListener) {
+                el.textContent = 'Overlay and ID3 listeners need a live output stream. An on-demand Verify job skips them; '
+                    + 'its results stay in the stored rows and reach any Webhook or Log listener.';
+                el.style.display = 'block';
+            } else if (chainTypes.indexOf('synthetic') !== -1 && hasLiveOnlyListener) {
+                el.textContent = 'Overlay and ID3 listeners need a live output stream. A chain with a Synthetic stage runs '
+                    + 'only as an on-demand job, which skips them; its results stay in the stored rows and reach any '
+                    + 'Webhook or Log listener.';
+                el.style.display = 'block';
+            } else if (detectorType === 'synthetic' && hasOverlay && !useTranscoder) {
                 el.innerHTML = 'This Overlay listener won’t appear for synthetic detection: synthetic relays the ' +
                     'source without transcoding, so there is no rendition to burn the verdict into (playback and the ' +
                     'thumbnail show the source with no overlay). Enable <strong>Use Transcoder</strong> above to render a ' +
@@ -371,7 +440,7 @@
                 OverlayEvent: 'OverlayEvent draws boxes, labels, and optional stats back onto the Wowza video output.',
                 Id3Event: 'Id3Event injects timed metadata into the stream for downstream players or consumers.',
                 LogFileEvent: 'LogFileEvent writes detection activity to a file, which is helpful for audits and debugging.',
-                WebhookEvent2: 'WebhookEvent2 sends detections using the webhook destinations configured in webhooks.json.',
+                WebhookEvent2: 'WebhookEvent2 POSTs detections to the Destination URL set on this listener, under the secret it names. Send a test event to check the consumer before a detection happens.',
                 ObjectTracking: 'ObjectTracking evaluates tracked objects against configured regions, triggers, directions, counts, and dwell logic.'
             };
 
@@ -438,6 +507,10 @@
 
         function isListenerTypeEditable(listenerData) {
             return !!listenerData && listenerData.type_locked === false;
+        }
+
+        function webhookSettingsOf(properties) {
+            return VIF.listeners.webhookSettingsOf(properties);
         }
 
         function lockListenerTypesAfterSave() {
@@ -519,7 +592,7 @@
                         methods: l.methods && l.methods.length > 0
                             ? Array.from(l.methods)[0].toLowerCase() : 'disabled',
                         confidence_threshold: l.confidence_threshold !== undefined && l.confidence_threshold !== null
-                            ? l.confidence_threshold : 0.7,
+                            ? l.confidence_threshold : defaultConfidenceThreshold(),
                         suppress_empty_detections: l.suppress_empty_detections ?? false,
                         properties: l.properties || {},
                         type_locked: true
@@ -560,7 +633,7 @@
             eventListenersData[name] = {
                 class_name: selectedTemplate,
                 methods: 'disabled',
-                confidence_threshold: 0.7,
+                confidence_threshold: defaultConfidenceThreshold(),
                 properties: {},
                 type_locked: true
             };
@@ -723,6 +796,12 @@
             });
         }
 
+        // Motion confidence is net displacement, not a 0-1 quality score: 0.7 would mean
+        // "crossed 70% of the frame", so a motion listener does no further filtering by default.
+        function defaultConfidenceThreshold() {
+            return getCurrentDetectorType() === 'motion' ? 0.0 : 0.7;
+        }
+
         function getCurrentDetectorType() {
             const select = document.getElementById('cfg-detector-type');
             return select ? String(select.value || '').trim().toLowerCase() : '';
@@ -737,7 +816,7 @@
             if (detectorType === 'vlm') {
                 return metadata.vlm_methods !== undefined ? metadata.vlm_methods : metadata.scene_methods;
             }
-            if (detectorType === 'synthetic') {
+            if (detectorType === 'synthetic' || detectorType === 'verify') {
                 return metadata.synthetic_methods !== undefined ? metadata.synthetic_methods : metadata.scene_methods;
             }
             if (detectorType === 'scene') {
@@ -821,6 +900,8 @@
                 : detectorType === 'object' ? 'Object'
                 : detectorType === 'vlm' ? 'VLM'
                 : detectorType === 'synthetic' ? 'Synthetic'
+                : detectorType === 'verify' ? 'Verify'
+                : detectorType === 'chain' ? 'Chain'
                 : detectorType;
         }
 
@@ -940,7 +1021,7 @@
         }
 
         function buildDetectorTypeSwitchConflictMessage(targetDetectorType, conflicts) {
-            const targetLabel = targetDetectorType === 'scene' ? 'Scene' : targetDetectorType === 'object' ? 'Object' : targetDetectorType === 'vlm' ? 'VLM' : targetDetectorType;
+            const targetLabel = capitalizeDetectorTypeLabel(targetDetectorType);
             const details = conflicts.map(function(conflict) {
                 if (conflict.typeNotApplicable) {
                     return conflict.name + ' (not applicable to ' + targetLabel + ' detection)';
@@ -952,7 +1033,7 @@
         }
 
         function buildDetectorTypeSwitchConflictDialogMessage(targetDetectorType, conflicts) {
-            const targetLabel = targetDetectorType === 'scene' ? 'Scene' : targetDetectorType === 'object' ? 'Object' : targetDetectorType === 'vlm' ? 'VLM' : targetDetectorType;
+            const targetLabel = capitalizeDetectorTypeLabel(targetDetectorType);
             const details = conflicts.map(function(conflict) {
                 if (conflict.typeNotApplicable) {
                     return '- ' + conflict.name + ': not applicable to ' + targetLabel + ' detection';
@@ -1123,11 +1204,57 @@
                     renderScalarField(propsFields, field, props[field.key]);
                 }
             });
+            // Below both fields rather than beside the url: the test fires the listener,
+            // destination and credential together, which is what there is to check.
+            if (shortName === 'WebhookEvent2') renderWebhookTestRow(propsFields);
 
             const previousSuppressDirtyTracking = suppressDirtyTracking;
             suppressDirtyTracking = true;
             syncPropertyFields();
             suppressDirtyTracking = previousSuppressDirtyTracking;
+        }
+
+        function loadSecretNames() {
+            if (!secretNamesPromise) {
+                secretNamesPromise = VIF.core.client().persist.secrets().get()
+                    .then(function (stored) { secretNames = stored.names || []; })
+                    // An unreadable list is not an empty one: a read the operator may not be
+                    // allowed, or a blip, must not label every stored name as missing.
+                    .catch(function () { secretNames = []; secretNamesUnreadable = true; });
+            }
+            return secretNamesPromise;
+        }
+
+        function fillSecretPicker(picker, name) {
+            picker.innerHTML = '';
+            var none = document.createElement('option');
+            none.value = '';
+            none.textContent = (secretNamesUnreadable || (secretNames && secretNames.length))
+                ? '(no credential)' : '(none \u2014 add one on the Secrets page)';
+            picker.appendChild(none);
+            (secretNames || []).forEach(function (known) {
+                var opt = document.createElement('option');
+                opt.value = known;
+                opt.textContent = known;
+                picker.appendChild(opt);
+            });
+            // A stored reference always shows, even when its name has left the document -
+            // otherwise selecting the listener would silently drop it on the next save.
+            if (name && (secretNames || []).indexOf(name) === -1) {
+                var missing = document.createElement('option');
+                missing.value = name;
+                missing.textContent = secretNamesUnreadable ? name : name + ' (not configured)';
+                picker.appendChild(missing);
+            }
+            picker.value = name || '';
+        }
+
+        function fillRenderedSecretPickers() {
+            var container = document.getElementById('evt-properties-fields');
+            if (!container) return;
+            container.querySelectorAll('[data-field-type="secret"]').forEach(function (picker) {
+                fillSecretPicker(picker, picker.value);
+            });
         }
 
         function renderScalarField(container, field, value, dataAttr) {
@@ -1197,6 +1324,16 @@
                 select.value = value !== undefined ? value : field.default;
                 select.addEventListener('change', syncPropertyFields);
                 div.appendChild(select);
+            } else if (field.type === 'secret') {
+                var picker = document.createElement('select');
+                picker.dataset[dataAttr] = field.key;
+                picker.dataset.fieldType = 'secret';
+                fillSecretPicker(picker, hasExplicitValue ? String(value) : '');
+                picker.addEventListener('change', syncPropertyFields);
+                div.appendChild(picker);
+                // The stored name renders on its own until the names arrive; the read is
+                // started here rather than at init because most listeners have no picker.
+                if (secretNames === null) loadSecretNames().then(fillRenderedSecretPickers);
             } else if (field.type === 'string_list') {
                 var wrapper = document.createElement('div');
                 wrapper.className = 'string-list-field';
@@ -1249,6 +1386,72 @@
             }
 
             container.appendChild(div);
+        }
+
+        /**
+         * The Test row: one event, sent while the operator watches, because a detection
+         * webhook is otherwise only observable by publishing something a detector
+         * recognises - and the credential it travels under is a name the API never
+         * resolves for a reader, so nothing here can check it.
+         */
+        function renderWebhookTestRow(container) {
+            var div = document.createElement('div');
+            div.className = 'form-group';
+
+            var label = document.createElement('label');
+            label.textContent = 'Test';
+            div.appendChild(label);
+
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Send test event';
+            button.title = 'POST one test event to this listener\'s destination';
+            div.appendChild(button);
+
+            var help = document.createElement('div');
+            help.className = 'field-help';
+            help.textContent = 'Sends one event with no detections in it to the destination and'
+                + ' credential shown here, saved or not.';
+            div.appendChild(help);
+
+            var outcome = document.createElement('div');
+            outcome.className = 'endpoint-test-result';
+            outcome.style.display = 'none';
+            div.appendChild(outcome);
+
+            button.addEventListener('click', function () { sendWebhookTestEvent(button, outcome); });
+            container.appendChild(div);
+        }
+
+        function showWebhookTestOutcome(outcome, cls, message) {
+            outcome.className = 'endpoint-test-result ' + cls;
+            outcome.style.display = '';
+            outcome.textContent = message;
+        }
+
+        async function sendWebhookTestEvent(button, outcome) {
+            var typed = webhookSettingsOf(((eventListenersData[activeListenerName] || {}).properties));
+            var resource = typeof getSelectedResource === 'function' ? getSelectedResource() : null;
+            var request = VIF.listeners.webhookTestRequest(typed, resource);
+            if (!request) {
+                showWebhookTestOutcome(outcome, 'error', 'Set a Destination URL first.');
+                return;
+            }
+
+            var original = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Sending\u2026';
+            showWebhookTestOutcome(outcome, '', 'Sending\u2026');
+            try {
+                var result = await VIF.core.client().probes.webhook(request);
+                var shown = VIF.listeners.webhookTestOutcome(result, typed);
+                showWebhookTestOutcome(outcome, shown.ok ? 'ok' : 'error', shown.message);
+            } catch (error) {
+                showWebhookTestOutcome(outcome, 'error', '\u2717 ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = original;
+            }
         }
 
         function renderArrayField(container, field, items) {
@@ -1355,6 +1558,12 @@
                 } else if (input.dataset.fieldType === 'string_list') {
                     const source = input.value !== '' ? input.value : (input.placeholder || '');
                     props[key] = source.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+                } else if (input.dataset.fieldType === 'secret') {
+                    // Blank stores "", which every reader treats as no reference. NOT
+                    // omitted: the save is a merge patch, so a member it leaves out keeps
+                    // whatever the document already had, and a cleared picker has to
+                    // clear the stored name rather than quietly keep it.
+                    props[key] = input.value;
                 } else {
                     props[key] = input.value !== '' ? input.value : (input.placeholder || '');
                 }
@@ -1406,7 +1615,7 @@
             const nextMethod = document.getElementById('evt-methods').value;
             const confidenceInput = document.getElementById('evt-confidence');
             const confidence = parseFloat(confidenceInput.value || confidenceInput.placeholder);
-            const nextConfidence = Number.isFinite(confidence) ? confidence / 100 : 0.7;
+            const nextConfidence = Number.isFinite(confidence) ? confidence / 100 : defaultConfidenceThreshold();
             const nextSupresEmptyDetections = document.getElementById('evt-suppress-empty-detections').checked;
             const changed = propertiesChanged
                 || data.class_name !== nextClassName

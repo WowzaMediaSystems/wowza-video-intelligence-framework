@@ -64,7 +64,17 @@
     "log_timing": 0,        //how long to write logging details to /tmp/vi/<stream_name>
     "log_max_messages": 20, //maximum number of log messages to write in wse access log for vi/ws/wss messages. -1 is all, 0 is disabled
 
-    "motion_analysis": {},
+    "motion_analysis": {
+        // 1 reports only large high-contrast movement, 10 the smallest and faintest
+        "sensitivity": 5,
+        // net travel, as a fraction of the frame diagonal, before a moving region is reported;
+        // detection confidence carries this displacement, so it is not a quality score
+        "min_displacement": 0.02,
+        // gap, as a fraction of the frame width, within which moving regions merge into one subject
+        "merge_distance": 0.08,
+        // false reports a whole-picture change (a cut, a lighting change, a camera move) as its moving regions
+        "suppress_global_changes": true
+    },
     "object_analysis": {
         // default to to object tracking, the only other valid option is "byte-track"
         "tracking_method": "none",
@@ -142,7 +152,7 @@
         //      "response_schema": { "type": "object", "properties": { "reading": { "type": "number" } }, "required": ["reading"] }
     },
     "synthetic_analysis" : {
-        // NVIDIA Maxine Synthetic Video Detector (SVD) NIM — opt-in, bring-your-own
+        // NVIDIA Synthetic Video Detector (SVD) NIM — opt-in, bring-your-own
         // gRPC endpoint (host:port, NOT an http URL). No sidecar is bundled (the NIM
         // is access-gated). Point endpoint at your self-hosted NIM (e.g. "svd.host:8001",
         // which auto-detects plaintext) or the NVCF hosted dev endpoint shown below.

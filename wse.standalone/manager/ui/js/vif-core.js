@@ -7,7 +7,7 @@
     // automatically by the CI version-bump workflow (see
     // .github/workflows/reusable-update-version-file.yml) in the same
     // commit that bumps VERSION.
-    var UI_VERSION = '1.1.0';
+    var UI_VERSION = '1.2.0';
 
     // ── credential / serverUrl resolution ───────────────────────────────────
     // Consolidates the near-identical boilerplate previously duplicated at
@@ -47,9 +47,13 @@
         if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
             resolvedServerUrl = resolvedServerUrl.replaceAll('localhost', url.hostname);
         }
-		if(url.protocol === 'https:') {
-			resolvedServerUrl = resolvedServerUrl.replaceAll('http://', 'https://');
-		}
+        // An https page cannot call a plain-http REST API (mixed content), so the
+        // scheme follows the page. Remembered: when this rewrite happened, a failed
+        // request has a known cause -- Manager itself reaches Engine over http.
+        var upgradedToHttps = url.protocol === 'https:' && resolvedServerUrl.startsWith('http://');
+        if (upgradedToHttps) {
+            resolvedServerUrl = resolvedServerUrl.replaceAll('http://', 'https://');
+        }
 
         var resolvedUsername = (typeof username !== 'undefined' ? username : '');
         var resolvedPassword = (typeof password !== 'undefined' ? password : '');
@@ -66,8 +70,70 @@
             // playback.html ignore them.
             host: url.host,
             protocol: url.protocol,
-            hostname: url.hostname
+            hostname: url.hostname,
+            upgradedToHttps: upgradedToHttps
         };
+    };
+
+    // ── engine reachability ─────────────────────────────────────────────────
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function engineAuthority(resolved) {
+        try {
+            return new URL(resolved.serverUrl).host;
+        } catch (invalid) {
+            return '';
+        }
+    }
+
+    // One sentence, HTML, for the dashboard's offline banner: why the Engine REST
+    // API did not answer, from what the SDK error and the resolved server say. A
+    // rejected fetch carries no reason in any browser (TLS, refused, DNS and a
+    // dropped connection all surface as the same TypeError), so the transport
+    // case is certain only when resolveServer had to upgrade the scheme; the
+    // other causes are listed for the operator to check.
+    VIF.core.explainEngineError = function (error, resolved) {
+        var sdk = VIF.sdk;
+        var isSdkError = sdk && error instanceof sdk.VifError;
+        if (!isSdkError) {
+            return 'Lost connection to the Engine.';
+        }
+        var authority = escapeHtml(engineAuthority(resolved));
+        if (error instanceof sdk.TransportError) {
+            if (resolved.upgradedToHttps) {
+                var where = authority ? ' (' + authority + ')' : '';
+                return 'This page is served over HTTPS, but Manager reaches Engine\'s REST API over plain HTTP' +
+                    where + ', which the browser cannot use. See "Manager over HTTPS" in the VIF documentation.';
+            }
+            // An https REST API the browser does not trust fails the same way as
+            // one that is down, and the browser never tells the page which.
+            var certificate = String(resolved.serverUrl).startsWith('https://')
+                ? 'that this browser trusts its certificate (open the address in a new tab to see), '
+                : '';
+            return 'Cannot reach the Engine REST API at ' + escapeHtml(resolved.serverUrl) +
+                '. Check that Engine is running, that ' + (authority || 'its address') +
+                ' is reachable from this browser, ' + certificate +
+                'and that this address is in RESTInterface/IPWhiteList.';
+        }
+        if (error instanceof sdk.AuthError) {
+            if (error.status === 403) {
+                return 'The Engine REST API refused this browser\'s address (403): add it to RESTInterface/IPWhiteList.';
+            }
+            // Two 401s the browser cannot tell from bad credentials: a digest
+            // challenge the page never saw (the CORS policy has to expose
+            // WWW-Authenticate) and one with an algorithm this client lacks.
+            return 'The Engine REST API rejected the Manager credentials (401). With digest authentication, ' +
+                'the REST API\'s CORS policy also has to expose WWW-Authenticate (the installer sets it) ' +
+                'and the challenge has to use MD5 or SHA-256.';
+        }
+        if (error.status > 0) {
+            return 'The Engine REST API answered ' + error.status + '.';
+        }
+        return 'Lost connection to the Engine.';
     };
 
     // ── API client ──────────────────────────────────────────────────────────
@@ -75,6 +141,8 @@
     // Knowing what a WSEM chrome is, and turning it into a base URL and a
     // credential, is this file's job — the SDK takes a transport and reads no
     // globals of its own, so the dependency runs UI → SDK and only that way.
+    // The transport gets the username and password, not a Basic token: it
+    // answers whichever challenge the Engine's REST interface sends.
     // `options` passes through to VifClient — in practice `application`. A
     // caller wanting a different endpoint or a stub builds its own transport
     // and constructs VIF.sdk.VifClient directly; that is the whole seam.
@@ -83,7 +151,8 @@
         return new VIF.sdk.VifClient(Object.assign({
             transport: VIF.sdk.httpTransport({
                 baseUrl: resolved.serverUrl,
-                encodedCredentials: resolved.encodedCredentials
+                username: resolved.username,
+                password: resolved.password
             })
         }, options || {}));
     };
@@ -96,6 +165,16 @@
     VIF.core.client = function () {
         if (!sharedClient) sharedClient = VIF.core.createClient();
         return sharedClient;
+    };
+
+    // ── feature flags ────────────────────────────────────────────────────────
+    // Verify ships dark: pages offer it only when the Manager container runs with
+    // VIF_VERIFY_ENABLED=true, surfaced through config.json as the plugin property
+    // verify_enabled. Anything else — including the unsubstituted "ENV.…" literal
+    // when the variable is unset — reads as off.
+    VIF.core.verifyEnabled = function () {
+        var props = (typeof pluginProperties !== 'undefined' && pluginProperties) || {};
+        return props.verify_enabled === 'true';
     };
 
     // ── conflict retry ──────────────────────────────────────────────────────
@@ -155,9 +234,49 @@
     };
 
     // The Configs tab remembers which config surface was last in use — Stream
-    // Configs, Stream Config Defaults, or On-Demand Configs (vod.html's settings
-    // view in Configs chrome). The stored value is whitelisted here, never
-    // loaded raw; no memory lands on Stream Configs.
+    // Configs, Stream Config Defaults, On-Demand Configs (vod.html's settings
+    // view in Configs chrome), or Secrets. The stored value is whitelisted
+    // here, never loaded raw; no memory lands on Stream Configs.
+    // ── header tab counts ───────────────────────────────────────────────────
+    // The Live Streams and On-Demand counts every VIF page's tab rows carry: the
+    // On-Demand total from the VOD jobs API, the active live streams from the status
+    // wire, refreshed every 15 s. A page may carry a second tab row whose counts use
+    // the same ids with a "-cfg" suffix. Failures leave the placeholders. The
+    // fragments have no unload hook, so arming clears the previous page's pollers.
+    VIF.core.armTabCounts = function () {
+        function counters(id) {
+            return [id, id + '-cfg'].map(function (x) { return document.getElementById(x); }).filter(Boolean);
+        }
+        var ondemand = counters('vif-tab-ondemand-count');
+        var live = counters('vif-tab-live-count');
+        function show(els, n) { els.forEach(function (el) { el.textContent = String(n); }); }
+        function refreshOnDemand() {
+            if (!ondemand.length) return;
+            try {
+                // A limit-1 call totals the whole listing, so the count is exact.
+                VIF.core.client().vod.jobs.list({ limit: 1 }).then(function (page) {
+                    show(ondemand, (page && page.total) || 0);
+                }).catch(function () { /* Engine unreachable: the placeholder stays */ });
+            } catch (e) { /* placeholders stay */ }
+        }
+        function refreshLive() {
+            if (!live.length) return;
+            try {
+                VIF.core.client().status().then(function (status) {
+                    var active = ((status && status.streams) || []).filter(function (s) {
+                        return s.config && s.config.active;
+                    }).length;
+                    show(live, active);
+                }).catch(function () {});
+            } catch (e) { /* placeholders stay */ }
+        }
+        refreshOnDemand();
+        refreshLive();
+        if (window.__vifVodTabTimers) { window.__vifVodTabTimers.forEach(clearInterval); window.__vifVodTabTimers = null; }
+        if (window.__vifTabCountTimers) window.__vifTabCountTimers.forEach(clearInterval);
+        window.__vifTabCountTimers = [setInterval(refreshOnDemand, 15000), setInterval(refreshLive, 15000)];
+    };
+
     VIF.core.gotoConfigs = function () {
         var page = null;
         try { page = sessionStorage.getItem('vifConfigsPage'); } catch (e) { /* non-sticky */ }
@@ -166,7 +285,41 @@
             loadAjaxPluginContent('server', 'vif', 'vod.html', '');
             return;
         }
-        loadAjaxPluginContent('server', 'vif', page === 'default.html' ? 'default.html' : 'stream-config.html', '');
+        var remembered = page === 'default.html' || page === 'secrets.html';
+        loadAjaxPluginContent('server', 'vif', remembered ? page : 'stream-config.html', '');
+    };
+
+    // ── toasts ───────────────────────────────────────────────────────────────
+    // The one save-feedback pattern every fragment shares: a dark chip stack,
+    // bottom right, auto-dismissing (4.5s; warnings 7s, errors 9s). A message
+    // identical to the newest one still showing restarts that toast's clock
+    // instead of stacking a twin, so repeated clicks of a Save with nothing to
+    // save read as one calm chip, not a tower. containerId lets vod.html keep
+    // its own #vod-toasts node (and the .vif-vod styling scoped to it);
+    // everyone else gets a shared #vif-toasts appended to body on first use —
+    // classed vif-plugin so the palette variables reach it there.
+    VIF.core.toast = function (msg, kind, containerId) {
+        var box = document.getElementById(containerId || 'vif-toasts');
+        if (!box) {
+            if (containerId) return;
+            box = document.createElement('div');
+            box.id = 'vif-toasts';
+            box.className = 'vif-plugin vif-toasts';
+            document.body.appendChild(box);
+        }
+        var cls = 'toast' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '');
+        var ttl = kind === 'err' ? 9000 : kind === 'warn' ? 7000 : 4500;
+        var last = box.lastElementChild;
+        if (last && last.className === cls && last.textContent === String(msg)) {
+            clearTimeout(Number(last.dataset.vifToastTimer));
+            last.dataset.vifToastTimer = String(setTimeout(function () { last.remove(); }, ttl));
+            return;
+        }
+        var el = document.createElement('div');
+        el.className = cls;
+        el.textContent = msg;
+        el.dataset.vifToastTimer = String(setTimeout(function () { el.remove(); }, ttl));
+        box.appendChild(el);
     };
 
     // ── click-popover tips ───────────────────────────────────────────────────
@@ -312,7 +465,18 @@
         document.addEventListener('keydown', function (ev) {
             if (ev.key === 'Escape') hide();
         });
-        window.addEventListener('scroll', hide, true);
+        window.addEventListener('scroll', function (ev) {
+            if (!currentAnchor) return;
+            // An anchor a re-render replaced is gone from the document: the card
+            // is orphaned and closes on the next scroll, wherever it happened.
+            if (!document.contains(currentAnchor)) { hide(); return; }
+            // Only a scroll that can move the anchor closes the card. Another pane
+            // scrolling — the VOD windows list under its Follow, the card's own
+            // overflow — leaves an open tip where the user put it.
+            var scrolled = ev.target === document ? document.documentElement : ev.target;
+            if (scrolled && scrolled.contains && !scrolled.contains(currentAnchor)) return;
+            hide();
+        }, true);
         window.addEventListener('resize', hide);
     };
 

@@ -116,6 +116,31 @@
 .vif-plugin .text-warn { color: var(--warn-color) !important; }
 .vif-plugin .text-good { color: var(--good-color) !important; }
 
+/* Shared save-feedback toasts (VIF.core.toast): the same dark chip stack
+   vod.html renders bottom-right. #vif-toasts is created on first use outside
+   any fragment root, so it carries .vif-plugin itself for the palette vars. */
+.vif-toasts {
+    position: fixed;
+    bottom: 18px;
+    right: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 1060;
+    max-width: 440px;
+}
+.vif-toasts .toast {
+    background: #1b2430;
+    color: #fff;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    box-shadow: 0 3px 14px rgba(0, 0, 0, .3);
+    word-break: break-word;
+}
+.vif-toasts .toast.err { background: var(--alert-color); }
+.vif-toasts .toast.warn { background: var(--warn-color); }
+
 /* Brand accent (orange) — shared by every fragment. */
 .vif-plugin .slider {
     accent-color: #f08a00;

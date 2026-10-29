@@ -21,6 +21,8 @@ C:\Program Files\Wowza Media Systems\Wowza Streaming Engine x.y.z+vv\jre\bin\jav
 
 Add  `--help` to the above commands to see all the options available.
 
+The installer prepares the REST API for the Manager UI (CORS policy and IP white list) but does not put TLS on it. If Manager is served over HTTPS, read [Manager over HTTPS](#manager-over-https) before opening the VIF tab.
+
 ## Manually updating Wowza Streaming Engine
 
 ### Lib folder and jar files
@@ -34,10 +36,10 @@ Add  `--help` to the above commands to see all the options available.
 	* commons-text-1.15.0.jar
 	* jakarta.websocket-api-2.1.1.jar
 	* jakarta.websocket-client-api-2.1.1.jar
-	* jetty-ee10-websocket-jakarta-client-12.1.9.jar
-	* jetty-ee10-websocket-jakarta-common-12.1.9.jar
-	* jetty-websocket-core-client-12.1.9.jar
-	* jetty-websocket-core-common-12.1.9.jar
+	* jetty-ee10-websocket-jakarta-client-12.1.11.jar
+	* jetty-ee10-websocket-jakarta-common-12.1.11.jar
+	* jetty-websocket-core-client-12.1.11.jar
+	* jetty-websocket-core-common-12.1.11.jar
 
 * copy the lib-native `.so` or `.dll` files to the WSE lib-native folder, depending on your architecture
     * x86_64
@@ -88,6 +90,7 @@ Add  `--help` to the above commands to see all the options available.
 			<Type>String</Type>
 		</Property>
 	```
+	`VideoIntelligenceServer` decides how the VIF REST API (v1 and v2) is mounted on the Engine's REST interface: `authorized` (the default when the property is absent) requires Engine credentials and honors the Engine's roles, so a read-only user (group `basic`) gets `403` on every write; `unauthorized` mounts it on the unauthenticated router, where anyone who can reach the REST port can read and change every configuration (the Engine log warns at startup); `disabled` does not mount it.
 
 * set the REST API CORS policy in the `<Properties>` block inside `<RESTInterface>` in Server.xml. The installer sets it to exactly this value, replacing any existing one.
 	```xml
@@ -96,7 +99,7 @@ Add  `--help` to the above commands to see all the options available.
 		<Properties>
 			<Property>
 				<Name>restUserHTTPHeaders</Name>
-				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag</Value>
+				<Value>Access-Control-Allow-Origin:*|Access-Control-Allow-Methods:GET,POST,PUT,DELETE,PATCH,OPTIONS|Access-Control-Allow-Headers:Content-Type,Authorization,If-Match|Access-Control-Expose-Headers:ETag,WWW-Authenticate</Value>
 				<Type>String</Type>
 			</Property>
 		</Properties>
@@ -107,8 +110,14 @@ Add  `--help` to the above commands to see all the options available.
 	UI calls the API cross-origin (Manager on 8088, Engine REST on 8087), and the v2 API's
 	concurrency handshake needs `If-Match` allowed on requests and `ETag` exposed on responses —
 	without them every save from the browser fails its CORS preflight or loses its revision,
-	which reads like the Engine being down. `V2CorsPolicyTest` pins the shipped policy to what
+	which reads like the Engine being down. The SDK also reads `WWW-Authenticate` off a 401 to
+	answer a digest challenge, so an Engine whose `<RESTInterface>` uses `digest` needs it exposed,
+	or every Manager request to a digest Engine stays a 401. `V2CorsPolicyTest` pins the shipped policy to what
 	the browser SDK actually sends, and pins the installer's value to the shipped policy.
+
+	An existing install does not pick a newer policy up on its own: a native install gets it by
+	rerunning the installer, which replaces the value; a Docker Engine whose `conf/` is a bind
+	mount keeps the `Server.xml` it was seeded with and needs the value updated by hand.
 
 ### Application.xml
 * add application Modules to each Application.xml that VIF will run under.
@@ -120,9 +129,9 @@ Add  `--help` to the above commands to see all the options available.
 			<Class>com.wowza.wms.plugin.videointelligence.ModuleVideoIntelligence</Class>
 		</Module>
 		<Module>
-			<Name>ID3AndPDTInjectionModule</Name>
-			<Description>ID3AndPDTInjectionModule</Description>
-			<Class>com.wowza.wms.plugin.metadatainjection.module.ID3AndPDTInjectionModule</Class>
+			<Name>MetadataInjectionModule</Name>
+			<Description>MetadataInjectionModule</Description>
+			<Class>com.wowza.wms.plugin.metadatainjection.MetadataInjectionModule</Class>
 		</Module>
 		<Module>
 			<Name>OverlayModule</Name>
@@ -196,6 +205,7 @@ Add  `--help` to the above commands to see all the options available.
 		<IPWhiteList>127.0.0.1,172.*.*.*,192.168.*.*,10.*.*.*</IPWhiteList>
 	```
 * If connecting to a remote instance (not localhost), in WSEM login with `Wowza Streaming Engine URL` = http://<ip_address>:8087
+* If Manager itself is served over HTTPS, the REST API must serve HTTPS too - see [Manager over HTTPS](#manager-over-https).
 * The VIF dashboard (`docker/manager/ui`, entry page `shm.html` per `config.json`) is reachable only through the WSE Manager — there is no standalone entry page; for standalone dev/preview use the `qa_automation` harness's static-server mode (VIS repo).
 
 ### Misc
@@ -205,6 +215,50 @@ Add  `--help` to the above commands to see all the options available.
 	```shell
 	apt-get install -y libfreetype6 fontconfig
 	```
+
+## Manager over HTTPS
+
+The VIF pages in Manager call the Engine REST API (port 8087) directly from the browser. A browser refuses plain `http://` requests from an `https://` page (mixed content), so when Manager is served over HTTPS (`httpsPort` in `manager/conf/tomcat.properties`) the UI addresses `https://<host>:8087`, and the Engine REST API has to serve HTTPS as well. Until it does, the VIF dashboard reports the Engine as offline and names this cause, even though Engine and VIS are fine.
+
+Wowza documents the Manager side in [Connect to Wowza Streaming Engine Manager over HTTPS](https://www.wowza.com/docs/how-to-connect-to-wowza-streaming-engine-manager-over-https) and the `SSLConfig` fields in the [Server.xml configuration reference](https://www.wowza.com/docs/wowza-streaming-engine-serverxml-configuration-reference). The step below is not covered by the article and is required to successfully enable the VIF dashboard in Manager.
+
+Add the keystore used by Manager (the same StreamLock `.jks` works) to the REST interface's `SSLConfig` in `Server.xml`. It is separate from the one under `HostPort` 443 in `VHost.xml`:
+
+```xml
+<RESTInterface>
+	<Port>8087</Port>
+	...
+	<SSLConfig>
+		<Enable>true</Enable>
+		<KeyStorePath>${com.wowza.wms.ConfigHome}/conf/<domain>.streamlock.net.jks</KeyStorePath>
+		<KeyStorePassword><password></KeyStorePassword>
+		<KeyStoreType>JKS</KeyStoreType>
+	</SSLConfig>
+```
+
+`<Enable>` is what switches the REST API to HTTPS; a keystore alone does nothing. The path takes `${com.wowza.wms.ConfigHome}`, not the `${com.wowza.wms.context.VHostConfigHome}` of `VHost.xml`: `Server.xml` never expands that one, and Engine then fails to start the REST API at all, leaving nothing on 8087 and only a `FileNotFoundException` in the Engine log. A `Server.xml` from a recent Engine already carries this block with `<Enable>false</Enable>` and Wowza's bundled `conf/tls.jks`, so on those the change is flipping `Enable` and pointing the keystore at your certificate.
+
+Restart Engine:
+
+```shell
+sudo systemctl restart WowzaStreamingEngine
+```
+
+Then sign in to Manager with `Wowza Streaming Engine URL` = `https://<domain>.streamlock.net:8087`: port 8087 no longer accepts plain HTTP, and the certificate is valid for that hostname, so make sure to use the correct URL. The browser has to trust that certificate too: the VIF pages call 8087 from the browser, and a certificate it rejects (self-signed, or one issued for another name) reads as the Engine being unreachable; opening `https://<domain>.streamlock.net:8087` in a new tab shows which.
+
+## Engine over `wss` to VIS
+
+A `vi_service_url` that starts with `wss://` makes Engine the TLS client, and Engine judges the certificate VIS serves against its Java trust store.
+
+A certificate it cannot accept is reported against `VisService` in the Engine access log, `HTTP 0` standing for a request that never reached a response:
+
+```
+VideoIntelligenceController:VisService:available-models: HTTP 0: PKIX path building failed: sun.security.provider.certpath.SunCertPathBuilderException: unable to find valid certification path to requested target
+```
+
+Two conditions have to hold. The certificate has to chain to a certificate authority the trust store knows - one from a public CA, a StreamLock certificate among them, already does. And the host in `vi_service_url` has to appear in the certificate: one issued for `example.streamlock.net` covers neither `localhost` nor an IP address, even when Engine and VIS share a host, so address VIS by the name the certificate carries.
+
+A self-signed certificate, or one from an internal CA, fails the first and has to be imported into a copy of Engine's trust store, which `conf/Tune.xml` then names as `-Djavax.net.ssl.trustStore`. [Self-signed certs end to end (VIS + Engine)](https://github.com/WowzaMediaSystems/wowza-video-intelligence-framework/blob/main/docs/VIS_DEPLOYMENT.md#self-signed-certs-end-to-end-vis--engine) walks through both sides for the Compose stack; on an Engine installed on the host, the trust store and the `keytool` that writes it are `java/lib/security/cacerts` and `java/bin/keytool` under the Engine install directory (`jre\...` on Windows), and the copy belongs in `conf/`, where it survives an Engine upgrade.
 
 ## VIF Configuration
 Configuration files for the module are stored in `conf.modules/vif/`
@@ -217,6 +271,7 @@ Update the Default.json `vi_service_url` and `vi_service_api_key` to point to th
 | active             | false                                           | Set to `true` to register WSE with the VI service                            |
 | vi_service         | null | WebSocket endpoint for the VI Service. ws://*VI-SERVICE-HOST*:*VIF-SERVICE-PORT*/ws/stream/                                         |
 | vi_service_api_key | null                      | API Key for authentication with VI Service.                                 |
+| vi_service_api_key_secret | null | Name of an entry in the global secrets document to authenticate with instead of `vi_service_api_key` — one of the two, never both. The analysis blocks take the same form: `vlm_analysis.api_key_secret`, `synthetic_analysis.api_key_secret`, `synthetic_analysis.tls_client_key_secret` |
 | app_name | null | per stream configuration for the application.  if left blank, all applications will work |
 | stream_name | null | per stream configuration can contain a regex value to match incommong streams to. ie. `objects.*` |
 | vif_event_listeners | null | and array of VIF Event Listeners to get triggered.  See section on VIF Event Listeners below for definition |
@@ -227,7 +282,7 @@ Update the Default.json `vi_service_url` and `vi_service_api_key` to point to th
 | scene_analysis | null | object detections configuration, see vif-service for details |
 | ignore_untracked_objects | false |  ignore untracked objects when object tracking_method is set |
 | frame_buffer | 10 | size of the frame buffer to hold frames to send to VIF service |
-| catch_up_to_live | true | **Scene/VLM only.** When inference stays slower than real-time, skip the stale buffered backlog and resume at the live edge instead of letting latency grow to the full `frame_buffer` depth. Temporary slowdowns are still absorbed by the buffer. (Object detection bounds latency via `auto_frame_throttle` instead — it can't skip without breaking ByteTrack, so this option has no effect for object.) Every detection reports `behind_live_ms`; the first scene/VLM detection after a skip also carries `caught_up`/`skipped_frames`/`skipped_ms`. |
+| catch_up_to_live | true | **Scene/VLM only.** When inference stays slower than real-time, skip the stale buffered backlog and resume at the live edge instead of letting latency grow to the full `frame_buffer` depth. Temporary slowdowns are still absorbed by the buffer. (Object detection bounds latency via `auto_frame_throttle` instead — it can't skip without breaking ByteTrack, so this option has no effect for object.) Detections report `behind_live_ms` (omitted, with the window's `from`/`to` time keys, when the window can't be placed on the live timeline); the first scene/VLM detection after a skip also carries `caught_up`/`skipped_frames`/`skipped_ms`. |
 | catch_up_max_behind_seconds | null (=2s) | **Scene/VLM:** how far behind live (seconds) detections may fall before catch-up skips to live. **Object:** not used — object latency is bounded by the `inference_fps` throttle toward the sustainable rate, and the slow-inference warning fires at a fixed ~1s single-frame round-trip. For **Scene/VLM**, unset derives to the buffer's design headroom (~2s), bounding latency near `inference_time + 2s`; lower for tighter latency, raise to tolerate more lag. |
 | auto_frame_throttle | false | Opt-in frame-rate throttle (default **off**, all modes): reduce `inference_fps` when inference falls behind. **Object detection:** its latency lever — keeps the analyzed frame near live and contiguous for the tracker. **Scene/VLM:** a pre-step that throttles before `catch_up_to_live` resorts to skipping, for fewer coverage gaps. Renamed from `auto_scene_frame_throttle` (still accepted on read). |
 | use_transcoder| true | use transcoder to grab frames |
@@ -278,7 +333,7 @@ VOD job settings live in a file of their own, `conf.modules/vif/vod/settings.jso
 
 The document is edited over REST with `PATCH /v2/vif/persist/vod-settings` (a JSON merge patch guarded by `If-Match`, like every persist document; a `null` value restores a key's default). The two caps apply to the running Engine as soon as the patch is applied — the worker pool is resized without interrupting a job in flight, and a lowered `max_jobs` evicts immediately. The two directories take effect on the next Engine restart: moving them under jobs that are already running would strand them, so a change is logged and left for the restart.
 
-The secrets document, `conf.modules/vif/vod/secrets.json`, is a flat map of named `Authorization` values referenced from `lifecycle_webhook_secret` here or from a submit's own `lifecycle_webhook_secret`; see the VOD guide's "Named webhook secrets". `GET /v2/vif/persist/secrets` answers the names only, and `PATCH` sets, rotates (a string) or removes (`null`) a name — a value never travels back out.
+The secrets document, `conf.modules/vif/secrets.json`, is the framework's global flat map of named credentials — referenced from `lifecycle_webhook_secret` here or on a submit, and from a config's `*_secret` members (service key, VLM/SVD endpoint keys, the SVD TLS client key); see the VOD guide's "Named webhook secrets". `GET /v2/vif/persist/secrets` answers the names only, and `PATCH` sets, rotates (a string) or removes (`null`) a name — a value never travels back out, and a document still at the pre-move `conf.modules/vif/vod/secrets.json` is read from there and relocated by the first PATCH.
 
 **Retention.** The two retention keys compose rather than override: `max_jobs` bounds how many jobs are kept, `job_ttl_seconds` bounds how long, and either one on its own can forget a job — taking its stored results and thumbnail with it. Once a TTL is configured it is swept every 60 seconds, and again whenever a job is submitted or the Engine restarts; a saved TTL also applies at once to the jobs already held. A queued or running job is never touched however old it is. The clock is the moment the job last ended, so a job that was resumed is measured from the run that continued it rather than from the run that stopped. `0` — the default — means no TTL: it has to be a value rather than a missing key, because a config save merges and cannot un-set one.
 
@@ -312,7 +367,7 @@ One POST goes out per *persisted* transition — `running`, then whichever of `c
 
 Delivery is asynchronous and never affects the job: one POST at a time, in transition order per job, `Content-Type: application/json`, 5s to connect and 10s for the response, up to 3 attempts with 2s and 10s between them. Anything but a 2xx is a failed attempt; after the third the notification is dropped with a WARN naming the job and the state, and the job is unaffected either way. Terminal events are additionally at-least-once across restarts: a successful delivery is recorded in the job's manifest, and a startup that hydrates a terminal job whose notification was never recorded — the Engine can stop with deliveries still queued or failing — pushes that event again. A consumer may therefore see a terminal event twice (route on `job_id` and `state`), and configuring a webhook after jobs have finished means their terminal events arrive on the next restart.
 
-**Carrying a secret.** Every webhook credential is a name in the secrets document — `conf.modules/vif/vod/secrets.json`, edited through `PATCH /v2/vif/persist/secrets` (a string sets or rotates a name, `null` removes it; a read answers names only, never a value) — referenced by name and resolved at delivery time, never recorded against a job. The settings document's `lifecycle_webhook_secret` authorizes only deliveries to its own `lifecycle_webhook` (matched by exact string equality) — a destination named on a submit never receives it, so one submit cannot exfiltrate the operator's credential to a collector of its own. A per-job destination that needs authentication names its own entry at submit (`lifecycle_webhook_secret` in the body; an unknown name is refused, and a job-named secret wins over the global one). Don't put tokens in webhook URLs: a per-job URL is written verbatim into the job's manifest — it has to be, or the job could not be reported after a restart — so a `?token=` in one is on disk for as long as the job record is. A submit whose `lifecycle_webhook` is not an absolute http(s) URL is refused outright. See the VOD guide's "Named webhook secrets" for the full semantics, including the trust boundary of the secrets document.
+**Carrying a secret.** Every webhook credential is a name in the global secrets document — `conf.modules/vif/secrets.json`, edited through `PATCH /v2/vif/persist/secrets` (a string sets or rotates a name, `null` removes it; a read answers names only, never a value) — referenced by name and resolved at delivery time, never recorded against a job. The settings document's `lifecycle_webhook_secret` authorizes only deliveries to its own `lifecycle_webhook` (matched by exact string equality) — a destination named on a submit never receives it, so one submit cannot exfiltrate the operator's credential to a collector of its own. A per-job destination that needs authentication names its own entry at submit (`lifecycle_webhook_secret` in the body; an unknown name is refused, and a job-named secret wins over the global one). Don't put tokens in webhook URLs: a per-job URL is written verbatim into the job's manifest — it has to be, or the job could not be reported after a restart — so a `?token=` in one is on disk for as long as the job record is. A submit whose `lifecycle_webhook` is not an absolute http(s) URL is refused outright. See the VOD guide's "Named webhook secrets" for the full semantics, including the trust boundary of the secrets document.
 
 #### Automatic Resume
 
@@ -326,7 +381,7 @@ Every failure records an `error_cause` alongside its `error`, on the job view an
 | --- | --- | --- |
 | transient, short | `response_timeout`, `disconnected`, `detector_restarted`, `send_failed` | 5s, 15s, 30s |
 | transient, slow | `endpoint_degraded`, `not_connected`, `connect_failed`, `detector_error` | 15s, 1m, 5m |
-| never retried | `config_drift`, `coverage_shortfall`, `source_error`, `store_error`, `engine_restart` | — |
+| never retried | `endpoint_rejected`, `config_drift`, `coverage_shortfall`, `source_error`, `store_error`, `engine_restart` | — |
 
 Three attempts, and each failure picks its own backoff — a dropped connection waits 5s, and if the retry finds the service still down (`connect_failed`) the next wait is a minute, then five. An attempt that got *further* than the one before it starts the count again, so a long file with the occasional blip is never starved out. After the third the job stays `failed` with everything it had analysed, and a manual resume picks it up from there.
 
@@ -348,7 +403,7 @@ Some jobs are never retried whatever the cause: one submitted with `store_result
 | methods | disabled | What events and how often events are sent.  Options are `disabled` \\| `immediate` \\| `batch` \\| `rollup` |
 | confidence_threshold | 0.0 | What threshold to use for objects or scenes. Used by immediate and batch. |
 | suppress_empty_detections | false | Don't call the event listener if there are no detections |
-| properties| null | A list of key:value pairs for custom properties for the event.  Included by default are `stream_name`, `width`, `height`, `frame_rate`, and `detector_type` |
+| properties| null | A list of key:value pairs for custom properties for the event.  Included by default are `app_name`, `stream_name`, `listener_name`, `width`, `height`, `frame_rate`, and `detector_type` |
 
 ### Built in VIF Event Listeners
 
@@ -356,9 +411,160 @@ Some jobs are never retried whatever the cause: one submitted with `store_result
 
 &nbsp;&nbsp;&nbsp;&nbsp;**Custom Properties:** -None-
 
-**WebhookEvent2:** Sends webhook events defined in `Webhooks.json`
+**WebhookEvent2:** POSTs detections to the destination this listener names
 
-&nbsp;&nbsp;&nbsp;&nbsp;**Custom Properties:** -None-
+&nbsp;&nbsp;&nbsp;&nbsp;**Custom Properties:**
+
+| Key | Default | Purpose |
+| -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| url | null | Where detections are POSTed. An absolute `http(s)` URL with a host. Refused at save if it is neither; without one, an enabled listener delivers nowhere and logs a WARN naming the application, stream and listener |
+| credential_secret | null | The **name** of an entry in the secrets document (`conf.modules/vif/secrets.json`, written through `PATCH /v2/vif/persist/secrets`), whose value is sent as the credential. Resolved per delivery, so rotating the value applies to the next delivery with no configuration write. Only the name is stored here, and only the name is returned by a read |
+| credential_header | `Authorization` | The header the credential is sent under. A consumer that wants its key elsewhere names that header here — `DD-API-KEY` for a Datadog intake, for instance. Refused at save if it is not a legal header name, or is one the delivery owns (`Content-Type`, `Content-Length`, `Host`, `Connection`, `Transfer-Encoding`, `Upgrade`, `Expect`, `TE`, `Trailer`, `Keep-Alive`, `Proxy-Authorization`, `Proxy-Connection`) |
+
+Deliveries leave the analysis path: the payload is built on the calling thread, and the POST
+itself is queued and sent by the plugin's own delivery threads, so a consumer that is slow,
+unreachable or uninterested costs the stream nothing. There are no retries — a detection
+webhook describes a moment, and the next one is already on its way. Each (application, app
+instance, stream, listener) has its own queue of 100; a full queue drops its **oldest** entry
+and counts it in one WARN per hundred, because what a consumer that has fallen behind wants
+back is what is happening now. A consumer that keeps failing is skipped rather than
+tried per detection: after three failures in a row its listener's deliveries go unsent for
+thirty seconds, then one is tried — a failure reopens the window, a landing closes it — so a
+dead destination costs the delivery threads one request timeout per window.
+
+An event's `context.entity` names the detector that produced the detections — `objects`,
+`scenes`, `motion`, `vlm`, `synthetic`, `chain` or `verify` — and `context.options` is
+`viDetection`, or `viDetectionTest` for an event sent by the test-fire probe.
+
+`POST /v2/vif/probes/webhook` sends one test event to a listener's stored destination under
+its stored credential, or to a url under the secret name and header the request carries,
+which is the only way to check a credential the API never echoes. The Manager's listener
+panel has it as **Send test event**, and it tests what the form shows, saved or not.
+
+#### Migrating from the Engine's webhook bus
+
+Before this version, detections were handed to the Engine's server-wide webhook bus:
+destinations and routing filters lived in a `Webhooks.json`, and `Server.xml` carried a
+`com.wowza.wms.webhooks.WebhookListener` ServerListener. Both are gone. A destination now
+belongs to the listener that sends to it, which is what makes it per stream group, and the
+synchronous POST that used to happen inside the detection dispatcher's monitor is gone with
+it — that POST cost a measured 56% of one stream's analysis with a healthy consumer on
+localhost, and a full read timeout per detection with an unreachable one.
+
+There is no importer, by design: the mapping from a bus filter to a listener is a decision,
+not a translation. A carried-over listener is *enabled with no url* — a supported state that
+delivers nowhere and says so on every stream start, so the log tells you which listeners
+still need one. Three requests per listener:
+
+```bash
+VIF=http://localhost:8087/v2/vif
+AUTH='--digest -u wowza:wowza'
+GROUP=$VIF/persist/stream-group-configs/live_objectDotStar
+
+# Every persist write quotes the revision it is based on, so each step reads first.
+# The tag comes back weak (ETag: W/"…"); the server takes it back either way.
+etag() { curl -s $AUTH -D- -o /dev/null "$1" | sed -n 's/^[Ee][Tt]ag: *\(W\/\)\{0,1\}"\([^"]*\)".*/\2/p'; }
+
+# 1 · the credential, once, under a name — the value is the header value verbatim
+curl -s $AUTH -X PATCH -H 'Content-Type: application/merge-patch+json' \
+  -H "If-Match: $(etag "$VIF/persist/secrets")" \
+  -d '{"values":{"vi-webhook-auth":"Bearer eyJhbGciOiJIUzI1NiJ9..."}}' \
+  "$VIF/persist/secrets"
+
+# 2 · the destination that used to be your Webhooks.json target, and the name beside it
+curl -s $AUTH -X PATCH -H 'Content-Type: application/merge-patch+json' \
+  -H "If-Match: $(etag "$GROUP")" \
+  -d '{"config":{"listeners":{"Webhooks":{"type":"webhook","enabled":true,
+       "url":"https://hooks.example.com/vi","credential_secret":"vi-webhook-auth"}}}}' \
+  "$GROUP"
+
+# 3 · one test event, to the stored destination under the stored credential
+curl -s $AUTH -X POST -H 'Content-Type: application/json' \
+  -d '{"app":"live","stream":"object.*","listener":"Webhooks"}' \
+  "$VIF/probes/webhook"
+```
+
+`stream` in step 3 is the stream's name, or — as here — the stream pattern the group config
+is keyed by, so a group's listener can be tested before any of its streams runs. The answer
+is `{"delivered":true,"status":200}`, or `delivered: false` with the reason.
+
+The secret's value is the header value **verbatim**, and `credential_header` names the header
+it goes under — so whatever the old target sent, it migrates:
+
+- a `Webhooks.json` entry with an `Authorization` header — store that header's value as it
+  stood, and leave `credential_header` unset;
+- an entry whose credential rides **another header**, which the Engine's targets allowed —
+  store the value and name that header. A Datadog logs intake, for instance, sends its key
+  under `DD-API-KEY`:
+
+  ```bash
+  # the key, once, under a name of your choosing
+  curl -s $AUTH -X PATCH -H 'Content-Type: application/merge-patch+json' \
+    -H "If-Match: $(etag "$VIF/persist/secrets")" \
+    -d '{"values":{"datadog-intake":"<the DD-API-KEY value>"}}' \
+    "$VIF/persist/secrets"
+
+  # the listener: where it goes, which secret authenticates it, and under what
+  curl -s $AUTH -X PATCH -H 'Content-Type: application/merge-patch+json' \
+    -H "If-Match: $(etag "$GROUP")" \
+    -d '{"config":{"listeners":{"Datadog":{"type":"webhook","enabled":true,
+         "url":"https://http-intake.logs.datadoghq.com/api/v2/logs",
+         "credential_secret":"datadog-intake","credential_header":"DD-API-KEY"}}}}' \
+    "$GROUP"
+  ```
+
+  One `Webhooks.json` filter per target becomes one listener per target, so a stream that fed
+  two targets gets two listeners with two names — each with its own destination, secret and
+  header. `Content-Type` stays the delivery's own and is refused here.
+
+- a target that sent **more than one header** — a listener carries exactly one, the one its
+  credential travels under. A target whose `headers` list sent `Authorization` *and*, say,
+  `X-Tenant` migrates its credential and loses `X-Tenant`: there is no member for a custom
+  header that is not the credential, and nothing warns about the ones left behind. A
+  consumer that routed on such a header routes on the event's `context` instead.
+
+- a `jwt` target — the Engine minted a static HS256 bearer with a single claim, `sub` = the
+  event name, no expiry, signed with the target's `auth.secret`. For a detection event the
+  name is `video.intelligence.detection` (the event's own `name` member), so the token is
+  the signature over these two documents and never changed:
+
+  ```json
+  {"alg":"HS256","typ":"JWT"}
+  {"sub":"video.intelligence.detection"}
+  ```
+
+  A receiver verifies the signature and the `sub` claim rather than the token's bytes, so
+  any HS256 library that signs that payload with the same secret produces a token it
+  accepts. With nothing but Python:
+
+  ```bash
+  python3 - 'your-shared-secret-key' <<'EOF' | sed 's/^/Bearer /'
+  import base64, hmac, hashlib, json, sys
+  b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b'=').decode()
+  signing = b64(json.dumps({"alg":"HS256","typ":"JWT"}, separators=(",",":")).encode()) \
+      + "." + b64(json.dumps({"sub":"video.intelligence.detection"}, separators=(",",":")).encode())
+  print(signing + "." + b64(hmac.new(sys.argv[1].encode(), signing.encode(), hashlib.sha256).digest()))
+  EOF
+  ```
+
+  Store that whole `Bearer …` line as the secret's value, with `credential_header` unset.
+  Better still, mint a fresh credential with the receiver and retire the old one: a token
+  with no expiry that has been in a config file is not a credential worth carrying forward.
+
+> [!NOTE]
+> Three things changed for a consumer, not just for the configuration.
+>
+> - **`context.entity` now names the detector.** It was the constant `objects` for every
+>   detector type, so a scene stream's events arrived labelled `objects`. They now say
+>   `scenes`; motion, VLM, synthetic, chain and verify streams say `motion`, `vlm`,
+>   `synthetic`, `chain` and `verify`. A consumer switching on `entity` — or dropping
+>   everything that is not `objects` — needs the new values.
+> - **`source` is always this Engine's server GUID.** The Engine's webhook configuration
+>   could override the event's `source`; nothing carries that over.
+> - **Leave the `WebhookListener` line in `Server.xml` alone.** The installer no longer adds
+>   it, because this plugin no longer needs it — but that ServerListener is the Engine's own,
+>   and the Engine's stream, recording and error webhooks (`Webhooks.json`) attach only when
+>   it has run. Removing it switches those off.
 
 **LogFileEvent:** log all detected events locally to `wowzastreamingengine_vi.log`
 

@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
     <style>
         .vif-plugin {
             --form-label-width: 240px;
@@ -263,6 +263,64 @@
             width: auto;
             max-width: none;
         }
+        /* The literal-or-name mode select above each credential input, and the name picker
+           that stands in for the input when the slot holds a reference. */
+        .vif-plugin .secret-source {
+            font-size: 0.82em;
+            margin-bottom: 4px;
+            display: block;
+        }
+        .vif-plugin .secret-store-row {
+            display: flex;
+            gap: 6px;
+            margin: 4px 0;
+            align-items: center;
+        }
+        .vif-plugin .secret-store-row input {
+            flex: 0 1 220px;
+        }
+        .vif-plugin select[id$="-secret"] {
+            display: block;
+            width: 100%;
+            max-width: 300px;
+        }
+        /* A credential slot stacks its controls in the field column — the mode select, then
+           the value row or the name picker, then the store row — so none of them squeezes
+           the value input. */
+        .vif-plugin .secret-slot {
+            flex: 1 1 0;
+            min-width: 0;
+            max-width: 560px;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 4px;
+        }
+        /* The label lines up with the slot's first control, the mode select. */
+        .vif-plugin .form-group:has(> .secret-slot) {
+            align-items: flex-start;
+        }
+        .vif-plugin .form-group:has(> .secret-slot) > label {
+            padding-top: 4px;
+        }
+        .vif-plugin .secret-slot .secret-source {
+            align-self: flex-start;
+            width: auto;
+            max-width: 100%;
+            margin-bottom: 0;
+        }
+        .vif-plugin .secret-slot .input-with-toggle {
+            flex: 0 0 auto;
+            width: 100%;
+            max-width: none;
+        }
+        .vif-plugin .secret-slot .secret-store-row {
+            margin: 0;
+        }
+        .vif-plugin .secret-slot select[id$="-secret"] {
+            width: 100%;
+            max-width: 320px;
+        }
         .vif-plugin .input-with-toggle > button {
             flex: 0 0 auto;
         }
@@ -290,7 +348,10 @@
            column rather than the 300px field cap, with a touch more inner padding. */
         .vif-plugin #cfg-vlm-system-prompt,
 .vif-plugin #cfg-vlm-user-prompt,
-.vif-plugin #cfg-vlm-response-schema {
+.vif-plugin #cfg-vlm-response-schema,
+        .vif-plugin textarea[id$="-cfg-vlm-system-prompt"],
+        .vif-plugin textarea[id$="-cfg-vlm-user-prompt"],
+        .vif-plugin textarea[id$="-cfg-vlm-response-schema"] {
             max-width: none;
             padding: 8px 12px;
             /* Auto-grow (vlm-autogrow.js) fits the height to the content as the
@@ -300,9 +361,12 @@
             max-height: 320px;
             overflow-y: auto;
         }
-        .vif-plugin #cfg-vlm-system-prompt      { min-height: 66px; }
-        .vif-plugin #cfg-vlm-user-prompt        { min-height: 82px; }
-        .vif-plugin #cfg-vlm-response-schema    { min-height: 98px; }
+        .vif-plugin #cfg-vlm-system-prompt,
+        .vif-plugin textarea[id$="-cfg-vlm-system-prompt"]      { min-height: 66px; }
+        .vif-plugin #cfg-vlm-user-prompt,
+        .vif-plugin textarea[id$="-cfg-vlm-user-prompt"]        { min-height: 82px; }
+        .vif-plugin #cfg-vlm-response-schema,
+        .vif-plugin textarea[id$="-cfg-vlm-response-schema"]    { min-height: 98px; }
 
         /* VLM class rows: the class name (and its optional hint on the line below) fill the input
            column right up to the hint button, instead of the 300px field cap. !important overrides the
@@ -1039,6 +1103,466 @@
             margin-bottom: 0;
         }
 
+        .vif-plugin .chain-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .vif-plugin .chain-head .form-section-title {
+            margin-bottom: 0;
+        }
+        .vif-plugin .chain-status {
+            font-size: 0.8em;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            overflow-wrap: anywhere;
+            max-width: 65%;
+        }
+        .vif-plugin .chain-status.ok {
+            color: #1e9e5a;
+            background: #e9f7ef;
+            border-color: #b7e4c7;
+        }
+        .vif-plugin .chain-status.error {
+            color: var(--alert-color);
+            background: #fdecea;
+            border-color: #e7b6b4;
+        }
+        .vif-plugin .chain-status.warn,
+        .vif-plugin .chain-status.vod-only {
+            color: var(--warn-color);
+            background: var(--warn-bg);
+            border-color: var(--warn-color);
+        }
+        .vif-plugin .chain-status.vod-only {
+            letter-spacing: 0.08em;
+            white-space: nowrap;
+        }
+        .vif-plugin .chain-chips {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 6px;
+            min-width: 0;
+            max-width: 65%;
+        }
+        .vif-plugin .chain-chips .chain-status#chain-status {
+            max-width: none;
+            min-width: 0;
+        }
+        .vif-plugin .chain-warnings {
+            white-space: pre-line;
+        }
+        .vif-plugin .chain-level-warnings {
+            margin-left: calc(var(--form-label-width) + 10px);
+        }
+        .vif-plugin .chain-gate > .chain-warnings {
+            margin: 6px 0 0;
+        }
+        .vif-plugin .chain-seg {
+            display: flex;
+            flex: 0 0 360px;
+            max-width: 100%;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .vif-plugin .chain-seg > button {
+            flex: 1 1 0;
+            margin: 0;
+            border: 0;
+            border-radius: 0;
+        }
+        .vif-plugin .chain-seg > button + button {
+            border-left: 1px solid #cfd4da;
+        }
+        .vif-plugin .chain-seg > button.is-active,
+        .vif-plugin .chain-seg > button.is-active:disabled {
+            background: #f08a00;
+            color: #fff;
+        }
+        .vif-plugin .chain-cadence {
+            margin: 0 0 14px calc(var(--form-label-width) + 10px);
+            font-size: 0.85em;
+            color: #2b3440;
+        }
+        .vif-plugin .chain-stages {
+            display: flex;
+            flex-direction: column;
+        }
+        .vif-plugin .chain-stage.array-item {
+            margin-bottom: 0;
+        }
+        .vif-plugin .chain-stage.is-dragging {
+            opacity: 0.5;
+        }
+        .vif-plugin .chain-stage.drop-before {
+            box-shadow: 0 -3px 0 #f08a00;
+        }
+        .vif-plugin .chain-stage.drop-after {
+            box-shadow: 0 3px 0 #f08a00;
+        }
+        .vif-plugin .chain-stage .array-item-header {
+            justify-content: flex-start;
+            gap: 8px;
+            touch-action: none;
+        }
+        .vif-plugin .chain-stage .array-item-actions {
+            margin-left: auto;
+        }
+        .vif-plugin .dbadge {
+            min-width: 22px;
+            height: 22px;
+            padding: 0 4px;
+            background: #2b3440;
+            color: #fff;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+        .vif-plugin .chain-stage-type {
+            font-size: 0.85em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #a35d00;
+            background: #fff3e0;
+            border-radius: 3px;
+            padding: 1px 6px;
+            flex-shrink: 0;
+        }
+        .vif-plugin .chain-stage-summary {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-weight: normal;
+            color: #6b7480;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .vif-plugin .chain-grip {
+            flex: 0 0 auto;
+            width: 10px;
+            height: 16px;
+            cursor: grab;
+            background-image: radial-gradient(circle, #98a1ab 1.2px, transparent 1.6px);
+            background-size: 5px 5px;
+        }
+        .vif-plugin .chain-connector {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .vif-plugin .chain-connector::before,
+        .vif-plugin .chain-connector::after {
+            content: '';
+            width: 2px;
+            height: 8px;
+            background: #cfd5db;
+        }
+        .vif-plugin .chain-insert {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            margin: 0;
+            border-radius: 50%;
+            line-height: 1;
+        }
+        .vif-plugin .chain-insert.chain-insert-end {
+            width: auto;
+            height: auto;
+            padding: 5px 14px;
+            border: 1px solid #98a1ab;
+            border-radius: 14px;
+            font-weight: 600;
+        }
+        .vif-plugin .chain-end {
+            text-align: center;
+            font-size: 0.75em;
+            color: #98a1ab;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 14px;
+        }
+        .vif-plugin .chain-json summary,
+        .vif-plugin .chain-disclosure > summary {
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #5d6771;
+        }
+        .vif-plugin .chain-disclosure > summary {
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .vif-plugin .chain-disclosure > summary::-webkit-details-marker {
+            display: none;
+        }
+        .vif-plugin .chain-disclosure > summary .collapse-chevron {
+            font-size: 0.7em;
+            color: #6b7480;
+            transition: transform 0.2s ease;
+            display: inline-block;
+        }
+        .vif-plugin .chain-disclosure:not([open]) > summary .collapse-chevron {
+            transform: rotate(-90deg);
+        }
+        .vif-plugin .chain-disclosure-value {
+            font-weight: normal;
+            color: #98a1ab;
+        }
+        .vif-plugin .chain-json pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            max-height: 50vh;
+            overflow: auto;
+            background: #f4f6f8;
+            border: 1px solid #dde3e8;
+            border-radius: 3px;
+            padding: 8px 10px;
+            font-size: 0.8em;
+        }
+        .vif-plugin .chain-stage-body {
+            --form-label-width: 150px;
+        }
+        .vif-plugin .chain-stage-body .form-group input[type="text"],
+        .vif-plugin .chain-stage-body .form-group input[type="password"],
+        .vif-plugin .chain-stage-body .form-group select,
+        .vif-plugin .chain-stage-body .form-group textarea {
+            max-width: none;
+        }
+        .vif-plugin .chain-stage-body .form-section {
+            margin-top: 8px;
+        }
+        .vif-plugin .chain-disclosure {
+            margin: 10px 0 0 calc(var(--form-label-width) + 10px);
+        }
+        .vif-plugin .chain-disclosure > .chain-disclosure-body {
+            margin: 8px 0 0 calc(-1 * (var(--form-label-width) + 10px));
+        }
+        .vif-plugin .chain-crop-rail {
+            padding-left: 12px;
+            border-left: 3px solid #f08a00;
+        }
+        .vif-plugin .chain-crop-actions {
+            margin-left: calc(var(--form-label-width) + 10px);
+        }
+        .vif-plugin .chain-stage-errors {
+            color: var(--alert-color);
+            font-size: 0.8em;
+            margin: 0 0 10px;
+            line-height: 1.4;
+            white-space: pre-line;
+        }
+        .vif-plugin .chain-stage.has-error {
+            border-color: var(--alert-color);
+        }
+        .vif-plugin .chain-stage-errors:empty,
+        .vif-plugin .chain-note:empty {
+            display: none;
+        }
+        .vif-plugin .chain-seg > button:disabled:not(.is-active) {
+            cursor: default;
+        }
+        .vif-plugin .chain-confirm {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-left: calc(var(--form-label-width) + 10px);
+        }
+        .vif-plugin .chain-confirm-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .vif-plugin .chain-confirm-actions button {
+            margin: 0;
+        }
+        .vif-plugin .chain-gate {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .vif-plugin .chain-gate-plain {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 0.8em;
+            color: #6b7480;
+        }
+        .vif-plugin .chain-gate-plain::before {
+            content: '';
+            width: 2px;
+            height: 8px;
+            background: #cfd5db;
+        }
+        .vif-plugin .chain-gate-slot {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 6px 12px;
+            border: 1px dashed #cfd5db;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .vif-plugin .chain-gate-slot:hover {
+            background: #f4f6f8;
+        }
+        .vif-plugin .chain-gate-slot button {
+            margin: 0;
+        }
+        .vif-plugin .gstrip {
+            background: #fdf1e0;
+            border: 1px solid #e3e6ea;
+            border-left: 3px solid #f08a00;
+            padding: 8px 13px;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            cursor: pointer;
+        }
+        .vif-plugin .gstrip .gl {
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #9a5b00;
+        }
+        .vif-plugin .gstrip .gx {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-family: ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
+            font-size: 11.5px;
+            color: #9a5b00;
+            overflow-wrap: anywhere;
+        }
+        .vif-plugin .gstrip .chain-gate-toggle {
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #5d6771;
+        }
+        .vif-plugin .chain-gate.has-error .gstrip {
+            border-color: var(--alert-color);
+        }
+        .vif-plugin .chain-gate > .chain-stage-errors {
+            margin: 6px 0 0;
+        }
+        .vif-plugin .chain-gate-editor {
+            display: none;
+            border: 1px solid #e3e6ea;
+            border-top: 0;
+            border-left: 3px solid #f08a00;
+            padding: 10px 13px;
+            --form-label-width: 150px;
+        }
+        .vif-plugin .chain-gate.is-open .chain-gate-editor {
+            display: block;
+        }
+        .vif-plugin .chain-rule,
+        .vif-plugin .chain-rule-head,
+        .vif-plugin .chain-prop {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 140px 110px 80px;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .vif-plugin .chain-prop {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 80px;
+        }
+        .vif-plugin .chain-rule.chain-rule-motion,
+        .vif-plugin .chain-rule-head.chain-rule-motion {
+            grid-template-columns: minmax(0, 1fr) 110px 80px;
+        }
+        .vif-plugin .chain-rule-head {
+            font-size: 0.75em;
+            font-weight: 600;
+            color: #5d6771;
+            margin-bottom: 4px;
+        }
+        .vif-plugin .chain-rule input,
+        .vif-plugin .chain-prop input {
+            width: 100%;
+            box-sizing: border-box;
+            margin: 0;
+        }
+        .vif-plugin .chain-rule button,
+        .vif-plugin .chain-prop button,
+        .vif-plugin .chain-gate-editor > button,
+        .vif-plugin .chain-props > button {
+            margin: 0;
+        }
+        .vif-plugin .chain-rules-empty {
+            font-size: 0.8em;
+            color: #6b7480;
+            margin: 0 0 8px;
+        }
+        .vif-plugin .chain-gate-editor .chain-seg {
+            flex: 0 0 240px;
+        }
+        .vif-plugin .chain-gate-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin: 4px 0 10px;
+        }
+        .vif-plugin .chain-gate-actions button {
+            margin: 0;
+        }
+        .vif-plugin .chain-decision {
+            border: 1px solid #e3e6ea;
+            border-left: 3px solid #f08a00;
+            border-radius: 3px;
+            padding: 10px 13px;
+            margin-bottom: 14px;
+        }
+        .vif-plugin .chain-decision-title {
+            font-size: 0.8em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #9a5b00;
+            margin-bottom: 8px;
+        }
+        .vif-plugin .chain-required {
+            font-size: 0.75em;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #a35d00;
+            background: #fff3e0;
+            border-radius: 3px;
+            padding: 0 5px;
+            margin-left: 4px;
+        }
+        .vif-plugin .chain-props {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .vif-plugin .chain-advanced {
+            margin-bottom: 14px;
+        }
+        .vif-plugin .chain-end.is-sentence {
+            text-transform: none;
+            letter-spacing: 0;
+            font-size: 0.8em;
+        }
+
     </style>
 
     <div class="content-wrapper vif-plugin">
@@ -1050,8 +1574,8 @@
         <!-- Global VIF nav (same four tabs on every VIF page): this page is the
              Configs area; the secondary row says which config surface. -->
         <div class="vif-tabs-row">
-            <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams</button>
-            <button class="vif-tab" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand</button>
+            <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams <span class="vif-tab-count" id="vif-tab-live-count">&ndash;</span></button>
+            <button class="vif-tab" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count">&ndash;</span></button>
             <span class="vif-tab is-active">Configs</span>
         </div>
         <script>
@@ -1066,7 +1590,20 @@
         <div class="vif-subtabs" style="margin-bottom: 12px;">
             <span class="vif-subtab is-active">Stream Configs</span>
             <button class="vif-subtab" title="Defaults every stream config inherits.&#10;A config that sets its own value pins it." onclick="loadAjaxPluginContent('server','vif','default.html','')">Stream Config Defaults</button>
-            <button class="vif-subtab" title="On-Demand job settings:&#10;caps, retention, lifecycle webhooks, secrets." onclick="try { sessionStorage.setItem('vifVodView','settings'); } catch (e) {} loadAjaxPluginContent('server','vif','vod.html','')">On-Demand Configs</button>
+            <button class="vif-subtab" title="On-Demand job settings:&#10;caps, retention, lifecycle webhooks." onclick="try { sessionStorage.setItem('vifVodView','settings'); } catch (e) {} loadAjaxPluginContent('server','vif','vod.html','')">On-Demand Configs</button>
+            <button class="vif-subtab" title="Stored credentials the configs reference by name:&#10;endpoint keys, the service key, webhook secrets." onclick="loadAjaxPluginContent('server','vif','secrets.html','')">Secrets</button>
+        </div>
+        <style>
+            /* Page header, the shape every VIF sub-view carries: a back crumb top
+               left over the page title (the On-Demand pages set the pattern). */
+            .vif-plugin .vif-page-head{padding:14px 0 10px;border-bottom:1px solid #cfd5db;margin-bottom:16px}
+            .vif-plugin .vif-page-crumb{display:inline-block;font-size:12.5px;font-weight:600;color:#f08a00;text-decoration:none;margin-bottom:3px;cursor:pointer}
+            .vif-plugin .vif-page-crumb:hover{text-decoration:underline}
+            .vif-plugin .vif-page-title{margin:0;font-size:20px;font-weight:700}
+        </style>
+        <div class="vif-page-head">
+            <a class="vif-page-crumb" href="#" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html',''); return false;">&#8592; Live Streams</a>
+            <h2 class="vif-page-title">Stream Configs</h2>
         </div>
 
         <!-- Stream Selector -->
@@ -1142,10 +1679,13 @@
                 <select id="cfg-detector-type">
                     <option value="object" selected>Object</option>
                     <option value="scene">Scene</option>
+                    <option value="motion">Motion</option>
                     <option value="vlm">VLM</option>
                     <option value="synthetic">Synthetic</option>
+                    <option value="verify">Verify</option>
+                    <option value="chain">Chain</option>
                 </select>
-                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated content (a Real-vs-Fake verdict).</span></div>
+                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-motion" style="display:none">Differences consecutive frames and reports sustained movement as <code>motion</code> boxes &mdash; no model inference, so it is cheap enough to run on every stream or to gate heavier stages as a chain's entry.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated content (a Real-vs-Fake verdict).</span><span id="detector-help-verify" style="display:none">Two-stage verification of a file for AI-generated content: the NVIDIA Synthetic Video Detector scores every window, and a vision-language model reviews the windows that cross the gate. Used by On-Demand &rarr; New Analysis &rarr; Verify; the application and stream name only identify this config, and a live stream that matches it is refused.</span><span id="detector-help-chain" style="display:none">Runs a pipeline of named stages on each window; every stage is its own Object, Scene, VLM or Synthetic detector.</span></div>
             </div>
 
             <div class="form-group">
@@ -1177,7 +1717,7 @@
             <div class="form-group" id="cfg-inference-fps-group">
                 <label>Inference FPS</label>
                 <input type="number" id="cfg-inference-fps" value="" placeholder="30" min="-1" max="120" step="1">
-                <div class="field-help"><span id="inference-fps-help-object">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-scene" style="display:none">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-vlm" style="display:none">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate. VLM sends one request per window carrying Duration × Inference FPS images; if that exceeds the endpoint's image cap, the service evenly subsamples the window down to the limit.</span></div>
+                <div class="field-help"><span id="inference-fps-help-object">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-scene" style="display:none">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-motion" style="display:none">Frames per second differenced for motion. Lower values cut CPU further but miss brief movement; displacement is measured across whichever frames are sent. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-vlm" style="display:none">Frames per second sent for analysis. Lower values reduce load but may miss short events. VLM sends one request per window carrying Duration × Inference FPS images, and the endpoint accepts at most 8 per request — a config asking for more, or set to <code>-1</code> (match source), does not save.</span><span id="inference-fps-help-verify" style="display:none">Frames per second sampled from each window for the review model. Set to <code>-1</code> to match the stream frame rate; the service evenly subsamples a window that exceeds the endpoint's image cap.</span><span id="inference-fps-help-chain" style="display:none">Frames per second sent for analysis, shared by every stage. Set to <code>-1</code> to match the stream frame rate.</span></div>
             </div>
             <div class="form-group">
                 <label>Inference Video Height</label>
@@ -1196,7 +1736,7 @@
             <div class="form-group" id="cfg-duration-group">
                 <label>Duration (seconds)</label>
                 <input type="number" id="cfg-duration" value="" placeholder="2" min="0" max="5" step="0.1">
-                    <div class="field-help"><span id="duration-help-scene">Length of each analysis window (seconds) sent to the Video Intelligence Service (VIS).</span><span id="duration-help-vlm" style="display:none">Length of each analysis window (seconds). VLM sends one request per window carrying Duration × Inference-FPS images; if that exceeds the endpoint's image cap, the service evenly subsamples the window down to the limit.</span><span id="duration-help-synthetic" style="display:none">Target length of each analysis window (seconds). Windows snap to the next keyframe — set Duration ≥ your source's GOP.</span></div>
+                    <div class="field-help"><span id="duration-help-scene">Length of each analysis window (seconds) sent to the Video Intelligence Service (VIS).</span><span id="duration-help-vlm" style="display:none">Length of each analysis window (seconds). VLM sends one request per window carrying Duration × Inference-FPS images, and the endpoint accepts at most 8 per request — a config asking for more does not save.</span><span id="duration-help-synthetic" style="display:none">Target length of each analysis window (seconds). Windows snap to the next keyframe — set Duration ≥ your source's GOP.</span><span id="duration-help-verify" style="display:none">Target length of each verified window (seconds). Each window is scored whole and its sampled frames are what the review model sees; windows snap to the next keyframe.</span><span id="duration-help-chain" style="display:none">Length of each analysis window (seconds) the stages run on. The limit follows the stages: 8 with a VLM stage, 30 with a Synthetic stage, 5 otherwise.</span></div>
                 <div id="vlm-images-meter" class="field-help" style="display:none;"></div>
             </div>
 
@@ -1206,7 +1746,7 @@
                     <input type="checkbox" id="cfg-auto-frame-throttle">
                     <span class="slider-switch"></span>
                 </label>
-                <div class="field-help"><span id="throttle-help-object">Automatically lowers Inference FPS when inference can't keep up. This is object detection's latency control — frames stay near-live and contiguous so tracking is preserved.</span><span id="throttle-help-scene" style="display:none">Automatically lowers Inference FPS when inference can't keep up — throttling first means fewer coverage gaps before Catch Up To Live has to skip ahead.</span><span id="throttle-help-vlm" style="display:none">Automatically lowers Inference FPS when inference can't keep up — throttling first means fewer coverage gaps before Catch Up To Live has to skip ahead.</span></div>
+                <div class="field-help"><span id="throttle-help-object">Automatically lowers Inference FPS when inference can't keep up. This is object detection's latency control — frames stay near-live and contiguous so tracking is preserved.</span><span id="throttle-help-scene" style="display:none">Automatically lowers Inference FPS when inference can't keep up — throttling first means fewer coverage gaps before Catch Up To Live has to skip ahead.</span><span id="throttle-help-motion" style="display:none">Automatically lowers Inference FPS when differencing can't keep up — frames stay contiguous so displacement tracking is preserved.</span><span id="throttle-help-vlm" style="display:none">Automatically lowers Inference FPS when inference can't keep up — throttling first means fewer coverage gaps before Catch Up To Live has to skip ahead.</span><span id="throttle-help-chain" style="display:none">Automatically lowers Inference FPS when the stages can't keep up.</span></div>
             </div>
 
             <div class="form-group" id="cfg-catch-up-to-live-group">
@@ -1215,15 +1755,94 @@
                     <input type="checkbox" id="cfg-catch-up-to-live">
                     <span class="slider-switch"></span>
                 </label>
-                <div class="field-help"><span id="catchup-live-help-scene">When inference falls persistently behind real time, automatically skip a batch of old frames to catch up with the live edge.</span><span id="catchup-live-help-vlm" style="display:none">When inference falls persistently behind real time, automatically skip a batch of old frames to catch up with the live edge.</span></div>
+                <div class="field-help"><span id="catchup-live-help-scene">When inference falls persistently behind real time, automatically skip a batch of old frames to catch up with the live edge.</span><span id="catchup-live-help-vlm" style="display:none">When inference falls persistently behind real time, automatically skip a batch of old frames to catch up with the live edge.</span><span id="catchup-live-help-chain" style="display:none">When the stages fall persistently behind real time, automatically skip a batch of old frames to catch up with the live edge.</span></div>
             </div>
 
             <div class="form-group" id="cfg-catch-up-max-behind-group">
                 <label>Catch-up Max Behind (seconds)</label>
                 <input type="number" id="cfg-catch-up-max-behind" value="" placeholder="auto (~2s)" min="0" max="30" step="0.1">
-                <div class="field-help"><span id="catchup-behind-help-scene">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span><span id="catchup-behind-help-vlm" style="display:none">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span></div>
+                <div class="field-help"><span id="catchup-behind-help-scene">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span><span id="catchup-behind-help-vlm" style="display:none">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span><span id="catchup-behind-help-chain" style="display:none">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span></div>
             </div>
 
+            <div class="form-section chain-pipeline" id="chain-pipeline-section" style="display:none;">
+                <div class="chain-head">
+                    <div class="form-section-title">Chain Pipeline<span class="vif-help-tip" aria-label="Help" data-vif-tip="A chain runs several detectors in turn on each captured window. Every stage is an ordinary detector, and the fields you leave blank inherit that detector type's defaults."></span></div>
+                    <div class="chain-chips">
+                        <span id="chain-vod-only" class="chain-status vod-only" style="display:none;">VOD ONLY</span>
+                        <span id="chain-status" class="chain-status"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Execution Mode<span class="vif-help-tip" aria-label="Help" data-vif-tip="Linear runs every stage in order. Conditional lets each stage's route pick what runs next from its detections. Dynamic hands that choice to a decision listener class installed on the server."></span></label>
+                    <div id="chain-mode" class="chain-seg" role="group">
+                        <button type="button" data-mode="linear">Linear</button>
+                        <button type="button" data-mode="conditional">Conditional</button>
+                        <button type="button" data-mode="dynamic">Dynamic</button>
+                    </div>
+                    <div class="field-help"><span id="chain-mode-help-linear">Every stage runs in order on each window.</span><span id="chain-mode-help-conditional" style="display:none">Each stage's route picks which stage runs next.</span><span id="chain-mode-help-dynamic" style="display:none">A decision listener picks which stage runs next after each run.</span></div>
+                </div>
+                <div id="chain-mode-confirm" class="inline-warning chain-confirm" style="display:none;">
+                    <span id="chain-mode-confirm-text"></span>
+                    <div class="chain-confirm-actions">
+                        <button type="button" id="chain-mode-confirm-yes" class="btn-danger"></button>
+                        <button type="button" id="chain-mode-confirm-no" class="btn-secondary">Cancel</button>
+                    </div>
+                </div>
+                <div id="chain-cadence" class="chain-cadence"></div>
+                <div id="chain-warnings" class="inline-warning chain-warnings chain-level-warnings" style="display:none;"></div>
+                <div id="chain-decision-panel" class="chain-decision" style="display:none;">
+                    <div class="chain-decision-title">Decision Listener<span class="vif-help-tip" aria-label="Help" data-vif-tip="The Java class, installed on the server, that picks the next stage or ends the window after each stage run."></span></div>
+                    <div id="chain-decision-errors" class="chain-stage-errors"></div>
+                    <div class="form-group">
+                        <label>Class Name <span class="chain-required">Required</span></label>
+                        <input type="text" id="chain-decision-class" placeholder="e.g. com.example.MyDecider" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div class="form-group">
+                        <label>Decision Timeout (seconds)<span class="vif-help-tip" aria-label="Help" data-vif-tip="How long one decision may take, 5 seconds by default. On a timeout the window completes with the results it already has."></span></label>
+                        <input type="number" id="chain-decision-timeout" placeholder="5">
+                    </div>
+                    <div class="form-group">
+                        <label>Dispatch Intermediate<span class="vif-help-tip" aria-label="Help" data-vif-tip="Also deliver each intermediate stage run to the event listeners, not only the finished window. The decision listener always receives every run."></span></label>
+                        <label class="switch">
+                            <input type="checkbox" id="chain-dispatch-intermediate">
+                            <span class="slider-switch"></span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Properties<span class="vif-help-tip" aria-label="Help" data-vif-tip="Key and value pairs handed to the decision listener exactly as entered."></span></label>
+                        <div class="chain-props">
+                            <div id="chain-decision-properties"></div>
+                            <button type="button" id="chain-property-add" class="btn-secondary">+ Add property</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="chain-stages" class="chain-stages"></div>
+                <div id="chain-end" class="chain-end">End of window</div>
+                <details id="chain-advanced" class="chain-disclosure chain-advanced">
+                    <summary><span class="collapse-chevron">&#9660;</span>Advanced</summary>
+                    <div class="chain-disclosure-body">
+                        <div id="chain-advanced-errors" class="chain-stage-errors"></div>
+                        <div class="form-group">
+                            <label>Max Executions<span class="vif-help-tip" aria-label="Help" data-vif-tip="The most stage runs one window may take, 8 by default. It bounds loops and revisits; a linear chain stops at whichever is smaller, this or the number of stages."></span></label>
+                            <input type="number" id="chain-max-rings" placeholder="8">
+                        </div>
+                        <div class="form-group">
+                            <label>Result Mode<span class="vif-help-tip" aria-label="Help" data-vif-tip="What event listeners — ID3, overlays and webhooks — receive per window: only the final stage’s result (a window filtered out by a routing miss delivers no detections), or every stage’s. Stored VOD results keep the full history either way."></span></label>
+                            <select id="chain-result-mode">
+                                <option value="">Default (Final)</option>
+                                <option value="final">Final (last stage)</option>
+                                <option value="combined">Combined (every stage)</option>
+                            </select>
+                        </div>
+                    </div>
+                </details>
+                <details id="chain-json" class="chain-json">
+                    <summary>View JSON</summary>
+                    <pre id="chain-json-body"></pre>
+                </details>
+            </div>
+
+            <template id="vif-detector-sections">
             <!-- Object Analysis Section -->
             <div class="form-section" id="object-analysis-section">
                 <div class="form-section-title">Object Analysis</div>
@@ -1233,7 +1852,7 @@
 
                 <div class="form-group">
                     <label>Model Name</label>
-                    <select id="cfg-model-name" onchange="toggleCheckpointPath()">
+                    <select id="cfg-model-name">
                         <option value="nano">Nano</option>
                         <option value="small">Small</option>
                         <option value="medium" selected>Medium</option>
@@ -1244,7 +1863,7 @@
                 </div>
                 <div class="form-group" id="checkpoint-path-group" style="display:none;">
                     <label>Checkpoint Path</label>
-                    <select id="cfg-checkpoint-path" onchange="updateClassNamesOptions()">
+                    <select id="cfg-checkpoint-path">
                         <option value="">Loading...</option>
                     </select>
                     <div class="field-help">Required when using a custom object model. This is the location of available customized models and model weights.</div>
@@ -1263,7 +1882,7 @@
 
                 <div class="form-group">
                     <label>Tracking Method</label>
-                    <select id="cfg-tracking-method" onchange="toggleByteTrack()">
+                    <select id="cfg-tracking-method">
                         <option value="none" selected>None</option>
                         <option value="byte-track">ByteTrack</option>
                     </select>
@@ -1317,7 +1936,7 @@
                 <div class="form-group" id="tiling-enable-group" style="display:none;">
                     <label>Enable Tiling</label>
                     <label class="switch">
-                        <input type="checkbox" id="cfg-tiling-enabled" onchange="toggleTiling()">
+                        <input type="checkbox" id="cfg-tiling-enabled">
                         <span class="slider-switch"></span>
                     </label>
                     <div class="field-help">Cuts each frame into a grid and analyzes every piece separately, so small or far-away objects are much easier to spot. The trade-off is more processing power. <strong>Recommended:</strong> leave off unless you notice small or distant objects being missed.</div>
@@ -1333,7 +1952,7 @@
 
                     <div class="form-group">
                         <label>Algorithm</label>
-                        <select id="cfg-tiling-mode" onchange="toggleTilingMode()">
+                        <select id="cfg-tiling-mode">
                             <option value="fixed" selected>Fixed</option>
                             <option value="gated">Gated</option>
                         </select>
@@ -1378,7 +1997,7 @@
                         <div class="form-group">
                             <label>Full Frame Detection</label>
                             <label class="switch">
-                                <input type="checkbox" id="cfg-tiling-full-frame" onchange="toggleFullFrameDetection()">
+                                <input type="checkbox" id="cfg-tiling-full-frame">
                                 <span class="slider-switch"></span>
                             </label>
                             <div class="field-help">Also analyzes the whole frame in one pass, on top of the grid pieces. This catches objects too big to fit inside a single piece (which the grid alone tends to miss or split into several wrong boxes). Costs a little extra processing per frame. <strong>Recommended:</strong> on when your scene also contains large objects.</div>
@@ -1404,7 +2023,7 @@
                     <label>Class Names</label>
                     <div style="flex:1; min-width:0;">
                         <div id="cfg-scene-class-names"></div>
-                        <button type="button" class="btn-secondary" onclick="addClassRow('cfg-scene-class-names', '', {withHint:false})" style="margin-top:6px;">+ Add class</button>
+                        <button type="button" class="btn-secondary" style="margin-top:6px;">+ Add class</button>
                     </div>
                     <div class="field-help">One row per target scene phrase or label to classify against (e.g. <em>person walking</em>).</div>
                 </div>
@@ -1423,205 +2042,62 @@
 
             </div>
 
-            <!-- VLM Analysis Section -->
-            <div class="form-section" id="vlm-analysis-section" style="display:none;">
-                <div class="form-section-title">VLM Analysis</div>
+            <!-- Motion Analysis Section -->
+            <div class="form-section" id="motion-analysis-section" style="display:none;">
+                <div class="form-section-title">Motion Analysis</div>
                 <div class="section-help">
-                    Configure Vision Language Model (VLM) analysis using an external AI endpoint.
+                    Differences consecutive frames and reports moving regions as boxes of class <code>motion</code>. A detection's confidence carries the track's net travel as a percentage of the frame diagonal.
                 </div>
 
-                <div class="form-group" id="cfg-vlm-model-name-group">
-                    <label>Model Name</label>
-                    <select id="cfg-vlm-model-name" onchange="toggleVlmModelNameOther()">
-                        <!-- Supported-model options are populated from VLM_MODEL_OPTIONS in vif-stream-config.js. -->
-                        <option value="__other__">Other&hellip;</option>
+                <div class="form-group">
+                    <label>Sensitivity</label>
+                    <input type="number" id="cfg-motion-sensitivity" value="" placeholder="5" min="1" max="10" step="1">
+                    <div class="field-help">How faint a pixel change still counts as movement, 1&ndash;10; higher picks up fainter changes. A region is reported once its travel also reaches Min Displacement, under Advanced.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Global Changes</label>
+                    <select id="cfg-motion-suppress-global-changes">
+                        <option value="">Default (Suppress)</option>
+                        <option value="true">Suppress</option>
+                        <option value="false">Report</option>
                     </select>
-                    <input type="text" id="cfg-vlm-model-name-other" placeholder="Custom model name" style="display:none; margin-top:6px;">
-                    <div class="field-help">Model served by the VLM endpoint. Pick a supported model, or choose &ldquo;Other&hellip;&rdquo; to enter a custom name. Must match a model the endpoint actually serves.</div>
+                    <div class="field-help">Suppress: a frame whose change covers the whole picture &mdash; a cut, a lighting change, a camera move &mdash; reports no regions, so only subjects moving inside a steady picture are reported. Report: such a frame is reported as the moving regions it produces, for streams where the whole-picture event is the signal &mdash; a blackout, lights switched on, a scene change. A region is reported once it has travelled Min Displacement, so to receive the event on the frame it happens set Min Displacement to 0.</div>
                 </div>
 
                 <div class="form-group">
-                    <label>VLM Server</label>
-                    <div class="input-with-toggle">
-                        <input type="text" id="cfg-vlm-endpoint-url" placeholder="vlm.docker:8000">
-                        <button type="button" id="cfg-vlm-endpoint-test" onclick="testVlmEndpoint()" title="Verify the VLM server and that it serves the configured model">Verify</button>
-                    </div>
-                    <div class="field-help">Address of the VLM server (e.g. <em>vlm.docker:8000</em>). If omitted, <code>http://</code> and the <code>/v1</code> path are added on save; an explicit scheme or path is kept as typed. Leave empty to use the default.</div>
-                    <div id="cfg-vlm-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
+                    <label style="cursor:pointer; user-select:none;"><span id="cfg-motion-advanced-caret">&#9656;</span> Advanced</label>
                 </div>
-
-                <div class="form-group">
-                    <label>API Key</label>
-                    <div class="input-with-toggle">
-                        <input type="password" id="cfg-vlm-api-key" placeholder=""
-                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-                        <button type="button" id="cfg-vlm-api-key-toggle" onclick="toggleVlmApiKeyVisibility()" title="Show/hide API key">Show</button>
-                    </div>
-                    <div class="field-help">API key for authenticating with the VLM endpoint.</div>
-                </div>
-
-                <div class="form-group">
-                    <label>Request Timeout (seconds)</label>
-                    <input type="number" id="cfg-vlm-request-timeout" value="" placeholder="30" min="0" step="0.1">
-                    <div class="field-help">Timeout in seconds for each VLM API request.</div>
-                </div>
-
-                <div class="form-group">
-                    <label>Analysis Mode</label>
-                    <div id="cfg-vlm-mode" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
-                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="detect" onchange="toggleVlmMode()"> Detect</label>
-                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="describe" onchange="toggleVlmMode()"> Describe</label>
-                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="custom" onchange="toggleVlmMode()"> Custom</label>
-                    </div>
-                    <div class="field-help">
-                        <strong>Detect</strong>: list what to look for &rarr; a per-item verdict.
-                        <strong>Describe</strong>: a written description, no fixed list.
-                        <strong>Custom</strong>: your own prompts and (optionally) output schema.
-                    </div>
-                </div>
-
-                <!-- Detect mode: per-class repeater (class + optional hint) -->
-                <div id="vlm-mode-detect" class="vlm-mode-panel">
-                    <!-- align-items:flex-start so the "Classes & Hints" label stays
-                         pinned beside the first row instead of drifting down (the
-                         form-group's default align-items:center re-centers it as the
-                         row list grows taller). -->
-                    <div class="form-group" style="align-items:flex-start;">
-                        <label>Classes &amp; Hints</label>
-                        <!-- Rows + button share one block wrapper (flex:1) so the button always
-                             sits directly below the last row instead of being vertically centered
-                             beside the list by the form-group's align-items:center. -->
-                        <div style="flex:1; min-width:0;">
-                            <div id="cfg-vlm-detect-classes"></div>
-                            <button type="button" class="btn-secondary" onclick="addVlmClassRow('cfg-vlm-detect-classes')" style="margin-top:6px;">+ Add class</button>
-                        </div>
-                        <div class="field-help">One row per class to look for. Each class may carry an optional hint that disambiguates it (e.g. <em>open flame, not red lighting</em>); leave the hint empty to send the class without one. Hints cost only a few prompt tokens.</div>
-                    </div>
-                    <!-- Reasoning Level: how much the model deliberates before emitting
-                         per-class verdicts. High (default) is most robust; Low/Medium trade
-                         robustness for speed. VIS applies the per-level presets server-side. -->
+                <div id="cfg-motion-advanced" style="display:none;">
                     <div class="form-group">
-                        <label>Reasoning Level</label>
-                        <div id="cfg-vlm-reasoning-level" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="low" checked onchange="markDirty()"> Low</label>
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="medium" onchange="markDirty()"> Medium</label>
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="high" onchange="markDirty()"> High</label>
-                        </div>
-                        <div class="field-help">How much the model deliberates before answering. <strong>Low</strong> is fastest; <strong>High</strong> is most robust against false positives. Applies to Detect only.</div>
+                        <label>Min Displacement %</label>
+                        <input type="number" id="cfg-motion-min-displacement" value="" placeholder="2" min="0" max="100" step="0.1">
+                        <div class="field-help">Net travel a region needs before it is reported, as a percentage of the frame diagonal. A detection's confidence shows the same percentage &mdash; watch a stream's motion events and set this just under the movement you care about. The 2% default keeps swaying leaves and trees quiet.</div>
                     </div>
-                </div>
 
-                <!-- Describe mode: no class/prompt fields -->
-                <div id="vlm-mode-describe" class="vlm-mode-panel" style="display:none;">
-                    <!-- Indent to the input column so this lines up with the field/help
-                         text in the other modes instead of sitting flush-left. -->
-                    <div class="section-help" style="margin-left: calc(var(--form-label-width) + 10px);">The model returns a written description of each window. No class list or prompt configuration &mdash; uses the built-in descriptive prompt.</div>
-                </div>
-
-                <div id="vlm-mode-custom" class="vlm-mode-panel" style="display:none;">
-                    <div class="form-group" style="display:block;">
-                        <button type="button" class="btn-secondary" onclick="openVlmPromptGuide()" style="font-weight:600; margin-left:calc(var(--form-label-width) + 10px);">Prompting guide &amp; defaults</button>
-                    </div>
-                    <div id="vlm-guide-modal" class="overlay-backdrop" onclick="if(event.target===this)closeVlmPromptGuide()">
-                        <div class="overlay-card" style="width:min(880px,100%); max-height:85vh; overflow-y:auto;">
-                            <button type="button" class="btn-secondary overlay-close" onclick="closeVlmPromptGuide()" title="Close">&times;</button>
-                            <h3 style="margin:0 28px 8px 0;">VLM prompting guide</h3>
-                            <div id="vlm-prompt-guide"></div>
-                        </div>
-                    </div>
                     <div class="form-group">
-                        <label>System Prompt</label>
-                        <textarea id="cfg-vlm-system-prompt" rows="3" placeholder="Leave empty to use the built-in default." oninput="updateVlmCustomLint()"></textarea>
-                        <div class="field-help">Optional. Overrides the built-in system prompt. Supports the placeholders listed under the user prompt.</div>
-                    </div>
-                    <div class="form-group">
-                        <label>User Prompt <span style="color:#d64541;">*</span></label>
-                        <textarea id="cfg-vlm-user-prompt" rows="4" placeholder="Required in Custom mode &mdash; your instruction to the model." oninput="updateVlmCustomLint()"></textarea>
-                        <div class="field-help">Required in Custom mode. Placeholders (substituted in both prompts): <code>{class_list}</code> (the classes below, when set), <code>{frame_count}</code> (images in the window), <code>{duration_seconds}</code> (window length in seconds).</div>
-                    </div>
-                    <!-- Same per-class repeater as Detect mode (class + optional hint),
-                         align-items:flex-start so the label stays pinned beside the
-                         first row. The classes feed {class_list} in the operator's
-                         prompts; a hint is inlined as `- class: hint`. -->
-                    <div class="form-group" style="align-items:flex-start;">
-                        <label>Classes (optional)</label>
-                        <div style="flex:1; min-width:0;">
-                            <div id="cfg-vlm-custom-classes"></div>
-                            <button type="button" class="btn-secondary" onclick="addVlmClassRow('cfg-vlm-custom-classes')" style="margin-top:6px;">+ Add class</button>
-                        </div>
-                        <div class="field-help">Optional. One row per class, each with an optional hint. Injected wherever <code>{class_list}</code> appears in your prompts (a class with a hint renders as <code>- class: hint</code>). Leave empty for prompts that don't reference a class list.</div>
-                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#d64541;">Classes are set but neither prompt contains <code>{class_list}</code>, so the classes won't be injected into the prompt.</div>
-                    </div>
-                    <!-- align-items:flex-start so the label pins to the top of the
-                         kind selector / sub-editor stack. -->
-                    <div class="form-group" style="align-items:flex-start;">
-                        <label>Output Schema</label>
-                        <div style="flex:1; min-width:0;">
-                            <!-- Output kind: Free-form (default) leaves output free; Per-class
-                                 verdicts posts the built-in detection schema (relayed live from
-                                 VIS at /vlm/defaults) so VIS enforces the {class_name, reasoning}
-                                 contract; Custom reveals the Fields/Raw builder. -->
-                            <div id="cfg-vlm-schema-kind" style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:2px 0;">
-                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="freeform" onchange="switchVlmSchemaKind('freeform')" checked> Free-form</label>
-                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="default" onchange="switchVlmSchemaKind('default')"> Per-class verdicts</label>
-                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="custom" onchange="switchVlmSchemaKind('custom')"> Custom schema</label>
-                            </div>
-                            <div id="vlm-schema-kind-help" class="field-help" style="margin-left:0; margin-top:4px;"></div>
-                            <!-- Custom schema editor (shown only for the Custom kind). -->
-                            <div id="vlm-schema-custom" style="display:none; margin-top:8px;">
-                                <div id="cfg-vlm-schema-mode" style="display:flex; gap:16px; align-items:center; margin:4px 0;">
-                                    <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-mode" value="fields" onchange="switchVlmSchemaMode('fields')" checked> Fields</label>
-                                    <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-mode" value="raw" onchange="switchVlmSchemaMode('raw')"> Raw JSON</label>
-                                </div>
-                                <!-- Fields builder: one row per output property; generates a JSON Schema. -->
-                                <div id="vlm-schema-fields">
-                                    <div id="cfg-vlm-schema-rows"></div>
-                                    <button type="button" class="btn-secondary" onclick="addVlmSchemaField()" style="margin-top:6px;">+ Add field</button>
-                                    <div class="field-help" style="margin-left:0;">Each row becomes a field the model must return. Pick a type (including <code>enum</code>, and <code>object</code>/<code>object[]</code> for nesting), add an optional description, and tick <em>required</em>. The JSON Schema is built for you; switch to <strong>Raw JSON</strong> only for advanced features (numeric/string constraints, <code>$ref</code>, <code>oneOf</code>). Write your prompt to ask for exactly these fields. See the <strong>Prompting guide</strong> above.</div>
-                                </div>
-                                <!-- Raw JSON escape hatch: an arbitrary JSON Schema, validated client-side. -->
-                                <div id="vlm-schema-raw" style="display:none;">
-                                    <textarea id="cfg-vlm-response-schema" rows="5" placeholder='JSON Schema for structured output, e.g.&#10;{"type":"object","properties":{"reading":{"type":"number"}},"required":["reading"]}' oninput="validateVlmSchema()" style="font-family:monospace;"></textarea>
-                                    <div class="field-help" style="margin-left:0;">A JSON Schema, passed to the model verbatim. Validated as JSON here; the endpoint may still reject schemas its guided decoding can't honor.</div>
-                                </div>
-                            </div>
-                            <div id="vlm-schema-error" class="field-help" style="margin-left:0; display:none; color:#d64541;"></div>
-                        </div>
+                        <label>Merge Distance %</label>
+                        <input type="number" id="cfg-motion-merge-distance" value="" placeholder="8" min="0" max="50" step="1">
+                        <div class="field-help">Moving regions closer together than this percentage of the frame width merge into one box. Raise it when one object shows up as several boxes, lower it when separate objects merge into one.</div>
                     </div>
                 </div>
-
-                <!-- Advanced disclosure (all modes): temperature / max tokens -->
-                <div class="form-group">
-                    <label onclick="toggleVlmAdvanced()" style="cursor:pointer; user-select:none;"><span id="cfg-vlm-advanced-caret">&#9656;</span> Advanced</label>
-                </div>
-                <div id="cfg-vlm-advanced" style="display:none;">
-                    <div class="form-group">
-                        <label>Temperature</label>
-                        <input type="number" id="cfg-vlm-temperature" value="" placeholder="0.0" min="0" max="2" step="0.01">
-                        <div class="field-help">Controls randomness in model output. Lower values are more deterministic.</div>
-                    </div>
-                    <div class="form-group">
-                        <label>Max Tokens</label>
-                        <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" max="4096" step="1">
-                        <div class="field-help">Maximum number of tokens in the VLM response.</div>
-                    </div>
-                </div>
-
-                <!-- Max Concurrent Requests is JSON-only (set it in Default.json's
-                     vlm_analysis); intentionally not exposed in the UI. -->
             </div>
 
             <!-- Synthetic Analysis Section -->
             <div class="form-section" id="synthetic-analysis-section" style="display:none;">
-                <div class="form-section-title">Synthetic (AI generated) Detection</div>
+                <div class="form-section-title"><span id="synthetic-title-synthetic">Synthetic (AI generated) Detection</span><span id="synthetic-title-verify" style="display:none">Stage 1 &mdash; Scoring (NVIDIA Synthetic Video Detector)</span></div>
                 <div class="section-help">
-                    Relay each source H.264 window to the NVIDIA Synthetic Video Detector NIM (over gRPC) for a per-window Real-vs-Fake verdict. Opt-in / bring-your-own endpoint; H.264-only; no re-encode.
+                    <span id="synthetic-help-synthetic">Relay each source H.264 window to the NVIDIA Synthetic Video Detector NIM (over gRPC) for a per-window Real-vs-Fake verdict. Opt-in / bring-your-own endpoint; H.264-only; no re-encode.</span><span id="synthetic-help-verify" style="display:none">Every window of the file is relayed to the NVIDIA Synthetic Video Detector NIM (over gRPC) and scored for AI-generated content. Blank fields inherit the Verify baseline of the Stream Config Defaults.</span>
                 </div>
 
                 <div class="form-group">
                     <label>Endpoint</label>
-                    <input type="text" id="cfg-synthetic-endpoint" placeholder="svd.docker:8001">
+                    <div class="input-with-toggle">
+                        <input type="text" id="cfg-synthetic-endpoint" placeholder="svd.docker:8001">
+                        <button type="button" id="cfg-synthetic-endpoint-test" title="Verify that an SVD service answers at this endpoint over the chosen transport and accepts the credentials">Verify</button>
+                    </div>
                     <div class="field-help">SVD NIM as a gRPC <code>host:port</code> (not an http URL). Local sidecar: <code>svd.docker:8001</code>; NVCF hosted dev: <code>grpc.nvcf.nvidia.com:443</code>.</div>
+                    <div id="cfg-synthetic-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
                 </div>
 
                 <div class="form-group">
@@ -1649,7 +2125,7 @@
                      (public certs, no client-cert auth) together with the mTLS hint above. -->
                 <div id="synthetic-tls-certs-group" style="display:none;">
                     <div class="form-group">
-                        <label onclick="toggleSyntheticTlsCerts()" style="cursor:pointer; user-select:none;"><span id="cfg-synthetic-tls-certs-caret">&#9656;</span> TLS Certificates</label>
+                        <label style="cursor:pointer; user-select:none;"><span id="cfg-synthetic-tls-certs-caret">&#9656;</span> TLS Certificates</label>
                     </div>
                     <div id="cfg-synthetic-tls-certs" style="display:none;">
                         <div class="form-group">
@@ -1664,7 +2140,22 @@
                         </div>
                         <div class="form-group">
                             <label>Client Key Path</label>
-                            <input type="text" id="cfg-synthetic-tls-client-key" placeholder="">
+                            <div class="secret-slot">
+                                <select id="cfg-synthetic-tls-client-key-source" class="secret-source">
+                                    <option value="stored">Use a stored secret</option>
+                                    <option value="value">Enter a value</option>
+                                </select>
+                                <div id="cfg-synthetic-tls-client-key-value-row">
+                                    <input type="text" id="cfg-synthetic-tls-client-key" placeholder="">
+                                    <button type="button" class="secret-save-as" disabled title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                                </div>
+                                <div class="secret-store-row" id="cfg-synthetic-tls-client-key-store-row" style="display:none">
+                                    <input type="text" id="cfg-synthetic-tls-client-key-store-name" placeholder="secret name">
+                                    <button type="button" class="secret-store-confirm">Save</button>
+                                    <button type="button" class="secret-store-cancel">Cancel</button>
+                                </div>
+                                <select id="cfg-synthetic-tls-client-key-secret" style="display:none"></select>
+                            </div>
                             <div class="field-help">Private key for the client certificate above, as a file path readable by the Video Intelligence Service.</div>
                         </div>
                     </div>
@@ -1679,12 +2170,25 @@
 
                     <div class="form-group">
                         <label>API Key</label>
-                        <div class="input-with-toggle">
-                            <input type="password" id="cfg-synthetic-api-key" placeholder=""
-                                   autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-                            <button type="button" id="cfg-synthetic-api-key-toggle" onclick="toggleSyntheticApiKeyVisibility()" title="Show/hide API key">Show</button>
+                        <div class="secret-slot">
+                            <select id="cfg-synthetic-api-key-source" class="secret-source">
+                                <option value="stored">Use a stored secret</option>
+                                <option value="value">Enter a value</option>
+                            </select>
+                            <div class="input-with-toggle" id="cfg-synthetic-api-key-value-row">
+                                <input type="password" id="cfg-synthetic-api-key" placeholder=""
+                                       autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                                <button type="button" id="cfg-synthetic-api-key-toggle" title="Show/hide API key">Show</button>
+                                <button type="button" class="secret-save-as" disabled title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                            </div>
+                            <div class="secret-store-row" id="cfg-synthetic-api-key-store-row" style="display:none">
+                                <input type="text" id="cfg-synthetic-api-key-store-name" placeholder="secret name">
+                                <button type="button" class="secret-store-confirm">Save</button>
+                                <button type="button" class="secret-store-cancel">Cancel</button>
+                            </div>
+                            <select id="cfg-synthetic-api-key-secret" style="display:none"></select>
                         </div>
-                        <div class="field-help">Bearer token for NVIDIA&rsquo;s hosted endpoint &mdash; use an <strong>invocation-scoped</strong> key (an NGC pull key is not authorized to invoke).</div>
+                        <div class="field-help">Bearer token for NVIDIA&rsquo;s hosted endpoint &mdash; use an <strong>invocation-scoped</strong> key (an NGC pull key is not authorized to invoke); a value typed here, or a secret picked by name (rotates centrally on the Secrets page).</div>
                     </div>
 
                     <div class="form-group">
@@ -1694,12 +2198,237 @@
                     </div>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" id="cfg-synthetic-classification-threshold-group">
                     <label>Classification Threshold</label>
                     <input type="number" id="cfg-synthetic-classification-threshold" value="" placeholder="0.3" min="0" max="1" step="0.05">
                     <div class="field-help">Score above which a window is classified <code>synthetic</code> (0.0&ndash;1.0). NIM reference default 0.3 (conservative); 0.5 balanced.</div>
                 </div>
             </div>
+
+            <!-- Verify gate: which scored windows the review stage sees -->
+            <div class="form-section" id="verify-gate-section" style="display:none;" data-scope="config">
+                <div class="form-section-title">Gate &mdash; which windows Stage 2 reviews</div>
+                <div class="section-help">
+                    Windows scoring above the flag threshold go to the review. Windows scoring above the strong threshold count as synthetic even if the review disagrees; the review then only explains. Set the strong threshold to <code>1</code> to let the review decide every flagged window. Blank inherits the Verify baseline.
+                    <div id="verify-gate-line" class="field-help" style="margin:6px 0 0; font-weight:600;"></div>
+                </div>
+                <div class="form-group">
+                    <label>Flag Threshold</label>
+                    <input type="number" id="cfg-verify-flag-threshold" value="" placeholder="0.3" min="0" max="1" step="0.05">
+                    <div class="field-help">A window is flagged, and reviewed, when its synthetic score exceeds this (0.0&ndash;1.0).</div>
+                </div>
+                <div class="form-group">
+                    <label>Strong Threshold</label>
+                    <input type="number" id="cfg-verify-strong-threshold" value="" placeholder="0.9" min="0" max="1" step="0.05">
+                    <div class="field-help">Scores above this count as synthetic even if the review disagrees; the review then only explains why (0.0&ndash;1.0, at or above the flag threshold).</div>
+                </div>
+            </div>
+
+            <!-- VLM Analysis Section -->
+            <div class="form-section" id="vlm-analysis-section" style="display:none;">
+                <div class="form-section-title"><span id="vlm-title-vlm">VLM Analysis</span><span id="vlm-title-verify" style="display:none">Stage 2 &mdash; Review (vision-language model)</span></div>
+                <div class="section-help">
+                    <span id="vlm-help-vlm">Configure Vision Language Model (VLM) analysis using an external AI endpoint.</span><span id="vlm-help-verify" style="display:none">A vision-language model reviews each flagged window for physical accuracy, temporal consistency, lighting, texture, edges and motion, and answers with a verdict, a confidence and its reasoning. The prompt and answer schema are Verify's own. Blank fields inherit the Verify baseline.</span>
+                </div>
+
+                <div class="form-group" id="cfg-vlm-model-name-group">
+                    <label>Model Name</label>
+                    <select id="cfg-vlm-model-name">
+                        <option value="" id="cfg-vlm-model-inherit" style="display:none">Default</option>
+                        <!-- Supported-model options are populated from VLM_MODEL_OPTIONS in vif-stream-config.js. -->
+                        <option value="__other__">Other&hellip;</option>
+                    </select>
+                    <input type="text" id="cfg-vlm-model-name-other" placeholder="Custom model name" style="display:none; margin-top:6px;">
+                    <div class="field-help"><span id="vlm-model-help-vlm">Model served by the VLM endpoint. Pick a supported model, or choose &ldquo;Other&hellip;&rdquo; to enter a custom name. Must match a model the endpoint actually serves.</span><span id="vlm-model-help-verify" style="display:none">The NVIDIA model that reviews flagged windows; Verify's prompts are tuned for these. Default inherits the Verify baseline. Must match a model the endpoint actually serves.</span></div>
+                </div>
+
+                <div class="form-group">
+                    <label>VLM Server</label>
+                    <div class="input-with-toggle">
+                        <input type="text" id="cfg-vlm-endpoint-url" placeholder="vlm.docker:8000">
+                        <button type="button" id="cfg-vlm-endpoint-test" title="Verify the VLM server and that it serves the configured model">Verify</button>
+                    </div>
+                    <div class="field-help">Address of the VLM server (e.g. <em>vlm.docker:8000</em>). If omitted, <code>http://</code> and the <code>/v1</code> path are added on save; an explicit scheme or path is kept as typed. Leave empty to use the default.</div>
+                    <div id="cfg-vlm-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>API Key</label>
+                    <div class="secret-slot">
+                        <select id="cfg-vlm-api-key-source" class="secret-source">
+                            <option value="stored">Use a stored secret</option>
+                            <option value="value">Enter a value</option>
+                        </select>
+                        <div class="input-with-toggle" id="cfg-vlm-api-key-value-row">
+                            <input type="password" id="cfg-vlm-api-key" placeholder=""
+                                   autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                            <button type="button" id="cfg-vlm-api-key-toggle" title="Show/hide API key">Show</button>
+                            <button type="button" class="secret-save-as" disabled title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                        </div>
+                        <div class="secret-store-row" id="cfg-vlm-api-key-store-row" style="display:none">
+                            <input type="text" id="cfg-vlm-api-key-store-name" placeholder="secret name">
+                            <button type="button" class="secret-store-confirm">Save</button>
+                            <button type="button" class="secret-store-cancel">Cancel</button>
+                        </div>
+                        <select id="cfg-vlm-api-key-secret" style="display:none"></select>
+                    </div>
+                    <div class="field-help">API key for authenticating with the VLM endpoint — a value typed here, or a secret picked by name (rotates centrally on the Secrets page, no config change).</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Request Timeout (seconds)</label>
+                    <input type="number" id="cfg-vlm-request-timeout" value="" placeholder="30" min="0" step="0.1">
+                    <div class="field-help">Timeout in seconds for each VLM API request.</div>
+                </div>
+
+                <div id="vlm-analysis-prompting">
+                <div class="form-group">
+                    <label>Analysis Mode</label>
+                    <div id="cfg-vlm-mode" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
+                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="detect"> Detect</label>
+                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="describe"> Describe</label>
+                        <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-mode" value="custom"> Custom</label>
+                    </div>
+                    <div class="field-help">
+                        <strong>Detect</strong>: list what to look for &rarr; a per-item verdict.
+                        <strong>Describe</strong>: a written description, no fixed list.
+                        <strong>Custom</strong>: your own prompts and (optionally) output schema.
+                    </div>
+                </div>
+
+                <!-- Detect mode: per-class repeater (class + optional hint) -->
+                <div id="vlm-mode-detect" class="vlm-mode-panel">
+                    <!-- align-items:flex-start so the "Classes & Hints" label stays
+                         pinned beside the first row instead of drifting down (the
+                         form-group's default align-items:center re-centers it as the
+                         row list grows taller). -->
+                    <div class="form-group" style="align-items:flex-start;">
+                        <label>Classes &amp; Hints</label>
+                        <!-- Rows + button share one block wrapper (flex:1) so the button always
+                             sits directly below the last row instead of being vertically centered
+                             beside the list by the form-group's align-items:center. -->
+                        <div style="flex:1; min-width:0;">
+                            <div id="cfg-vlm-detect-classes"></div>
+                            <button type="button" class="btn-secondary" style="margin-top:6px;">+ Add class</button>
+                        </div>
+                        <div class="field-help">One row per class to look for. Each class may carry an optional hint that disambiguates it (e.g. <em>open flame, not red lighting</em>); leave the hint empty to send the class without one. Hints cost only a few prompt tokens.</div>
+                    </div>
+                    <!-- Reasoning Level: how much the model deliberates before emitting
+                         per-class verdicts. High (default) is most robust; Low/Medium trade
+                         robustness for speed. VIS applies the per-level presets server-side. -->
+                    <div class="form-group">
+                        <label>Reasoning Level</label>
+                        <div id="cfg-vlm-reasoning-level" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="low" checked> Low</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="medium"> Medium</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="high"> High</label>
+                        </div>
+                        <div class="field-help">How much the model deliberates before answering. <strong>Low</strong> is fastest; <strong>High</strong> is most robust against false positives. Applies to Detect only.</div>
+                    </div>
+                </div>
+
+                <!-- Describe mode: no class/prompt fields -->
+                <div id="vlm-mode-describe" class="vlm-mode-panel" style="display:none;">
+                    <!-- Indent to the input column so this lines up with the field/help
+                         text in the other modes instead of sitting flush-left. -->
+                    <div class="section-help" style="margin-left: calc(var(--form-label-width) + 10px);">The model returns a written description of each window. No class list or prompt configuration &mdash; uses the built-in descriptive prompt.</div>
+                </div>
+
+                <div id="vlm-mode-custom" class="vlm-mode-panel" style="display:none;">
+                    <div class="form-group" style="display:block;">
+                        <button type="button" class="btn-secondary" style="font-weight:600; margin-left:calc(var(--form-label-width) + 10px);">Prompting guide &amp; defaults</button>
+                    </div>
+                    <div id="vlm-guide-modal" class="overlay-backdrop">
+                        <div class="overlay-card" style="width:min(880px,100%); max-height:85vh; overflow-y:auto;">
+                            <button type="button" class="btn-secondary overlay-close" title="Close">&times;</button>
+                            <h3 style="margin:0 28px 8px 0;">VLM prompting guide</h3>
+                            <div id="vlm-prompt-guide"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>System Prompt</label>
+                        <textarea id="cfg-vlm-system-prompt" rows="3" placeholder="Leave empty to use the built-in default."></textarea>
+                        <div class="field-help">Optional. Overrides the built-in system prompt. Supports the placeholders listed under the user prompt.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>User Prompt <span style="color:#d64541;">*</span></label>
+                        <textarea id="cfg-vlm-user-prompt" rows="4" placeholder="Required in Custom mode &mdash; your instruction to the model."></textarea>
+                        <div class="field-help">Required in Custom mode. Placeholders (substituted in both prompts): <code>{class_list}</code> (the classes below, when set), <code>{frame_count}</code> (images in the window), <code>{duration_seconds}</code> (window length in seconds).</div>
+                    </div>
+                    <!-- Same per-class repeater as Detect mode (class + optional hint),
+                         align-items:flex-start so the label stays pinned beside the
+                         first row. The classes feed {class_list} in the operator's
+                         prompts; a hint is inlined as `- class: hint`. -->
+                    <div class="form-group" style="align-items:flex-start;">
+                        <label>Classes (optional)</label>
+                        <div style="flex:1; min-width:0;">
+                            <div id="cfg-vlm-custom-classes"></div>
+                            <button type="button" class="btn-secondary" style="margin-top:6px;">+ Add class</button>
+                        </div>
+                        <div class="field-help">Optional. One row per class, each with an optional hint. Injected wherever <code>{class_list}</code> appears in your prompts (a class with a hint renders as <code>- class: hint</code>). Leave empty for prompts that don't reference a class list.</div>
+                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#d64541;">Classes are set but neither prompt contains <code>{class_list}</code>, so the classes won't be injected into the prompt.</div>
+                    </div>
+                    <!-- align-items:flex-start so the label pins to the top of the
+                         kind selector / sub-editor stack. -->
+                    <div class="form-group" style="align-items:flex-start;">
+                        <label>Output Schema</label>
+                        <div style="flex:1; min-width:0;">
+                            <!-- Output kind: Free-form (default) leaves output free; Per-class
+                                 verdicts posts the built-in detection schema (relayed live from
+                                 VIS at /vlm/defaults) so VIS enforces the {class_name, reasoning}
+                                 contract; Custom reveals the Fields/Raw builder. -->
+                            <div id="cfg-vlm-schema-kind" style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:2px 0;">
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="freeform" checked> Free-form</label>
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="default"> Per-class verdicts</label>
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="custom"> Custom schema</label>
+                            </div>
+                            <div id="vlm-schema-kind-help" class="field-help" style="margin-left:0; margin-top:4px;"></div>
+                            <!-- Custom schema editor (shown only for the Custom kind). -->
+                            <div id="vlm-schema-custom" style="display:none; margin-top:8px;">
+                                <div id="cfg-vlm-schema-mode" style="display:flex; gap:16px; align-items:center; margin:4px 0;">
+                                    <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-mode" value="fields" checked> Fields</label>
+                                    <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-mode" value="raw"> Raw JSON</label>
+                                </div>
+                                <!-- Fields builder: one row per output property; generates a JSON Schema. -->
+                                <div id="vlm-schema-fields">
+                                    <div id="cfg-vlm-schema-rows"></div>
+                                    <button type="button" class="btn-secondary" style="margin-top:6px;">+ Add field</button>
+                                    <div class="field-help" style="margin-left:0;">Each row becomes a field the model must return. Pick a type (including <code>enum</code>, and <code>object</code>/<code>object[]</code> for nesting), add an optional description, and tick <em>required</em>. The JSON Schema is built for you; switch to <strong>Raw JSON</strong> only for advanced features (numeric/string constraints, <code>$ref</code>, <code>oneOf</code>). Write your prompt to ask for exactly these fields. See the <strong>Prompting guide</strong> above.</div>
+                                </div>
+                                <!-- Raw JSON escape hatch: an arbitrary JSON Schema, validated client-side. -->
+                                <div id="vlm-schema-raw" style="display:none;">
+                                    <textarea id="cfg-vlm-response-schema" rows="5" placeholder='JSON Schema for structured output, e.g.&#10;{"type":"object","properties":{"reading":{"type":"number"}},"required":["reading"]}' style="font-family:monospace;"></textarea>
+                                    <div class="field-help" style="margin-left:0;">A JSON Schema, passed to the model verbatim. Validated as JSON here; the endpoint may still reject schemas its guided decoding can't honor.</div>
+                                </div>
+                            </div>
+                            <div id="vlm-schema-error" class="field-help" style="margin-left:0; display:none; color:#d64541;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced disclosure (all modes): temperature / max tokens -->
+                <div class="form-group">
+                    <label style="cursor:pointer; user-select:none;"><span id="cfg-vlm-advanced-caret">&#9656;</span> Advanced</label>
+                </div>
+                <div id="cfg-vlm-advanced" style="display:none;">
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <input type="number" id="cfg-vlm-temperature" value="" placeholder="0.0" min="0" max="2" step="0.01">
+                        <div class="field-help">Controls randomness in model output. Lower values are more deterministic.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens</label>
+                        <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" max="4096" step="1">
+                        <div class="field-help">Maximum number of tokens in the VLM response.</div>
+                    </div>
+                </div>
+
+                </div><!-- end vlm-analysis-prompting -->
+
+                <!-- Max Concurrent Requests is JSON-only (set it in Default.json's
+                     vlm_analysis); intentionally not exposed in the UI. -->
+            </div>
+            </template>
 
             </div><!-- end collapsible-body (Video Processing) -->
         </div>
@@ -1725,14 +2454,27 @@
 
                 <div class="form-group">
                     <label>VIS API Key</label>
-                    <div class="input-with-toggle">
-                        <input type="password" id="cfg-vi-service-api-key" value="" placeholder="inherited from default config"
-                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-                        <button type="button" id="cfg-vi-service-api-key-toggle" onclick="toggleVisServiceApiKeyVisibility()" title="Show/hide API key">Show</button>
-                        <button type="button" id="cfg-vi-service-api-key-clear" onclick="clearVisServiceApiKey()" title="Stop overriding the API key for this stream">Disable</button>
+                    <div class="secret-slot">
+                        <select id="cfg-vi-service-api-key-source" class="secret-source" onchange="secretSourceChanged('cfg-vi-service-api-key')">
+                            <option value="stored">Use a stored secret</option>
+                            <option value="value">Enter a value</option>
+                        </select>
+                        <div class="input-with-toggle" id="cfg-vi-service-api-key-value-row">
+                            <input type="password" id="cfg-vi-service-api-key" value="" placeholder="inherited from default config"
+                                   autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                            <button type="button" id="cfg-vi-service-api-key-toggle" onclick="toggleVisServiceApiKeyVisibility()" title="Show/hide API key">Show</button>
+                            <button type="button" id="cfg-vi-service-api-key-clear" onclick="clearVisServiceApiKey()" title="Stop overriding the API key for this stream">Disable</button>
+                            <button type="button" class="secret-save-as" disabled onclick="promptStoreSecret('cfg-vi-service-api-key')" title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                        </div>
+                        <div class="secret-store-row" id="cfg-vi-service-api-key-store-row" style="display:none">
+                            <input type="text" id="cfg-vi-service-api-key-store-name" placeholder="secret name">
+                            <button type="button" onclick="confirmStoreSecret('cfg-vi-service-api-key')">Save</button>
+                            <button type="button" onclick="cancelStoreSecret('cfg-vi-service-api-key')">Cancel</button>
+                        </div>
+                        <select id="cfg-vi-service-api-key-secret" style="display:none" onchange="markDirty()"></select>
                     </div>
                     <div class="field-help">Override the <code>X-API-KEY</code> header sent to the Video Intelligence Service (VIS) for this stream only.
-                        A stored key is never shown, so this field is blank even when one is set &mdash; <strong>Disable</strong> is how you drop it and go back to the default config's key.</div>
+                        A stored key is never shown, so this field is blank even when one is set &mdash; <strong>Disable</strong> is how you drop it and go back to the default config's key. Or pick a stored secret: the name is readable, and rotating it on the Secrets page applies on the next reconnect.</div>
                 </div>
                 <hr>
                 <div class="form-section-title" style="margin-top:12px;">Debug Options</div>
@@ -1855,13 +2597,17 @@
 
     </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-chain-editor.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.2.0"></script>
 <script>
     VIF.streamConfig.init();
+    VIF.core.initClickTips(document.querySelector('.content-wrapper.vif-plugin'));
+
+    VIF.core.armTabCounts();
 </script>

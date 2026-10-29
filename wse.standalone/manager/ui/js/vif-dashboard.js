@@ -33,9 +33,6 @@
         }
 
         var resolvedServer = VIF.core.resolveServer();
-        // Used only by the thumbnail fetch and the Spring-session probe - direct
-        // fetches, not SDK calls, that carry their own Authorization header.
-        var encodedCredentials = resolvedServer.encodedCredentials;
         var pathPrefix = 'wse-plugins/server/vif/';
         var host = resolvedServer.host;
         var protocol = resolvedServer.protocol;
@@ -58,6 +55,11 @@
         var skipStatusUpdate = 0;
         var dashboardMutationInFlight = false;
         var liveUpdatesPromise = null;
+        // The SDK error behind the current offline state; null while Engine answers.
+        var lastEngineError = null;
+        // Set once the page itself cannot reach Manager: polling stops, and only
+        // a reload brings it back.
+        var managerUnreachable = false;
         var dashboardRenderInFlight = false;
         var activeSkipSliderInteractions = new Set();
 
@@ -92,9 +94,11 @@
                     });
 
                     jsonData = nextJsonData;
+                    lastEngineError = null;
 
                 } catch (error) {
                     console.error("Error fetching data:", error);
+                    lastEngineError = error;
                     defaultJson();
                 }
             })();
@@ -248,7 +252,11 @@
                     return;
                 }
 
-                await getLiveUpdates();
+                // Once Manager is gone the Engine is not polled again: a poll that
+                // happened to succeed would paint a live dashboard over a dead page.
+                if (!managerUnreachable) {
+                    await getLiveUpdates();
+                }
 
                 if(jsonData == null)
                     return;
@@ -278,10 +286,12 @@
                     const isOffline = jsonData.host.wse_version === 'offline';
                     setConfigButtonsEnabled(false);
                     setDashboardBanner(
-                        isOffline
-                            ? 'Offline &mdash; lost connection to the Engine. Retrying&hellip;'
-                            : 'Connecting to Engine&hellip;',
-                        isOffline ? 'alert' : 'info'
+                        managerUnreachable
+                            ? 'Offline &mdash; this page can no longer reach Manager, so the dashboard stopped polling. Reload the page once Manager answers again.'
+                            : isOffline
+                                ? 'Offline &mdash; ' + VIF.core.explainEngineError(lastEngineError, resolvedServer) + ' Retrying&hellip;'
+                                : 'Connecting to Engine&hellip;',
+                        isOffline || managerUnreachable ? 'alert' : 'info'
                     );
                     renderStatBand();
                     renderHostCard('host-display', "WSE", jsonData.host.wse_version);
@@ -373,6 +383,7 @@
 
                     setThumbnail(id+"-thumbnail", stream);
                     setFramesDetected(id+"-frame-detect-avg", stream);
+                    setOverlayNote(id+"-overlay-note", stream);
                 });
             }
             else
@@ -420,7 +431,7 @@
                                 <div class="vif-row"><div title="source resolution" id="${id}-res"></div>&nbsp;@&nbsp;<div title="Source fps" id="${id}-fps"></div></div>
                                 <div class="vif-row" id="${id}-gopContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? 'display:none;' : ''}"><div title="gop size" id="${id}-gop"></div></div>
                                 <div class="vif-controls vif-skip-controls" id="${id}-skipSliderContainer" style="${(stream.use_transcoder && stream.detector_type !== 'synthetic') ? '' : 'display:none;'}">
-                                    <div class="vif-skip-line">Inference fps<input type="range" class="slider" id="${id}-skipSlider" min="1" max="${stream.frame_rate}" value="${stream.inference_fps}"><span id="${id}-skipValue" class="vif-skip-value">${stream.inference_fps}</span></div>
+                                    <div class="vif-skip-line">Inference fps<input type="range" class="slider" id="${id}-skipSlider" min="1" max="${skipSliderMax(stream)}" value="${stream.inference_fps}" ${vlmSliderPinned(stream) ? 'disabled title="' + vlmPinnedTitle(stream) + '"' : ''}><span id="${id}-skipValue" class="vif-skip-value">${stream.inference_fps}</span></div>
                                     <div class="vif-skip-note-line"><span id="${id}-frames-window" class="frames-window-note"></span></div>
                                 </div>
                                 <div id="${id}-vihost"></div>
@@ -431,7 +442,7 @@
                             <td><div id="${id}-ttl-proc"></div></td>
                             <td><div id="${id}-frame-detect" title="Total Object Processing Time"></div></td>
                             <td><div id="${id}-frame-detect-avg"></div></td>
-                            <td><a id="${id}-thumbnail-link"><img src="${pathPrefix}thumb.png" id="${id}-thumbnail" height=110 alt="Thumbnail"></a></td>
+                            <td><a id="${id}-thumbnail-link"><img src="${pathPrefix}thumb.png" id="${id}-thumbnail" height=110 alt="Thumbnail"></a><div id="${id}-overlay-note" class="overlay-off-note" style="display:none;"></div></td>
                         `;
                         tbody.appendChild(tr);
                         const tr2 = document.createElement('tr');
@@ -530,10 +541,15 @@
                     const skipSliderContainer = document.getElementById(id+"-skipSliderContainer");
                     if (skipSliderContainer) skipSliderContainer.style.display = (stream.use_transcoder && !isSynthetic) ? '' : 'none';
                     slider = document.getElementById(id+"-skipSlider");
-                    slider.max = stream.frame_rate;
+                    slider.max = skipSliderMax(stream);
                     slider.dataset.windowed = (stream.detector_type === 'scene' || stream.detector_type === 'vlm') ? 'true' : 'false';
                     slider.dataset.detector = stream.detector_type || '';
                     slider.dataset.duration = (stream.duration != null) ? String(stream.duration) : '';
+                    // Lets the note tell a capped end stop apart from simply
+                    // sitting at the source frame rate.
+                    slider.dataset.sourceRate = String(stream.frame_rate);
+                    slider.disabled = vlmSliderPinned(stream);
+                    slider.title = slider.disabled ? vlmPinnedTitle(stream) : '';
                     if (!isSkipSliderInteracting(stream.app_name, stream.stream_name)) {
                         slider.value = stream.inference_fps;
                         updateSkipFrameDisplay(id);
@@ -593,7 +609,7 @@
                         reason.className = 'row-status-line';
                         reason.textContent = '';
                     } else if (reason.dataset.vifTip !== reasonText) {
-                        const isError = reasonText.toLowerCase().includes('error');
+                        const isError = String(stream.status).toLowerCase() === 'error' || reasonText.toLowerCase().includes('error');
                         reason.dataset.vifTip = reasonText;
                         // Raw server text — worth a copy button (see initClickTips).
                         reason.dataset.vifTipCopy = '1';
@@ -634,6 +650,7 @@
 
                     setFramesDetected(id+"-frame-detect-avg", stream);
                     setThumbnail(id+"-thumbnail", stream);
+                    setOverlayNote(id+"-overlay-note", stream);
 
                 });
                 header_values = document.getElementById("header-values");
@@ -655,11 +672,10 @@
             // table/thumbnail containers between this pass's DOM lookups.
             if (!thumbnail || !thumbnail_link) return;
 
-            const rand = new Date().getTime();
             var stream_name = stream.stream_name;
-            const thumbnailUrl = VIF.core.client().runtime.streams.ref(stream.app_name, stream_name).thumbnailUrl(
-                VIF.v2map.thumbnailParamsFromV1({ fitMode: 'fitheight', height: 180, overlay: true }));
-            loadImage(`${thumbnailUrl}&random=${rand}`,`${pathPrefix}thumb.png`,thumbnailId);
+            const streamRef = VIF.core.client().runtime.streams.ref(stream.app_name, stream_name);
+            loadImage(streamRef, VIF.v2map.thumbnailParamsFromV1({ fitMode: 'fitheight', height: 180, overlay: true }),
+                `${pathPrefix}thumb.png`, thumbnailId);
             if(stream.use_transcoder)
             {
                 stream_name = stream_name + "-vi";
@@ -667,9 +683,39 @@
             thumbnail_link.href = `javascript:loadPlayerPage('${hostname}','${stream.app_name}','${stream_name}')`;
         }
 
+        // The Overlays/ObjectTracking listeners draw detections onto the played
+        // stream and this thumbnail. When none will fire, the video is plain and
+        // a viewer can't tell why - so the off state gets a quiet note under the
+        // thumbnail, and the normal on state stays silent. Rebuilt only when the
+        // state flips, so the 1s poll never rewrites a title the cursor is on.
+        function setOverlayNote(noteId, stream)
+        {
+            const note = document.getElementById(noteId);
+            if (!note) return;
+            const listeners = stream.vif_event_listeners;
+            let off = false;
+            if (stream.active && listeners) {
+                off = !Object.keys(listeners).some((name) => {
+                    const entry = listeners[name] || {};
+                    const cls = String(entry.class_name || '');
+                    if (cls.indexOf('OverlayEvent') === -1 && cls.indexOf('ObjectTracking') === -1) return false;
+                    const methods = entry.methods || [];
+                    return methods.length > 0 && methods.indexOf('disabled') === -1;
+                });
+            }
+            const state = off ? 'off' : 'on';
+            if (note.dataset.overlayState === state) return;
+            note.dataset.overlayState = state;
+            note.textContent = off ? 'Overlay off' : '';
+            note.title = off
+                ? 'No overlay is drawn for this stream, so playback and this thumbnail show the video without detections. Turn overlays on from the stream playback page (click the thumbnail).'
+                : '';
+            note.style.display = off ? '' : 'none';
+        }
+
         function getDetectorTypeIconPath(detectorType) {
             const normalizedType = String(detectorType || '').toLowerCase();
-            if (normalizedType === 'object' || normalizedType === 'scene' || normalizedType === 'vlm' || normalizedType === 'synthetic') {
+            if (normalizedType === 'object' || normalizedType === 'scene' || normalizedType === 'vlm' || normalizedType === 'synthetic' || normalizedType === 'verify' || normalizedType === 'motion' || normalizedType === 'chain') {
                 return `${pathPrefix}${normalizedType}.png`;
             }
             return `${pathPrefix}unknown.png`;
@@ -690,7 +736,11 @@
             }
         }
 
-        async function loadImage(imageUrl, defaultImageUrl, imgElementId) {
+        // The thumbnail comes through the SDK transport like every other
+        // request, so it is authenticated the way the Engine asks, and is
+        // shown from a blob: an <img src> on the REST port could carry no
+        // credentials at all.
+        async function loadImage(streamRef, thumbnailParams, defaultImageUrl, imgElementId) {
             const imgElement = document.getElementById(imgElementId);
             if (!imgElement) return;
 
@@ -698,21 +748,7 @@
             imgElement.dataset.requestId = requestId;
 
             try {
-                const response = await fetch(imageUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                if (!response.ok) {
-                    // Handle HTTP error statuses (e.g., 404, 500)
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                // Convert the response to a Blob (binary data)
-                const imageBlob = await response.blob();
-                // Create an object URL for the blob
+                const imageBlob = await streamRef.thumbnail(thumbnailParams);
                 const objectUrl = URL.createObjectURL(imageBlob);
 
                 if (imgElement.dataset.requestId !== requestId) {
@@ -787,6 +823,7 @@
             card.innerHTML = `
                  <b>${stream.app_name} / ${stream.stream_name}</b>&nbsp;(${stream.width}x${stream.height} @ ${stream.frame_rate}fps)<br>
                  <a id="${id}-thumbnail-link"><img id="${id}-thumbnail" class="thumbnail-card-image" alt="Thumbnail"></a>
+                 <div id="${id}-overlay-note" class="overlay-off-note" style="display:none;"></div>
                 <br><div id="${id}-frame-detect-avg"></div>
             `;
             hostContainer.appendChild(card);
@@ -944,6 +981,7 @@
             let best = null;
             if (map) {
                 for (const id in map) {
+                    if (map[id] == null) continue;
                     const value = Number(map[id]);
                     if (!isNaN(value) && (best == null || value > best.value)) {
                         best = { id: id, value: value };
@@ -961,6 +999,14 @@
 
         // The Inference Host cell's sticky headline host (see renderStatBand).
         let primaryInferenceHost = null;
+
+        function observationStatus(instance)
+        {
+            if (instance.reachable !== false) return '';
+            return instance.age_seconds == null
+                ? 'waiting for first reading'
+                : 'last seen ' + Math.max(0, Math.floor(Number(instance.age_seconds))) + 's ago';
+        }
 
         function renderStatBand()
         {
@@ -1022,7 +1068,7 @@
                 barPct: hostUtil ? hostUtil.value : null,
                 sub: [gpuIdentity.join(' · '), videoEngine.join(' · ')],
                 muted: hostUtil == null,
-                tip: "The Wowza Streaming Engine (WSE) host machine's GPU: utilization, video-engine (decode/encode) load, and memory-bus busy share (not VRAM in use)."
+                tip: "The Wowza Streaming Engine (WSE) host machine's GPU: utilization, video-engine (decode/encode) load, and memory percentage (memory-controller activity on discrete NVIDIA GPUs; shared system RAM usage on Jetson)."
                     + (host.nvidia_driver_version ? ' Driver ' + host.nvidia_driver_version + '.' : ''),
             });
 
@@ -1034,8 +1080,9 @@
             function hostBits(inst) {
                 const bits = [];
                 if (inst.version) bits.push(inst.version);
-                if (inst.reachable === false) bits.push('metrics unavailable');
+                if (inst.reachable === false) bits.push('metrics unavailable · ' + observationStatus(inst));
                 else if (inst.cpu_pct != null) bits.push('CPU ' + Number(inst.cpu_pct).toFixed(0) + '%');
+                if (Array.isArray(inst.streams) && inst.streams.length) bits.push('Streams: ' + inst.streams.join(', '));
                 return bits;
             }
             if (instances.length > 1) {
@@ -1075,20 +1122,23 @@
                         util: gpu.utilization_pct != null ? Number(gpu.utilization_pct) : null,
                         usedBytes: gpu.memory_used_bytes,
                         totalBytes: gpu.memory_total_bytes,
+                        stale: inst.reachable === false,
+                        observation: observationStatus(inst),
                     });
                 });
             });
             const multiGpu = allGpus.length > 1;
+            const showGpuLines = multiGpu || allGpus.some((gpu) => gpu.stale);
             let util = null;
             let utilDevice = null;
             allGpus.forEach((gpu) => {
-                if (gpu.util != null && (util == null || gpu.util > util)) {
+                if (!gpu.stale && gpu.util != null && (util == null || gpu.util > util)) {
                     util = gpu.util;
                     utilDevice = gpu.label;
                 }
             });
             let utilSource = '';
-            if (util == null) {
+            if (util == null && allGpus.length === 0) {
                 const hostBest = maxEntry(host.gpu_avg);
                 if (hostBest) {
                     util = hostBest.value;
@@ -1099,15 +1149,16 @@
             // The card/driver/CUDA identify the WSE HOST's GPU, not the inference
             // instance's (which can be a different machine entirely) — they
             // belong to the WSE GPU cell below, never this one.
-            const utilLines = multiGpu
+            const utilLines = showGpuLines
                 ? allGpus.slice(0, 4).map((gpu) =>
-                    gpu.label + ' — ' + (gpu.util != null ? gpu.util.toFixed(0) + '%' : 'n/a'))
+                    gpu.label + ' — ' + (gpu.util != null ? gpu.util.toFixed(0) + '%' : 'n/a')
+                        + (gpu.stale ? ' · ' + gpu.observation : ''))
                 : [];
             if (multiGpu && allGpus.length > 4) utilLines.push('+' + (allGpus.length - 4) + ' more');
             bandCell(band, 'Inference GPU', {
                 value: util != null ? util.toFixed(0) + '%' : null,
                 barPct: util,
-                sub: multiGpu ? '' : (utilDevice != null ? String(utilDevice) + utilSource : ''),
+                sub: showGpuLines ? '' : (utilDevice != null ? String(utilDevice) + utilSource : ''),
                 subLines: utilLines,
                 muted: util == null,
                 tip: 'How busy the GPU running the models is. Low values mean headroom '
@@ -1120,7 +1171,7 @@
             let memPct = null;
             let memSub = '';
             allGpus.forEach((gpu) => {
-                if (gpu.usedBytes != null && gpu.totalBytes) {
+                if (!gpu.stale && gpu.usedBytes != null && gpu.totalBytes) {
                     const pct = (gpu.usedBytes / gpu.totalBytes) * 100;
                     if (memPct == null || pct > memPct) {
                         memPct = pct;
@@ -1129,12 +1180,13 @@
                 }
             });
             const memLines = [];
-            if (multiGpu) {
+            if (showGpuLines) {
                 allGpus.slice(0, 4).forEach((gpu) => {
                     if (gpu.usedBytes != null && gpu.totalBytes) {
                         memLines.push(gpu.label + ' — '
                             + ((gpu.usedBytes / gpu.totalBytes) * 100).toFixed(0) + '% ('
-                            + formatBytes(gpu.usedBytes) + ' / ' + formatBytes(gpu.totalBytes) + ')');
+                            + formatBytes(gpu.usedBytes) + ' / ' + formatBytes(gpu.totalBytes) + ')'
+                            + (gpu.stale ? ' · ' + gpu.observation : ''));
                     }
                 });
                 if (allGpus.length > 4) memLines.push('+' + (allGpus.length - 4) + ' more');
@@ -1169,10 +1221,14 @@
             renderHostCard('host-display', "CPU", Number(jsonData.host.cpu_avg).toFixed(0), "%");
 
             const infoLine = document.getElementById('host-nvidia');
-            if(jsonData.host.nvidia_gpu_type != 'unknown')
+            if(jsonData.host.nvidia_gpu_type != 'unknown' || Object.keys(jsonData.host.gpu_avg || {}).length)
             {
                 if (infoLine) {
-                    infoLine.textContent = `Card: ${jsonData.host.nvidia_gpu_type}  ·  Driver: ${jsonData.host.nvidia_driver_version}  ·  CUDA: ${jsonData.host.cuda_version}`;
+                    const info = [];
+                    if (jsonData.host.nvidia_gpu_type && jsonData.host.nvidia_gpu_type !== 'unknown') info.push('Card: ' + jsonData.host.nvidia_gpu_type);
+                    if (jsonData.host.nvidia_driver_version && jsonData.host.nvidia_driver_version !== 'unknown') info.push('Driver: ' + jsonData.host.nvidia_driver_version);
+                    if (jsonData.host.cuda_version && jsonData.host.cuda_version !== 'unknown') info.push('CUDA: ' + jsonData.host.cuda_version);
+                    infoLine.textContent = info.join('  ·  ');
                 }
 
                 const metricMaps = [
@@ -1199,7 +1255,7 @@
                         // groups' "Memory" column, which does show real VRAM
                         // used/total. Honest label + tooltip.
                         { key: 'mem_bandwidth', label: 'Mem Bandwidth',
-                            tip: "Percent of time the GPU's memory controller was busy — not VRAM in use." },
+                            tip: "Memory-controller activity on discrete NVIDIA GPUs; shared system RAM usage on Jetson. This is not allocated GPU VRAM." },
                         { key: 'encode', label: 'Encode' },
                         { key: 'decode', label: 'Decode' },
                     ], gpuIds.map((id) => ({
@@ -1397,6 +1453,30 @@
           });
         }
 
+        // A VLM window is one request of Inference FPS × window-seconds images and
+        // the endpoint accepts at most 8 of them, so a VLM row's slider simply
+        // ends at the rate that fills the window to the cap - it cannot be
+        // dragged into a rate the endpoint would not take. A window that already
+        // fills the cap at 1 fps disables the slider entirely; the window itself
+        // is what needs changing then, on Stream Configs.
+        const VLM_IMAGE_CAP = (window.VIF && VIF.fieldRegistry && VIF.fieldRegistry.VLM_TYPICAL_ENDPOINT_IMAGE_CAP) || 8;
+        function skipSliderMax(stream) {
+            const rate = Number(stream.frame_rate) || 1;
+            if (stream.detector_type !== 'vlm') return rate;
+            const dur = Number(stream.duration);
+            if (!isFinite(dur) || dur <= 0) return rate;
+            return Math.max(1, Math.min(rate, Math.floor(VLM_IMAGE_CAP / dur)));
+        }
+        function vlmSliderPinned(stream) {
+            return stream.detector_type === 'vlm'
+                && skipSliderMax(stream) <= 1 && Number(stream.inference_fps) <= 1;
+        }
+        function vlmPinnedTitle(stream) {
+            return 'At 1 fps, this ' + stream.duration + 's window already makes a full batch of '
+                + VLM_IMAGE_CAP + ' frames - the most the AI model takes at once. '
+                + 'For a faster rate, shorten the window on Configs > Stream Configs.';
+        }
+
         function computeFramesWindowNote(sliderValue, durationRaw, windowed) {
             if (!windowed) return '';
             const dur = Number(durationRaw);
@@ -1417,6 +1497,11 @@
             if (noteEl) {
                 const noteText = computeFramesWindowNote(slider.value, slider.dataset.duration, slider.dataset.windowed === 'true');
                 noteEl.textContent = noteText;
+                // A VLM slider ends at the rate whose window makes a full batch;
+                // sitting on that end stop, the tip leads with the why.
+                const atStop = slider.dataset.detector === 'vlm' && !slider.disabled
+                    && Number(slider.value) >= Number(slider.max)
+                    && Number(slider.max) < Number(slider.dataset.sourceRate || Infinity);
                 // Circled-? help-tip for the per-window note: its explanatory
                 // title lives on the tip, appended right AFTER the note - but only
                 // while the note actually has text (non-windowed detectors leave
@@ -1430,14 +1515,12 @@
                         noteTip.textContent = '?';
                         noteEl.insertAdjacentElement('afterend', noteTip);
                     }
-                    // VLM endpoints cap images per request and the service thins oversized
-                    // windows before the model sees them, so a VLM row's tip must not imply
-                    // every captured frame is analyzed. Scene windows have no such cap.
                     noteTip.title = slider.dataset.detector === 'vlm'
-                        ? 'One analysis request per window: Inference FPS × duration frames.\n'
-                            + 'VLM endpoints cap images per request (the bundled endpoint defaults to 8). '
-                            + 'Frames beyond the cap are evenly subsampled away by the service, '
-                            + 'so they add bandwidth, not analysis.'
+                        ? (atStop ? 'This is the most this window allows.\n' : '')
+                            + '• Frames go to the AI model in batches: one batch per window.\n'
+                            + '• The model takes at most ' + VLM_IMAGE_CAP + ' frames per batch.\n'
+                            + '• The slider stops at the highest rate that still fits this stream’s window.\n'
+                            + '• Want a faster rate? Shorten the window on Configs > Stream Configs.'
                         : 'Batched detectors send one request per window. Each window contains "Inference FPS × duration" frames.';
                 } else if (noteTip) {
                     noteTip.remove();
@@ -1489,15 +1572,16 @@
             springSecurityCheck();
         }
 
+        // The Manager's own Spring session is what this probes, and that
+        // session is the cookie: an Authorization header here would offer the
+        // Engine's credential to the Manager, which has no use for it.
         async function springSecurityCheck() {
             try {
 
                 const response = await fetch(`${protocol}//${host}`, {
                     method: 'GET',
-                    headers: {
-                        'Authorization': `Basic ${encodedCredentials}`,
-                        'Content-Type': 'application/json'
-                    }
+                    credentials: 'same-origin',
+                    cache: 'no-store'
                 });
 
                 content = await response.text();
@@ -1506,6 +1590,7 @@
                 // Config buttons stay visible (F13) - defaultJson() + renderDashboard()
                 // below drive them into the disabled "Waiting for Engine connection"
                 // state via the offline branch of renderDashboard's early return.
+                managerUnreachable = true;
                 defaultJson();
                 clearInterval(renderdashboardId);
                 clearInterval(securityCheckId);

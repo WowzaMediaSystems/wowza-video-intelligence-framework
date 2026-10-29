@@ -11,7 +11,7 @@ VIF.vod = VIF.vod || {};
 	'use strict';
 	const { h, clear, api, toast, DETECTOR_META } = V;
 
-	const ROW_CAP = 5000; // strip/band fetch cap; the browser below pages server-side
+	const WLIST_PAGE = 1000; // windows-pane rows per page; motion jobs store one row per frame
 	const STRIP_HUES = 6; // distinct class colors — must match the --strip-c0..c5 tokens in vod.css
 
 	const view = {
@@ -27,10 +27,10 @@ VIF.vod = VIF.vod || {};
 			this.stopPlayer(); // a remount must never inherit the previous job's stream
 			this.state = {
 				id: params && params.id, job: null, error: null,
-				rows: [], rowsTotal: 0, rowsPartial: false, noResults: null,
+				rows: [], rowsTotal: 0, noResults: null,
 				browser: { offset: 0, limit: 50, from_ms: '', to_ms: '', page: null, error: null, seq: 0 },
 				tail: false, settlePolls: 0, thumbUrl: null, openRows: new Set(),
-				playerOn: false, playError: null, stripSel: null,
+				playerOn: false, playError: null, stripSel: null, wpage: 0,
 				browserOpen: false, openZero: new Set(), openZeroPane: new Set(),
 			};
 			if (!this.state.id) { this.state.error = 'No job selected.'; this.render(); return; }
@@ -112,7 +112,7 @@ VIF.vod = VIF.vod || {};
 			const s = this.state;
 			try {
 				let offset = s.rows.length, total = Infinity;
-				while (offset < total && s.rows.length < ROW_CAP) {
+				while (offset < total) {
 					const page = await api.results(s.id, { offset, limit: 1000 });
 					if (gen !== V.gen) return;
 					total = page.total || 0;
@@ -121,7 +121,6 @@ VIF.vod = VIF.vod || {};
 					offset += page.count;
 				}
 				s.rowsTotal = total === Infinity ? s.rows.length : total;
-				s.rowsPartial = s.rows.length < s.rowsTotal;
 				s.noResults = null;
 			} catch (e) {
 				if (e.status === 404) { s.noResults = e.message; }
@@ -149,6 +148,10 @@ VIF.vod = VIF.vod || {};
 			// defaults, not filters: the request goes out unfiltered.
 			if (from !== '' && +from === 0) from = '';
 			if (to !== '' && s.job && s.job.sourceDurationMs && +to >= s.job.sourceDurationMs) to = '';
+			// The API's to bound is exclusive (windows STARTING in [from, to)). A
+			// typed end means "through this moment", so it goes out one ms later; a
+			// strip-set end is a shared cell edge and stays exact (VI-937 item 25).
+			if (to !== '' && !b.toIsExclusive) to = +to + 1;
 			try {
 				const page = await api.results(s.id, { offset: b.offset, limit: b.limit, from_ms: from, to_ms: to });
 				if (gen !== V.gen || seq !== b.seq) return;
@@ -197,27 +200,29 @@ VIF.vod = VIF.vod || {};
 				: type === 'vlm' ? (det.endpoint && det.endpoint.model)
 				: nvidia ? 'SVD' : null;
 			put('Source', h('span', { class: 'jval' }, job.file || s.id));
-			put('Status', h('span', { class: 'st st-' + job.state }, job.state));
+			put('Status', h('span', { class: 'st st-' + job.state }, V.stateLabel(job.state)));
 			put('Job ID', h('a', { href: '#', class: 'jid mono', title: 'vod-' + s.id + '\nClick to copy', onclick: copyId },
 				'vod-' + shortId + ' ⧉'));
 			if (job.streamGroupConfig || type) put('Config',
 				h('a', { href: '#', class: 'cfglink mono', title: 'Show the analysis options this job ran with',
 					onclick: (e) => { e.preventDefault(); V.showJobOptions(job); } }, rule));
+			if (job.tag) put('Tag', h('span', { class: 'tag tag-n verbatim' }, job.tag));
 			// Endpoint models arrive as org/name paths (Qwen/Qwen3-VL-4B-Instruct-FP8)
 			// and wrap the row: show the basename, ellipsize what still overflows,
 			// and keep the full path in the tooltip.
 			const modelShort = model ? String(model).split('/').pop() : null;
-			if (type) put('Detection type',
-				h('span', { class: 'jval', style: 'display:inline-flex;align-items:center;gap:6px;min-width:0' },
-					h('img', { class: 'dticon', src: 'wse-plugins/server/vif/'
-						+ (['object', 'scene', 'vlm', 'synthetic'].indexOf(type) >= 0 ? type : 'unknown') + '.png', alt: '' }),
-					h('span', { style: 'white-space:nowrap' }, DETECTOR_META[type] ? DETECTOR_META[type].name : type),
-					modelShort ? h('span', { class: 'jmodel', title: modelShort === model ? null : model },
-						'· ' + modelShort) : null,
-					nvidia ? h('img', { class: 'nvlogo', src: 'wse-plugins/server/vif/nvidia-logo-horz.svg',
-						alt: 'NVIDIA', title: 'NVIDIA SVD NIM' }) : null));
-			if (job.tag) put('Tag', h('span', { class: 'tag tag-n' }, job.tag));
-			return h('div', { class: 'jgrid' }, cells);
+			// The detection type is the page's headline fact: its own line above
+			// the labeled grid, a step larger (.dtline).
+			const dtLine = type ? h('div', { class: 'dtline' },
+				h('span', { class: 'dtlabel' }, 'Detection type:'),
+				h('img', { class: 'dticon', src: 'wse-plugins/server/vif/'
+					+ (['object', 'scene', 'vlm', 'synthetic', 'motion', 'chain'].indexOf(type) >= 0 ? type : 'unknown') + '.png', alt: '' }),
+				h('span', { style: 'white-space:nowrap' }, DETECTOR_META[type] ? DETECTOR_META[type].name : type),
+				modelShort ? h('span', { class: 'jmodel', title: modelShort === model ? null : model },
+					'· ' + modelShort) : null,
+				nvidia ? h('img', { class: 'nvlogo', src: 'wse-plugins/server/vif/nvidia-logo-horz.svg',
+					alt: 'NVIDIA', title: 'NVIDIA SVD NIM' }) : null) : null;
+			return h('div', null, dtLine, h('div', { class: 'jgrid' }, cells));
 		},
 
 		/**
@@ -295,8 +300,19 @@ VIF.vod = VIF.vod || {};
 			return conn.protocol + '//' + host + port + '/vod/_definst_/mp4:' + file + '/playlist.m3u8';
 		},
 
+		/** An explicit jump to a moment re-engages Follow: the newest intent wins,
+		    the same way scrolling back to the bottom does. */
+		engageFollow() {
+			const s = this.state;
+			s.followTail = true;
+			const btn = this.root && this.root.querySelector('.wfollow');
+			if (btn) btn.classList.add('on');
+			this.syncPlayingRow(true);
+		},
+
 		async startPlayer(seekMs) {
 			const s = this.state;
+			if (seekMs !== undefined) this.engageFollow();
 			if (s.playerOn) { if (seekMs !== undefined) this.seekTo(seekMs); return; }
 			const url = this.playbackUrl();
 			if (!url) return;
@@ -311,13 +327,31 @@ VIF.vod = VIF.vod || {};
 			// already mounted — never mount twice, just honor the seek.
 			if (s.playerOn) { if (seekMs !== undefined) this.seekTo(seekMs); return; }
 			if (!ok) {
-				s.playError = 'No HLS playlist at ' + url + '. Playback needs the Engine’s standard "vod" '
-					+ 'application (stock installs ship it; the compose stack may need it created once, see the VOD guide).';
+				s.playError = await this.playRefusal(url);
+				if (gen !== V.gen) return;
 				this.render();
 				return;
 			}
 			this.pendingSeekMs = seekMs === undefined ? null : seekMs;
 			this.mountPlayer(url);
+		},
+
+		/* Two very different failures share the probe: the vod application is
+		   missing, or the source file itself is gone. The files listing says which,
+		   so the error can name the actual problem. */
+		async playRefusal(url) {
+			const s = this.state;
+			let fileGone = false;
+			try {
+				const listing = await api.listFiles();
+				fileGone = !listing.truncated
+					&& !(listing.files || []).some((f) => f.file === (s.job && s.job.file));
+			} catch (e) { /* listing unavailable: keep the generic message */ }
+			return fileGone
+				? 'The source file ' + s.job.file + ' is no longer in the content directory, so there is '
+					+ 'nothing to play. The stored results and this report remain readable.'
+				: 'No HLS playlist at ' + url + '. Playback needs the Engine’s standard "vod" '
+					+ 'application (stock installs ship it; the compose stack may need it created once, see the VOD guide).';
 		},
 
 		mountPlayer(url) {
@@ -352,6 +386,7 @@ VIF.vod = VIF.vod || {};
 				video.play().catch(() => { /* autoplay blocked — the controls are right there */ });
 			});
 			video.addEventListener('timeupdate', () => this.movePlayhead());
+			video.loop = V.playerLoopOn();
 			this.videoEl = video;
 			s.playerOn = true;
 			s.playError = null;
@@ -370,8 +405,14 @@ VIF.vod = VIF.vod || {};
 
 		seekTo(ms) {
 			if (!this.videoEl) return;
-			if (this.videoEl.readyState >= 1) this.videoEl.currentTime = ms / 1000;
-			else this.pendingSeekMs = ms;
+			if (this.videoEl.readyState >= 1) {
+				this.videoEl.currentTime = ms / 1000;
+				// Every caller is a "show me this moment" gesture, so a player that had
+				// ended (or was paused) plays again instead of seeking silently.
+				this.videoEl.play().catch(() => { /* autoplay blocked — the controls are right there */ });
+			} else {
+				this.pendingSeekMs = ms;
+			}
 		},
 
 		/** Direct DOM: the marker rides timeupdate, far too often to re-render for. */
@@ -427,6 +468,13 @@ VIF.vod = VIF.vod || {};
 				el.classList.toggle('playing', on);
 				if (on) hit = el;
 			});
+			// Follow across pages: when the playhead's row lives on another page of the
+			// windows pane, show that page (the re-render re-enters here and finds it).
+			if (!hit && (force || s.followTail !== false) && s.rows.length > WLIST_PAGE) {
+				const k = this.rowIndexAt(t);
+				const pg = k >= 0 ? Math.floor(k / WLIST_PAGE) : -1;
+				if (pg >= 0 && pg !== s.wpage) { s.wpage = pg; this.render(); return; }
+			}
 			if (hit && (force || s.followTail !== false)) {
 				const delta = hit.getBoundingClientRect().top - list.getBoundingClientRect().top;
 				const target = Math.max(0, list.scrollTop + delta - list.clientHeight / 2 + hit.offsetHeight / 2);
@@ -666,9 +714,9 @@ VIF.vod = VIF.vod || {};
 			} else if (s.noResults) {
 				root.appendChild(h('div', { class: 'empty' }, s.noResults));
 			} else {
-				root.appendChild(this.renderStrip(type));
+				if (type !== 'chain') root.appendChild(this.renderStrip(type));
 				root.appendChild(h('div', { class: 'rbody' },
-					h('div', null, this.renderWindows(type)),
+					h('div', null, type === 'chain' ? V.chain.windows(this) : this.renderWindows(type)),
 					h('div', null, this.renderFrame(type))));
 				root.appendChild(this.renderBrowser());
 			}
@@ -689,6 +737,10 @@ VIF.vod = VIF.vod || {};
 			restoreScroll(this.letPageShrink ? null : root.lastElementChild);
 			this.letPageShrink = false;
 			this.movePlayhead();
+			// The rebuild and its scroll restore reflow the list; for a beat, scroll
+			// events are layout settling, not the user scrolling away (VI-937 #28:
+			// opening the drawer used to disarm Follow).
+			this.quietScrollUntil = Date.now() + 300;
 		},
 
 		/* One glance across the band: progress (or duration once done) first, what the
@@ -725,11 +777,16 @@ VIF.vod = VIF.vod || {};
 					'How far through the video the analysis is, by media time; not how long it has been running.', pct));
 			}
 
-			const partialSub = s.rowsPartial ? ' · first ' + ROW_CAP + ' rows' : '';
-			const partialTip = s.rowsPartial
-				? ' These numbers read the first ' + ROW_CAP + ' stored rows; the Detection details drawer below pages through all of them.' : '';
-
-			if (type === 'synthetic' && rows.length) {
+			if (type === 'chain' && rows.length) {
+				const counts = V.chain.summary(rows);
+				cells.push(cell('Chain windows', String(s.rowsTotal || counts.windows),
+					counts.historical ? counts.historical + ' with incomplete historical detail' : 'complete retained stage history',
+					'Each completed media window contributes one retained chain result.'));
+				cells.push(cell('Stage executions', String(counts.executions), 'across loaded windows',
+					'Every retained execution, including revisits. Earlier executions missing from old records are not counted.'));
+				cells.push(cell('Degraded windows', String(counts.degraded), 'one or more stages unavailable',
+					'Windows containing a degraded stage result.'));
+			} else if (type === 'synthetic' && rows.length) {
 				const scores = rows.map((r) => r.synthetic_score).filter((x) => typeof x === 'number');
 				const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 				const peak = scores.length ? Math.max.apply(null, scores) : null;
@@ -785,20 +842,19 @@ VIF.vod = VIF.vod || {};
 							: run + (run === 1 ? ' window' : ' windows')));
 				}
 				if (unscored) receipts.push('Unscored: ' + unscored + (unscored === 1 ? ' window' : ' windows') + ', no score from the service');
-				cells.push(cell('Verdict',
+				cells.push(cell('Evaluation',
 					!flagged ? 'No synthetic content detected'
 						: over ? 'Synthetic content detected'
 						: promoted ? 'Synthetic segment detected'
 						: 'Likely real video',
 					[share ? h('div', { class: 'rcsv' }, share) : null,
-						h('div', null, (balance || (thrLabel ? 'threshold ' + thrLabel : 'no scored windows')) + partialSub)],
+						h('div', null, (balance || (thrLabel ? 'threshold ' + thrLabel : 'no scored windows')))],
 					(mean !== null ? 'Synthetic score ' + Math.round(100 * mean) + '%: the average across all '
 							+ rows.length + ' analyzed windows'
 							+ (thrLabel ? ', judged against the ' + thrLabel + ' classification threshold' : '')
 							+ '. Lower means stronger evidence of real content.'
 						: 'Each window is judged against the classification threshold' + (thrLabel ? ' (' + thrLabel + ')' : '') + '.')
-					+ (receipts.length ? '\n\n' + receipts.join('\n') : '')
-					+ partialTip,
+					+ (receipts.length ? '\n\n' + receipts.join('\n') : ''),
 					knownMs ? 100 * synMs / knownMs : undefined, 'syn'));
 				cells.push(cell('Peak score', peak !== null ? peak.toFixed(3) : '—',
 					mean !== null ? 'mean ' + mean.toFixed(3) : null,
@@ -807,9 +863,9 @@ VIF.vod = VIF.vod || {};
 				const answered = rows.filter((r) => r.content || (r.detections || []).length).length;
 				const degraded = rows.filter((r) => r.degraded).length;
 				cells.push(cell('Windows answered', answered + ' / ' + rows.length,
-					(degraded ? degraded + ' degraded' : 'one model call each') + partialSub,
+					(degraded ? degraded + ' degraded' : 'one model call each'),
 					'Windows where the model returned content or detections. Degraded windows got no usable answer '
-					+ '(endpoint trouble) but the job kept going.' + partialTip));
+					+ '(endpoint trouble) but the job kept going.'));
 				const modeKey = this.vlmMode() || 'describe';
 				cells.push(cell('Mode', modeKey.charAt(0).toUpperCase() + modeKey.slice(1),
 					(rows.find((r) => r.model_name) || {}).model_name || null,
@@ -822,31 +878,34 @@ VIF.vod = VIF.vod || {};
 					for (const r of rows) for (const d of (r.detections || [])) { total++; if (d.class_name) classes.add(d.class_name); }
 					const det = (job.effectiveConfig || job.config || {}).detector || {};
 					const cfgN = (((det.detect || {}).classes) || det.classes || []).length;
-					cells.push(cell('Detections', String(total), 'raw, across stored windows' + partialSub,
-						'Every detection in every stored window, added up.\nThe same subject seen in five windows counts five times: this counts sightings, not distinct objects.' + partialTip));
+					cells.push(cell('Detections', String(total), 'raw, across stored windows',
+						'Every detection in every stored window, added up.\nThe same subject seen in five windows counts five times: this counts sightings, not distinct objects.'));
 					cells.push(cell('Classes seen', String(classes.size), cfgN ? 'of ' + cfgN + ' configured' : null,
-						'Distinct class names among the detections so far.' + partialTip));
+						'Distinct class names among the detections so far.'));
 				}
 			} else if ((type === 'object' || type === 'scene') && rows.length) {
 				let total = 0; const classes = new Set();
 				for (const r of rows) for (const d of (r.detections || [])) { total++; if (d.class_name) classes.add(d.class_name); }
-				cells.push(cell('Detections', String(total), 'raw, across stored windows' + partialSub,
-					'Every detection in every stored window, added up.\nThe same object seen in five windows counts five times: this counts sightings, not distinct objects.' + partialTip));
+				cells.push(cell('Detections', String(total), 'raw, across stored windows',
+					'Every detection in every stored window, added up.\nThe same object seen in five windows counts five times: this counts sightings, not distinct objects.'));
 				cells.push(cell('Windows', String(s.rowsTotal || rows.length), 'one analysis request each',
 					'Each window is one slice of media the service analyzed and answered, with one stored row each.'));
 				const cfg = (job.effectiveConfig || job.config || {}).detector || {};
 				const cfgN = (cfg.classes || []).length;
 				cells.push(cell('Classes seen', String(classes.size), cfgN ? 'of ' + cfgN + ' configured' : null,
-					'Distinct class names among the detections so far.' + partialTip));
+					'Distinct class names among the detections so far.'));
 			}
 
-			// The ratio only informs when the numbers diverge (running, keyframe-bound,
-			// truncated); a finished job that answered everything says so in one number.
-			const settled = job.state === 'completed' && job.requestsTotal
-				&& job.requestsSent >= job.requestsTotal;
+			// The ratio only informs while the job is going: completed means every
+			// needed request was answered, so a finished job says one number even
+			// when the up-front estimate overshot (VI-937 item 23). A job that has
+			// not sent anything yet says so instead of 0 / ?.
+			const settled = job.state === 'completed';
+			const unstarted = !job.requestsSent && !job.requestsTotal && !isTerminal(job);
 			cells.push(cell('Requests',
-				settled ? String(job.requestsSent) : job.requestsSent + ' / ' + (job.requestsTotal || '?'),
-				(settled ? 'all requests answered' : 'answered / expected')
+				settled ? String(job.requestsSent)
+					: unstarted ? '—' : job.requestsSent + ' / ' + (job.requestsTotal || '?'),
+				(settled ? 'all requests answered' : unstarted ? 'waiting for a worker' : 'answered / expected')
 					+ (job.resumes ? ' · resumed ×' + job.resumes : ''),
 				(type === 'object'
 					? 'Total analysis requests processed by the service.'
@@ -871,37 +930,52 @@ VIF.vod = VIF.vod || {};
 			const lastW = rows[rows.length - 1].detection_window || {};
 			const endMs = s.job.sourceDurationMs || lastW.to_time_code || lastW.from_time_code || 0;
 			this.stripEndMs = endMs;
+			const terminal = isTerminal(s.job);
+			// A completed job analyzed the whole clip; anything else (running, failed,
+			// cancelled) reached only doneMs, and the strip must say so past that point.
+			const completed = s.job.state === 'completed';
+			const doneMs = completed ? endMs : Math.max(s.job.mediaTimeMs || 0,
+				this.rowEndMs(rows[rows.length - 1]) ?? this.rowStartMs(rows[rows.length - 1]) ?? 0);
 
-			const mkCell = (bucket, i, n) => {
+			const mkCell = (bucket, i, startMs, cellEndMs) => {
 				const entries = this.classEntries(bucket);
 				return {
 					idx: i, rows: bucket, n: bucket.length,
-					v: Math.max.apply(null, bucket.map((r) => this.rowValue(r, type))),
+					v: bucket.length ? Math.max.apply(null, bucket.map((r) => this.rowValue(r, type))) : 0,
 					low: bucket.every((r) => this.rowLow(r, type)),
-					startMs: this.rowStartMs(bucket[0]) ?? Math.round(endMs * i / n),
-					lastEndMs: this.rowEndMs(bucket[bucket.length - 1]),
+					startMs, endMs: cellEndMs,
+					pend: !bucket.length && cellEndMs > doneMs,
 					entries, classes: new Set(entries.map((e) => e.name)),
 				};
 			};
 			let cells;
-			if (rows.length <= BIN_LIMIT) {
-				cells = rows.map((r, i) => mkCell([r], i, rows.length));
-			} else {
-				cells = [];
-				const per = rows.length / BIN_LIMIT;
-				for (let i = 0; i < BIN_LIMIT; i++) {
-					// a binned cell covers its whole bucket — start/end/hovercard say so
-					const bucket = rows.slice(Math.floor(i * per), Math.max(Math.floor(i * per) + 1, Math.floor((i + 1) * per)));
-					cells.push(mkCell(bucket, i, BIN_LIMIT));
+			if (completed && rows.length <= BIN_LIMIT) {
+				cells = rows.map((r, i) => mkCell([r], i, this.rowStartMs(r) ?? Math.round(endMs * i / rows.length), null));
+				for (let i = 0; i < cells.length; i++) {
+					const c = cells[i];
+					const re = this.rowEndMs(c.rows[0]);
+					c.endMs = re !== null && re > c.startMs ? re : (i + 1 < cells.length ? cells[i + 1].startMs : endMs);
 				}
-			}
-			for (let i = 0; i < cells.length; i++) {
-				const c = cells[i];
-				c.endMs = c.lastEndMs != null && c.lastEndMs > c.startMs ? c.lastEndMs
-					: (i + 1 < cells.length ? cells[i + 1].startMs : endMs);
+			} else {
+				// Fixed time slices across the whole source, so a cell's place IS its media
+				// time: the playhead, the axis and a running job's progress share one scale.
+				// A window lands in every slice it overlaps; slices the job hasn't reached
+				// yet stay pending.
+				const sliceMs = endMs / BIN_LIMIT;
+				const buckets = [];
+				for (let i = 0; i < BIN_LIMIT; i++) buckets.push([]);
+				for (const r of rows) {
+					const a = this.rowStartMs(r);
+					if (a === null || !sliceMs) continue;
+					const b = Math.max(a, this.rowEndMs(r) ?? a);
+					const i0 = Math.min(BIN_LIMIT - 1, Math.max(0, Math.floor(a / sliceMs)));
+					const i1 = Math.min(BIN_LIMIT - 1, Math.max(i0, Math.ceil(b / sliceMs) - 1));
+					for (let i = i0; i <= i1; i++) buckets[i].push(r);
+				}
+				cells = buckets.map((bucket, i) => mkCell(bucket, i, Math.round(i * sliceMs), Math.round((i + 1) * sliceMs)));
 			}
 			// The playhead finds its cell by these spans, not by index arithmetic:
-			// keyframe-bound windows make cell durations uneven.
+			// per-window cells (keyframe-bound) make cell durations uneven.
 			this.cellSpans = cells.map((c) => ({ s: c.startMs ?? 0, e: c.endMs ?? 0 }));
 
 			// Class colors: stable hues for the top classes across every stored row, the
@@ -946,10 +1020,10 @@ VIF.vod = VIF.vod || {};
 						style.push('background:var(' + (ci !== undefined ? '--strip-c' + ci : '--strip-other') + ')');
 					}
 					return h('i', {
-						class: [c.low ? 'low' : null, dim ? 'dim' : null].filter(Boolean).join(' ') || null,
+						class: [c.low ? 'low' : null, c.pend ? 'pend' : null, dim ? 'dim' : null].filter(Boolean).join(' ') || null,
 						style: style.join(';') || null,
 						onmouseenter: () => this.showStripCard(c, cardCtx),
-						onclick: () => { this.syncBrowser(c); if (seekable) this.startPlayer(c.startMs); },
+						onclick: c.pend ? null : () => { this.syncBrowser(c); if (seekable) this.startPlayer(c.startMs); },
 					});
 				}));
 			const wrap = h('div', { class: 'stripwrap' + (seekable ? ' seek' : '') },
@@ -958,9 +1032,10 @@ VIF.vod = VIF.vod || {};
 			this.stripWrapEl = wrap;
 
 			const axis = [0, 0.25, 0.5, 0.75, 1].map((f) => V.fmtMediaMs(Math.round(endMs * f)));
+			const wcount = rows.length + ' windows' + (terminal ? '' : ' so far');
 			const caption = (type === 'synthetic'
-				? rows.length + ' windows · darker red = more synthetic · gray = not flagged'
-				: rows.length + ' windows · ' + (top.length ? 'color = leading class · ' : '')
+				? wcount + ' · darker red = more synthetic · gray = not flagged'
+				: wcount + ' · ' + (top.length ? 'color = leading class · ' : '')
 					+ 'darker is higher ' + (type === 'vlm' ? 'activity' : 'confidence') + ' · gray = empty')
 				+ (rows.length > BIN_LIMIT ? ' · binned to ' + BIN_LIMIT + ' cells' : '')
 				+ (seekable ? ' · click a cell to play + browse its rows' : ' · click a cell to browse its rows');
@@ -991,6 +1066,7 @@ VIF.vod = VIF.vod || {};
 			s.browserOpen = true; // the drawer must show the rows the click just selected
 			b.from_ms = this.msToPaddedTc(Math.max(0, Math.floor(cell.startMs)));
 			b.to_ms = cell.endMs > cell.startMs ? this.msToPaddedTc(Math.ceil(cell.endMs)) : '';
+			b.toIsExclusive = true; // a cell's end is the next cell's start, not "through"
 			b.offset = 0;
 			s.openRows.clear();
 			s.openZero.clear();
@@ -1009,10 +1085,14 @@ VIF.vod = VIF.vod || {};
 			clear(card);
 			card.appendChild(h('div', { class: 'sch' },
 				V.fmtMediaMs(c.startMs) + ' – ' + V.fmtMediaMs(c.endMs) + (c.n > 1 ? ' · ' + c.n + ' windows' : '')));
-			card.appendChild(h('div', { class: 'scb' }, this.stripCardBody(c, ctx),
-				flags.map((f) => [' ', h('span', { class: 'tag tag-e' }, f)])));
-			card.appendChild(h('div', { class: 'scf' },
-				ctx.seekable ? 'Click to play from here and list the rows below.' : 'Click to list these rows below.'));
+			if (c.pend) {
+				card.appendChild(h('div', { class: 'scb' }, 'Not analyzed yet'));
+			} else {
+				card.appendChild(h('div', { class: 'scb' }, this.stripCardBody(c, ctx),
+					flags.map((f) => [' ', h('span', { class: 'tag tag-e' }, f)])));
+				card.appendChild(h('div', { class: 'scf' },
+					ctx.seekable ? 'Click to play from here and list the rows below.' : 'Click to list these rows below.'));
+			}
 			card.style.display = 'block';
 			const center = wrap.clientWidth * (c.idx + 0.5) / this.cellCount;
 			card.style.left = Math.round(Math.min(Math.max(0, center - card.offsetWidth / 2),
@@ -1021,6 +1101,7 @@ VIF.vod = VIF.vod || {};
 
 		/** What happened in this cell, one line, detector-aware. */
 		stripCardBody(c, ctx) {
+			if (!c.n) return 'no windows in this span';
 			if (ctx.type === 'synthetic') {
 				if (c.n === 1) {
 					const r = c.rows[0];
@@ -1084,10 +1165,19 @@ VIF.vod = VIF.vod || {};
 			return h('div', null,
 				h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, s.playerOn || seekable ? 'Player' : 'Frame'),
 				inner,
-				s.playerOn ? h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:6px' },
-					h('span', { class: 'hint' }, 'Click the score strip to jump around the source.'),
-					h('button', { class: 'btn btn-sm btn-ghost', style: 'margin-left:auto',
-						onclick: () => { this.stopPlayer(); this.render(); } }, 'Close player')) : null,
+				// Every element in this row gets the same 16px line box (the button
+				// explicitly - a button does not inherit line-height). The label
+				// zeroes its margins and weight: the Manager's Bootstrap styles
+				// label with a 5px bottom margin (which flex centers into a 2.5px
+				// droop) and bold text.
+				s.playerOn ? h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:6px;line-height:16px' },
+					h('span', { class: 'hint' }, type === 'chain' ? 'Expand a chain window and choose Play this window.' : 'Click the score strip to jump around the source.'),
+					h('label', { class: 'hint', style: 'margin:0 0 0 auto;font-weight:400;display:inline-flex;align-items:center;gap:5px;cursor:pointer' },
+						h('input', { type: 'checkbox', style: 'margin:0;width:12px;height:12px', checked: V.playerLoopOn() ? 'checked' : null,
+							onchange: (e) => { V.setPlayerLoop(e.target.checked); if (this.videoEl) this.videoEl.loop = e.target.checked; } }),
+						'Loop'),
+					h('button', { class: 'btn btn-sm btn-ghost', style: 'line-height:16px',
+						onclick: () => { this.stopPlayer(); this.render(); } }, 'Stop player')) : null,
 				s.playError ? h('div', { class: 'hint', style: 'margin-top:6px;color:var(--alert-color)' }, s.playError) : null,
 				!isTerminal(s.job) && type !== 'synthetic' && !s.playerOn ? h('div', { class: 'hint', style: 'margin-top:6px' }, 'Live while the job runs; a representative frame once finished.') : null);
 		},
@@ -1121,6 +1211,8 @@ VIF.vod = VIF.vod || {};
 					s.followTail = now;
 					btn.classList.toggle('on', now);
 					if (now && this.tailMode()) {
+						const last = Math.max(0, Math.ceil((s.rows || []).length / WLIST_PAGE) - 1);
+						if (last !== s.wpage) { s.wpage = last; this.render(); return; }
 						const list = this.root.querySelector('.wlist');
 						if (list) { this.progScroll = true; list.scrollTop = list.scrollHeight; }
 					} else if (now) {
@@ -1130,12 +1222,46 @@ VIF.vod = VIF.vod || {};
 			}, '⤓ Follow');
 		},
 
+		/** The windows pane shows one page of rows; paging by hand pauses Follow the
+		    way scrolling away does. Null while everything fits on one page. */
+		wpager(rows) {
+			const pages = Math.ceil(rows.length / WLIST_PAGE);
+			if (pages <= 1) return null;
+			const s = this.state;
+			const go = (d) => {
+				s.followTail = false;
+				s.wpage = Math.min(pages - 1, Math.max(0, s.wpage + d));
+				this.render();
+			};
+			return h('div', { style: 'display:flex;gap:4px;align-items:center;margin-left:10px' },
+				h('span', { class: 'mono', style: 'font-size:11px;color:var(--ink-60)' },
+					'w' + (s.wpage * WLIST_PAGE + 1) + '–' + Math.min(rows.length, (s.wpage + 1) * WLIST_PAGE)
+					+ ' of ' + rows.length),
+				h('button', { class: 'btn btn-sm btn-ghost', disabled: s.wpage <= 0 ? 'disabled' : null,
+					onclick: () => go(-1) }, '‹'),
+				h('button', { class: 'btn btn-sm btn-ghost', disabled: s.wpage >= pages - 1 ? 'disabled' : null,
+					onclick: () => go(1) }, '›'));
+		},
+
+		/** Index of the last row starting at or before t ms, by binary search; -1 when none. */
+		rowIndexAt(t) {
+			const rows = this.state.rows || [];
+			let lo = 0, hi = rows.length - 1, ans = -1;
+			while (lo <= hi) {
+				const mid = (lo + hi) >> 1;
+				const a = this.rowStartMs(rows[mid]);
+				if (a !== null && a <= t) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
+			}
+			return ans;
+		},
+
 		hookWindowFollow(list) {
 			if (!this.followEligible() || list.dataset.followHooked) return;
 			list.dataset.followHooked = '1';
 			list.addEventListener('scroll', () => {
 				// The render's own jumps must not count as the user scrolling.
 				if (this.progScroll) { this.progScroll = false; return; }
+				if (Date.now() < (this.quietScrollUntil || 0)) return;
 				const s = this.state;
 				if (this.tailMode()) {
 					// Scrolling back to the bottom re-engages, log-viewer style.
@@ -1172,18 +1298,41 @@ VIF.vod = VIF.vod || {};
 		renderWindows(type) {
 			const s = this.state;
 			const rows = s.rows || [];
+			// One page of rows at a time: motion stores a row per frame, and a long job
+			// would otherwise put six figures of nodes in this list. Tailing pins the
+			// newest page; playback follow flips to the playhead's page (syncPlayingRow).
+			const pages = Math.max(1, Math.ceil(rows.length / WLIST_PAGE));
+			if (this.tailMode() && s.followTail !== false) s.wpage = pages - 1;
+			s.wpage = Math.min(Math.max(0, s.wpage), pages - 1);
+			const p0 = s.wpage * WLIST_PAGE, p1 = Math.min(rows.length, p0 + WLIST_PAGE);
 			const threshold = type === 'synthetic' ? this.threshold() : null;
+			// A window row is a seek target like a strip cell: click, and the video
+			// plays from that window. Clicks that operate something inside the row
+			// (the per-clip details, a button) or finish a text selection don't seek.
+			const seekable = s.job && isTerminal(s.job) && !!s.job.file;
+			const seekAttrs = (fromMs) => {
+				if (!seekable || fromMs === null) return {};
+				const go = (e) => {
+					if (e.target.closest && e.target.closest('details,summary,button,a')) return;
+					if (String(window.getSelection())) return;
+					this.startPlayer(fromMs);
+				};
+				return { role: 'button', tabindex: '0', title: 'Play from ' + V.fmtMediaMs(fromMs),
+					onclick: go,
+					onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.startPlayer(fromMs); } } };
+			};
 
 			if (type === 'synthetic') {
 				return h('div', null,
 					h('div', { style: 'display:flex;align-items:center;margin-bottom:9px' },
-						h('div', { class: 'eyebrow' }, 'Windows'), this.followBtn()),
-					h('div', { class: 'wlist' }, rows.map((r, i) => {
+						h('div', { class: 'eyebrow' }, 'Windows'), this.followBtn(), this.wpager(rows)),
+					h('div', { class: 'wlist' }, rows.slice(p0, p1).map((r, pi) => {
+						const i = p0 + pi;
 						const low = this.rowLow(r, type);
 						const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
-						return h('div', { class: 'wrow' + (low ? ' low' : ''),
+						return h('div', Object.assign({ class: 'wrow' + (low ? ' low' : ''),
 							'data-from': fromMs != null ? String(fromMs) : null,
-							'data-to': toMs != null ? String(toMs) : null },
+							'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
 							h('span', { class: 'ws' }, typeof r.synthetic_score === 'number' ? r.synthetic_score.toFixed(3) : '—'),
 							h('span', { class: 'wt' }, this.windowLabel(r)),
 							h('span', { class: 'wv' }, low ? (r.verdict || 'real') + (threshold !== null ? ' · below ' + threshold : '') : (r.verdict || '')),
@@ -1207,7 +1356,7 @@ VIF.vod = VIF.vod || {};
 				// Describe: the sentinel class_name "description" with the prose in
 				// `reasoning` — render the prose, a badge saying DESCRIBE says nothing.
 				// Custom schema: only `data` — render its fields.
-				const said = (d, lead) => {
+				const said = (d) => {
 					if (d.data && typeof d.data === 'object') {
 						return h('div', { class: 'mono', style: 'font-size:12px;width:100%' },
 							Object.keys(d.data).map((k) => {
@@ -1217,39 +1366,39 @@ VIF.vod = VIF.vod || {};
 							}));
 					}
 					if (d.class_name === 'description' && d.reasoning)
-						return h('p', { class: lead ? 'reason-lead' : 'reason', style: 'margin:0;width:100%' }, d.reasoning);
+						return h('p', { class: 'reason', style: 'margin:0;width:100%' }, d.reasoning);
 					return h('span', { class: 'tag tag-o', title: d.reasoning || '' }, d.class_name || '?');
 				};
 				const hasAnswer = (r) => !!(r.content || (r.detections || []).length);
-				const block = (r, i, lead) => {
+				const block = (r, i) => {
 					const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
-					return h('div', { class: 'wblock',
+					return h('div', Object.assign({ class: 'wblock',
 						'data-from': fromMs != null ? String(fromMs) : null,
-						'data-to': toMs != null ? String(toMs) : null },
+						'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
 						h('div', { class: 'eyebrow', style: 'margin-bottom:4px' }, this.windowLabel(r),
 							r.degraded ? [' ', h('span', { class: 'tag tag-e' }, 'degraded')] : null,
 							r.truncated ? [' ', h('span', { class: 'tag tag-e' }, 'truncated')] : null),
-						r.content ? h('p', { class: lead ? 'reason-lead' : 'reason', style: 'margin:0' }, r.content) : null,
+						r.content ? h('p', { class: 'reason', style: 'margin:0' }, r.content) : null,
 						(r.detections || []).length ? h('div', { style: 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap' },
-							r.detections.map((d) => said(d, lead))) : null);
+							r.detections.map((d) => said(d))) : null);
 				};
 				// A window the model had nothing to say about stays on the timeline as a
 				// slim row; long stretches of them collapse to one line, like the drawer.
 				const emptyRow = (r, i) => {
 					const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
-					return h('div', { class: 'wrow low',
+					return h('div', Object.assign({ class: 'wrow low',
 						'data-from': fromMs != null ? String(fromMs) : null,
-						'data-to': toMs != null ? String(toMs) : null },
+						'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
 						h('span', { class: 'wt' }, this.windowLabel(r)),
 						h('span', { class: 'wv' }, 'no answer'),
 						r.degraded ? h('span', { class: 'tag tag-e' }, 'degraded') : null,
 						h('span', { style: 'margin-left:auto;color:var(--ink-40);font-size:11px' }, 'w' + String(i + 1).padStart(2, '0')));
 				};
 				const out = [];
-				let lead = true, i = 0;
-				while (i < rows.length) {
+				let i = p0;
+				while (i < p1) {
 					let j = i;
-					while (j < rows.length && !hasAnswer(rows[j])) j++;
+					while (j < p1 && !hasAnswer(rows[j])) j++;
 					if (j - i >= 3 && !s.openZeroPane.has('z' + i)) {
 						out.push(this.zeroRunLine(rows, i, j, 'no answer'));
 						i = j;
@@ -1257,14 +1406,13 @@ VIF.vod = VIF.vod || {};
 						for (let k = i; k < j; k++) out.push(emptyRow(rows[k], k));
 						i = j;
 					} else {
-						out.push(block(rows[i], i, lead));
-						lead = false;
+						out.push(block(rows[i], i));
 						i++;
 					}
 				}
 				return h('div', null,
 					h('div', { style: 'display:flex;align-items:center;margin-bottom:9px' },
-						h('div', { class: 'eyebrow' }, 'What the model saw'), this.followBtn()),
+						h('div', { class: 'eyebrow' }, 'What the model saw'), this.followBtn(), this.wpager(rows)),
 					!rows.length ? h('div', { class: 'hint' }, 'No windows analyzed yet.') :
 						h('div', { class: 'wlist', style: 'border:none;display:flex;flex-direction:column;gap:16px;max-height:460px' }, out));
 			}
@@ -1286,9 +1434,9 @@ VIF.vod = VIF.vod || {};
 				}
 				const entries = Array.from(byClass.entries());
 				const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
-				return h('div', { class: 'wrow' + (dets.length ? '' : ' low'),
+				return h('div', Object.assign({ class: 'wrow' + (dets.length ? '' : ' low'),
 					'data-from': fromMs != null ? String(fromMs) : null,
-					'data-to': toMs != null ? String(toMs) : null },
+					'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
 					h('span', { class: 'ws' }, String(dets.length)),
 					h('span', { class: 'wt' }, this.windowLabel(r)),
 					vlmChips && entries.length
@@ -1303,10 +1451,10 @@ VIF.vod = VIF.vod || {};
 			};
 			// Long stretches of empty windows collapse to one line, like the drawer.
 			const listOut = [];
-			let li = 0;
-			while (li < rows.length) {
+			let li = p0;
+			while (li < p1) {
 				let j = li;
-				while (j < rows.length && !(rows[j].detections || []).length) j++;
+				while (j < p1 && !(rows[j].detections || []).length) j++;
 				if (j - li >= 3 && !s.openZeroPane.has('z' + li)) {
 					listOut.push(this.zeroRunLine(rows, li, j, vlmChips ? 'no answer' : 'no detections'));
 					li = j;
@@ -1320,7 +1468,7 @@ VIF.vod = VIF.vod || {};
 			}
 			return h('div', null,
 				h('div', { style: 'display:flex;align-items:center;margin-bottom:9px' },
-					h('div', { class: 'eyebrow' }, 'Windows'), this.followBtn()),
+					h('div', { class: 'eyebrow' }, 'Windows'), this.followBtn(), this.wpager(rows)),
 				h('div', { class: 'wlist' }, listOut),
 				h('div', { class: 'hint', style: 'margin-top:10px' },
 					'One row per analyzed window. Class totals are in the legend above; the raw responses are under Detection details below.'));
@@ -1358,6 +1506,7 @@ VIF.vod = VIF.vod || {};
 						}
 						if (clean !== e.target.value) e.target.value = clean;
 						b[key] = clean.trim();
+						if (key === 'to_ms') b.toIsExclusive = false; // typed means "through"
 						const mine = this.parseTcMs(b[key]);
 						const other = this.parseTcMs(b[key === 'from_ms' ? 'to_ms' : 'from_ms']);
 						const inverted = mine !== null && other !== null && mine !== '' && other !== ''
@@ -1368,6 +1517,7 @@ VIF.vod = VIF.vod || {};
 					} }));
 
 			const brief = (r) => {
+				if (type === 'chain') return V.chain.brief(r);
 				if (type === 'synthetic') return (r.verdict || '') + (typeof r.synthetic_score === 'number' ? ' · ' + r.synthetic_score.toFixed(3) : '');
 				if (type === 'vlm') {
 					// A describe/custom row is its text, not a count of one.
@@ -1405,13 +1555,14 @@ VIF.vod = VIF.vod || {};
 					h('span', { style: 'color:var(--ink-52)' }, 'row ' + (page.offset + i + 1)),
 					h('span', null, this.windowLabel(r)),
 					chips(r),
-					h('span', { class: 'rawlink', style: 'margin-left:auto;color:var(--accent-700)' }, 'raw JSON ▸')),
-				h('pre', null, JSON.stringify(r, null, 2)));
+					h('span', { class: 'rawlink', style: 'margin-left:auto;color:var(--accent-700)' }, type === 'chain' ? 'stage results & JSON ▸' : 'raw JSON ▸')),
+				type === 'chain' ? V.chain.windowResults(r, ((s.job.effectiveConfig || s.job.config || {}).detector) || {}) : null,
+			h('pre', null, JSON.stringify(r, null, 2)));
 
 			// Long stretches of nothing collapse to one line; a click fans the run back
 			// out into its individual rows.
 			const isEmpty = (r) => {
-				if (type === 'synthetic') return false;
+				if (type === 'synthetic' || type === 'chain') return false;
 				if (type === 'vlm') return !this.vlmRowText(r) && !(r.detections || []).length;
 				return !(r.detections || []).length;
 			};
@@ -1465,6 +1616,7 @@ VIF.vod = VIF.vod || {};
 							onclick: () => {
 								b.from_ms = '00:00:00';
 								b.to_ms = s.job && s.job.sourceDurationMs ? this.msToPaddedTc(s.job.sourceDurationMs) : '';
+								b.toIsExclusive = false;
 								b.offset = 0; refetch();
 							} }, 'Clear'),
 						s.job && !isTerminal(s.job) ? h('label', { class: 'hint', style: 'align-self:flex-end;display:flex;gap:6px;align-items:center' },

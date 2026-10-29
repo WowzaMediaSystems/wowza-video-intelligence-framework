@@ -2,7 +2,12 @@
     window.VIF = window.VIF || {};
     var VIF = window.VIF;
 
-    var DETECTOR_TYPES = ['object', 'scene', 'vlm', 'synthetic'];
+    var DETECTOR_TYPES = ['object', 'scene', 'motion', 'vlm', 'synthetic', 'verify', 'chain'];
+
+    // Detector types a live stream never runs: their frames come from the file an on-demand job
+    // decodes, so the `transcoderGate` entries below — which pick between the transcoder output
+    // and the keyframe grabber — say nothing about them.
+    var ON_DEMAND_ONLY = ['verify'];
 
     // ── Section containers ──────────────────────────────────────────────────
     // toggleDetectorSection()'s four `document.getElementById('*-analysis-
@@ -11,8 +16,11 @@
     var SECTIONS = [
         { group: 'object-analysis-section', detectors: ['object'] },
         { group: 'scene-analysis-section', detectors: ['scene'] },
-        { group: 'vlm-analysis-section', detectors: ['vlm'] },
-        { group: 'synthetic-analysis-section', detectors: ['synthetic'] }
+        { group: 'motion-analysis-section', detectors: ['motion'] },
+        { group: 'vlm-analysis-section', detectors: ['vlm', 'verify'] },
+        { group: 'synthetic-analysis-section', detectors: ['synthetic', 'verify'] },
+        { group: 'verify-gate-section', detectors: ['verify'] },
+        { group: 'chain-pipeline-section', detectors: ['chain'] }
     ];
 
     // ── Fields ───────────────────────────────────────────────────────────────
@@ -40,13 +48,14 @@
         {
             id: 'cfg-inference-fps',
             path: 'inference_fps',
-            // Group is shown only when "useTranscoder && detectorType !== 'synthetic'" -
-            // the detector part of that condition is every type but synthetic.
-            detectors: ['object', 'scene', 'vlm'],
+            // Every type but synthetic, whose source-packet tap has no sampling rate to set.
+            // For the live types the group also follows Use Transcoder; for verify it does not
+            // (see ON_DEMAND_ONLY above) — the rate is what the review samples each window at.
+            detectors: ['object', 'scene', 'motion', 'vlm', 'verify', 'chain'],
             group: 'cfg-inference-fps-group',
             transcoderGate: 'on',
             rule: { default: { min: -1, max: 120, integer: true, label: 'Inference FPS' } },
-            help: { prefix: 'inference-fps-help', detectors: ['object', 'scene', 'vlm'] },
+            help: { prefix: 'inference-fps-help', detectors: ['object', 'scene', 'motion', 'vlm', 'verify', 'chain'] },
             inheritMode: 'blank-inherits'
         },
         {
@@ -76,7 +85,7 @@
         {
             id: 'cfg-duration',
             path: 'duration',
-            detectors: ['scene', 'vlm', 'synthetic'],
+            detectors: ['scene', 'vlm', 'synthetic', 'verify', 'chain'],
             group: 'cfg-duration-group',
             // The one field whose rule genuinely varies per detector: toggleDetectorSection
             // mutates FIELD_RULES['cfg-duration'].max at runtime (30 for synthetic, 5
@@ -88,36 +97,40 @@
                 default: { min: 0, max: 5, decimals: 1, label: 'Duration' },
                 byDetector: {
                     synthetic: { max: 30 },
+                    verify: { max: 30 },
                     scene: { max: 5 },
-                    vlm: { max: 5 }
+                    // One VLM request carries Duration × Inference FPS images and the
+                    // endpoint accepts at most VLM_TYPICAL_ENDPOINT_IMAGE_CAP (8); FPS
+                    // is at least 1, so a window past 8s can never fit the cap.
+                    vlm: { max: 8 }
                 }
             },
-            help: { prefix: 'duration-help', detectors: ['scene', 'vlm', 'synthetic'] },
+            help: { prefix: 'duration-help', detectors: ['scene', 'vlm', 'synthetic', 'verify', 'chain'] },
             inheritMode: 'blank-inherits'
         },
         {
             id: null, // checkbox - sent unconditionally in buildConfigJson today (F9 leak, e.g. into synthetic payloads)
             path: 'auto_frame_throttle',
-            detectors: ['object', 'scene', 'vlm'],
+            detectors: ['object', 'scene', 'motion', 'vlm', 'chain'],
             group: 'cfg-auto-frame-throttle-group',
-            help: { prefix: 'throttle-help', detectors: ['object', 'scene', 'vlm'] },
+            help: { prefix: 'throttle-help', detectors: ['object', 'scene', 'motion', 'vlm', 'chain'] },
             inheritMode: 'always-explicit' // booleans have no blank state
         },
         {
             id: null, // checkbox - already correctly gated in buildConfigJson today (only sent for scene/vlm; not an F9 leak)
             path: 'catch_up_to_live',
-            detectors: ['scene', 'vlm'],
+            detectors: ['scene', 'vlm', 'chain'],
             group: 'cfg-catch-up-to-live-group',
-            help: { prefix: 'catchup-live-help', detectors: ['scene', 'vlm'] },
+            help: { prefix: 'catchup-live-help', detectors: ['scene', 'vlm', 'chain'] },
             inheritMode: 'always-explicit' // booleans have no blank state
         },
         {
             id: 'cfg-catch-up-max-behind',
             path: 'catch_up_max_behind_seconds',
-            detectors: ['scene', 'vlm'],
+            detectors: ['scene', 'vlm', 'chain'],
             group: 'cfg-catch-up-max-behind-group',
             rule: { default: { min: 0, max: 30, decimals: 1, label: 'Catch-up Max Behind (s)' } },
-            help: { prefix: 'catchup-behind-help', detectors: ['scene', 'vlm'] },
+            help: { prefix: 'catchup-behind-help', detectors: ['scene', 'vlm', 'chain'] },
             // One of the plan's F7 finding's 3 fields that already blank->null correctly:
             // buildConfigJson reads it via an explicit `.value.trim() === '' ? null :
             // parseFloat(...)`, not readNumericInputValue().
@@ -126,13 +139,13 @@
         {
             id: null, // checkbox
             path: 'ignore_untracked_objects',
-            detectors: ['object'],
+            detectors: ['object', 'chain'],
             inheritMode: 'always-explicit' // booleans have no blank state
         },
         {
             id: null, // cfg-frame-grab: static HTML min/step (markup), not FIELD_RULES-managed
             path: 'frame_grab_interval',
-            detectors: ['object', 'scene', 'vlm'],
+            detectors: ['object', 'scene', 'motion', 'vlm', 'chain'],
             group: 'cfg-frame-grab-group',
             transcoderGate: 'off',
             inheritMode: 'blank-inherits'
@@ -222,6 +235,33 @@
             inheritMode: 'blank-inherits'
         },
         {
+            id: 'cfg-motion-sensitivity',
+            path: 'motion_analysis.sensitivity',
+            detectors: ['motion'],
+            rule: { default: { min: 1, max: 10, integer: true, label: 'Motion Sensitivity' } },
+            inheritMode: 'blank-inherits'
+        },
+        {
+            id: 'cfg-motion-min-displacement',
+            path: 'motion_analysis.min_displacement',
+            detectors: ['motion'],
+            rule: { default: { min: 0, max: 100, decimals: 1, label: 'Min Displacement %' } },
+            inheritMode: 'blank-inherits'
+        },
+        {
+            id: 'cfg-motion-merge-distance',
+            path: 'motion_analysis.merge_distance',
+            detectors: ['motion'],
+            rule: { default: { min: 0, max: 50, decimals: 1, label: 'Merge Distance %' } },
+            inheritMode: 'blank-inherits'
+        },
+        {
+            id: 'cfg-motion-suppress-global-changes',
+            path: 'motion_analysis.suppress_global_changes',
+            detectors: ['motion'],
+            inheritMode: 'blank-inherits'
+        },
+        {
             id: 'cfg-scene-confidence-threshold',
             path: 'scene_analysis.confidence_threshold',
             detectors: ['scene'],
@@ -268,14 +308,23 @@
         // null alone can never clear a stored value. No group/rule/help — the
         // synthetic section is shown/hidden wholesale via SECTIONS above.
         // use_tls "blank" is the select's '' (auto-detect) option.
-        { id: 'cfg-synthetic-endpoint', path: 'synthetic_analysis.endpoint', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-use-tls', path: 'synthetic_analysis.use_tls', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-tls-ca-cert', path: 'synthetic_analysis.tls_ca_cert', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-tls-client-cert', path: 'synthetic_analysis.tls_client_cert', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-tls-client-key', path: 'synthetic_analysis.tls_client_key', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-api-key', path: 'synthetic_analysis.api_key', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-function-id', path: 'synthetic_analysis.function_id', detectors: ['synthetic'], inheritMode: 'blank-inherits' },
-        { id: 'cfg-synthetic-classification-threshold', path: 'synthetic_analysis.classification_threshold', detectors: ['synthetic'], inheritMode: 'blank-inherits' }
+        { id: 'cfg-synthetic-endpoint', path: 'synthetic_analysis.endpoint', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-use-tls', path: 'synthetic_analysis.use_tls', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-tls-ca-cert', path: 'synthetic_analysis.tls_ca_cert', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-tls-client-cert', path: 'synthetic_analysis.tls_client_cert', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-tls-client-key', path: 'synthetic_analysis.tls_client_key', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-api-key', path: 'synthetic_analysis.api_key', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        // The *_secret reference pickers. Unlike the credentials above these are ordinary
+        // members — a reference is a NAME, echoed by reads — and the entries exist so a
+        // blanked picker (the slot switched back to a value) unsets the stored name.
+        { id: 'cfg-vi-service-api-key-secret', path: 'vi_service_api_key_secret', detectors: DETECTOR_TYPES.slice(), inheritMode: 'blank-inherits' },
+        { id: 'cfg-vlm-api-key-secret', path: 'vlm_analysis.api_key_secret', detectors: ['vlm'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-api-key-secret', path: 'synthetic_analysis.api_key_secret', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-tls-client-key-secret', path: 'synthetic_analysis.tls_client_key_secret', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-function-id', path: 'synthetic_analysis.function_id', detectors: ['synthetic', 'verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-synthetic-classification-threshold', path: 'synthetic_analysis.classification_threshold', detectors: ['synthetic'], group: 'cfg-synthetic-classification-threshold-group', inheritMode: 'blank-inherits' },
+        { id: 'cfg-verify-flag-threshold', path: 'verify_analysis.flag_threshold', detectors: ['verify'], inheritMode: 'blank-inherits' },
+        { id: 'cfg-verify-strong-threshold', path: 'verify_analysis.strong_threshold', detectors: ['verify'], inheritMode: 'blank-inherits' }
     ];
 
     // ── Accessors (pure; no DOM access) ──────────────────────────────────────
@@ -292,6 +341,10 @@
             if (FIELDS[i].path === path) return FIELDS[i];
         }
         return null;
+    }
+
+    function runsLive(detectorType) {
+        return ON_DEMAND_ONLY.indexOf(detectorType) === -1;
     }
 
     // Merges a field's per-detector rule override onto its default rule (D3's
@@ -332,14 +385,19 @@
         { value: 'nvidia/Cosmos3-Nano', label: 'Cosmos3 Nano (NVIDIA)' }
     ];
 
+    // What the review stage runs when neither the config nor the baseline names a model.
+    var VERIFY_FALLBACK_REVIEW_MODEL = 'nvidia/Cosmos3-Nano';
+
     VIF.fieldRegistry = {
         detectorTypes: DETECTOR_TYPES,
+        VERIFY_FALLBACK_REVIEW_MODEL: VERIFY_FALLBACK_REVIEW_MODEL,
         sections: SECTIONS,
         fields: FIELDS,
         VLM_TYPICAL_ENDPOINT_IMAGE_CAP: VLM_TYPICAL_ENDPOINT_IMAGE_CAP,
         VLM_MODEL_OPTIONS: VLM_MODEL_OPTIONS,
         getField: getField,
         getFieldByPath: getFieldByPath,
+        runsLive: runsLive,
         effectiveRule: effectiveRule,
         deriveFieldRules: deriveFieldRules
     };

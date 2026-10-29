@@ -404,6 +404,13 @@
           parsed.vif_data.forEach((viEntry) => {
             if (viEntry.detections && viEntry.detections.length > 0) {
               viEntry.detections.forEach(det => detections.push(normalize(det, viEntry)));
+            } else if (Array.isArray(viEntry.rings)) {
+              // A combined-result_mode chain response carries its detections
+              // per ring, with no top-level aggregate on the wire.
+              viEntry.rings.forEach((ring) => {
+                (Array.isArray(ring.detections) ? ring.detections : []).forEach(
+                  det => detections.push(normalize(det, viEntry)));
+              });
             }
           });
         } else if (parsed.detections && Array.isArray(parsed.detections)) {
@@ -417,14 +424,13 @@
 
         if (detections.length === 0) return;
 
-        const isVlm = eventType === 'vlm-detection';
         const isSynthetic = eventType === 'synthetic-detection';
         const labels = detections.map(d => {
           // Free-form (Describe) windows carry the internal "description" sentinel
           // with the prose in reasoning — render the prose alone: the sentinel is
           // plumbing, not a detected class (the burned-in overlay and the VOD
           // report make the same call).
-          if (isVlm && d.label === 'description' && d.reasoning) {
+          if (d.label === 'description' && d.reasoning) {
             return `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>`;
           }
           // Synthetic chips color by VERDICT, never by the score: the score is a
@@ -454,7 +460,7 @@
           // omitted/undefined key, else Number(undefined) renders "(NaN)").
           const confidenceClass = d.confidence != null ? getConfidenceClass(d.confidence) : '';
           const confidenceStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
-          const reasoningStr = isVlm && d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
+          const reasoningStr = d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
           const labelStr = d.label != null ? escapeHtml(d.label) : '';
           return `<span class="detection-label ${confidenceClass}">${labelStr}${confidenceStr}</span>${reasoningStr}`;
         }).join('');
@@ -485,7 +491,7 @@
     // ticks up live; the next real detection freezes it, so the gap stays in
     // the history. Paused playback suspends the watchdog (no ID3 flows on
     // purpose); resuming re-anchors it so a still-silent stream is marked.
-    const SILENCE_MS = 4000;
+    const SILENCE_MS = 10000;
     let lastDetectionAt = null;
     let silenceTimerId = null;
     let liveSilenceMarker = null;
@@ -674,6 +680,30 @@
       return detections;
     }
 
+    function labeledDetectionsFromItem(item) {
+      const detections = Array.from(item.querySelectorAll('.detection-label')).map(el => {
+        const t = (el.textContent || '').trim(); // "person (0.93)"
+        const m = t.match(/^(.*)\s+\(([-\d.]+)\)\s*$/);
+        const detection = m ? { label: m[1], confidence: Number(m[2]) } : { label: t, confidence: null };
+        const reasoningEl = el.nextElementSibling;
+        const reasoning = (reasoningEl && reasoningEl.classList.contains('detection-reasoning'))
+          ? (reasoningEl.textContent || '').trim()
+          : '';
+        if (reasoning) detection.reasoning = reasoning;
+        return detection;
+      });
+      Array.from(item.querySelectorAll('.detection-reasoning')).forEach(el => {
+        const prev = el.previousElementSibling;
+        if (prev && prev.classList.contains('detection-label')) return; // captured above
+        const reasoning = (el.textContent || '').trim();
+        if (reasoning) detections.push({ label: 'description', reasoning });
+      });
+      Array.from(item.querySelectorAll('.detection-data')).forEach(dataEl => {
+        detections.push({ data: dataFieldsFromDiv(dataEl) });
+      });
+      return detections;
+    }
+
     function buildFormattedPayloadFromDiv() {
       const type = rawEventType();
       const isVlm = type === 'vlm-detection';
@@ -681,14 +711,7 @@
       const out = items.reverse().map(item => {
         const timeEl = item.querySelector('.event-time');
 
-        const detections = isVlm
-          ? vlmDetectionsFromItem(item)
-          : Array.from(item.querySelectorAll('.detection-label')).map(el => {
-              const t = (el.textContent || '').trim(); // "person (0.93)"
-              const m = t.match(/^(.*)\s+\(([-\d.]+)\)\s*$/);
-              if (m) return { label: m[1], confidence: Number(m[2]) };
-              return { label: t, confidence: null };
-            });
+        const detections = isVlm ? vlmDetectionsFromItem(item) : labeledDetectionsFromItem(item);
 
         return {
           timestamp: timeEl ? timeEl.textContent.trim() : null,

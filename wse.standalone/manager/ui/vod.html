@@ -2,8 +2,8 @@
      file, css/vod.css and js/vod/, then drop the On-Demand tab + tab scripts in
      shm.html and the btn-vod-analysis id from setConfigButtonsEnabled in
      js/vif-dashboard.js. -->
-<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.1.0">
-<link rel="stylesheet" href="wse-plugins/server/vif/css/vod.css?v=1.1.0">
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vod.css?v=1.2.0">
 <style>
     .vif-vod .sticky-page-header {
         position: sticky;
@@ -65,14 +65,15 @@
          mark the spot (a sub-tab must never change the primary pill).
          vod-main.js flips these rows on every V.nav(). -->
     <div class="vif-tabs-row" id="vod-tabs-configs" style="display:none">
-        <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams</button>
-        <button class="vif-tab" onclick="VIF.vod && VIF.vod.nav && VIF.vod.nav('jobs')">On-Demand</button>
+        <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams <span class="vif-tab-count" id="vif-tab-live-count-cfg">&ndash;</span></button>
+        <button class="vif-tab" onclick="VIF.vod && VIF.vod.nav && VIF.vod.nav('jobs')">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count-cfg">&ndash;</span></button>
         <span class="vif-tab is-active">Configs</span>
     </div>
     <div class="vif-subtabs" id="vod-subtabs-configs" style="display:none">
         <button class="vif-subtab" title="Per-stream detector configs.&#10;Streams match by name pattern." onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
         <button class="vif-subtab" title="Defaults every stream config inherits.&#10;A config that sets its own value pins it." onclick="loadAjaxPluginContent('server','vif','default.html','')">Stream Config Defaults</button>
         <span class="vif-subtab is-active">On-Demand Configs</span>
+        <button class="vif-subtab" title="Stored credentials the configs reference by name:&#10;endpoint keys, the service key, webhook secrets." onclick="loadAjaxPluginContent('server','vif','secrets.html','')">Secrets</button>
     </div>
     </div>
 
@@ -81,17 +82,19 @@
     <div id="vod-modal-root"></div>
 </div>
 
-<script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-api.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vod/vod-util.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vod/vod-jobs.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vod/vod-new-analysis.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vod/vod-report.js?v=1.1.0"></script>
-<script src="wse-plugins/server/vif/js/vod/vod-settings.js?v=1.1.0"></script>
+<script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-util.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-jobs.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-new-analysis.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-chain.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-report.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-verify-report.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-settings.js?v=1.2.0"></script>
 <script>
     VIF.vod.init();
 
@@ -115,41 +118,5 @@
         if (pendingView === 'settings' && VIF.vod && VIF.vod.nav) VIF.vod.nav('settings');
     })();
 
-    // Header tab counts — same contract as shm.html's tab script: the On-Demand
-    // count from the VOD jobs API, the Live Streams count from the VIF status
-    // wire. Purely additive; failures leave the placeholders.
-    (function () {
-        var tabOndemand = document.getElementById('vif-tab-ondemand-count');
-        function refreshOnDemand() {
-            if (!window.VIF || !VIF.vod || !VIF.vod.api) return;
-            // A limit-1 call totals the whole listing (VI-875), so the count is
-            // exact however long the job history grows.
-            VIF.vod.api.listJobs({ limit: 1 }).then(function (page) {
-                if (tabOndemand) tabOndemand.textContent = String((page && page.total) || 0);
-            }).catch(function () { /* Engine unreachable — leave the placeholder */ });
-        }
-
-        var tabLive = document.getElementById('vif-tab-live-count');
-        function refreshLive() {
-            if (!tabLive || !window.VIF || !VIF.core || !VIF.core.client) return;
-            try {
-                VIF.core.client().status().then(function (status) {
-                    var streams = (status && status.streams) || [];
-                    var active = 0;
-                    streams.forEach(function (s) { if (s.config && s.config.active) active++; });
-                    tabLive.textContent = String(active);
-                }).catch(function () {});
-            } catch (e) { /* placeholders stay */ }
-        }
-
-        refreshOnDemand();
-        refreshLive();
-        // The fragment has no unload hook, so re-injections would leak these
-        // pollers — clear the previous instance's before arming ours.
-        if (window.__vifVodTabTimers) window.__vifVodTabTimers.forEach(clearInterval);
-        window.__vifVodTabTimers = [
-            setInterval(refreshOnDemand, 15000),
-            setInterval(refreshLive, 15000)
-        ];
-    })();
+    VIF.core.armTabCounts();
 </script>
