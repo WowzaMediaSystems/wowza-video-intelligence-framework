@@ -399,7 +399,7 @@ Some jobs are never retried whatever the cause: one submitted with `store_result
 | Key | Default | Purpose |
 | -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
 | name | null | Descriptive name of the event listener |
-| class_name | null | The java class name including namespace for the event. Built in classes are: `Id3Event`, `WebhookEvent2`, `LogFileEvent`, `OverlayEvent`.  Built in classes default to `com.wowza.wms.plugin.videointelligence.event` namespace |
+| class_name | null | The java class name including namespace for the event. Built in classes are: `Id3Event`, `WebhookEvent2`, `LogFileEvent`, `OverlayEvent`, `VlmAnswerEvent`.  Built in classes default to `com.wowza.wms.plugin.videointelligence.event` namespace |
 | methods | disabled | What events and how often events are sent.  Options are `disabled` \\| `immediate` \\| `batch` \\| `rollup` |
 | confidence_threshold | 0.0 | What threshold to use for objects or scenes. Used by immediate and batch. |
 | suppress_empty_detections | false | Don't call the event listener if there are no detections |
@@ -583,6 +583,56 @@ it goes under — so whatever the old target sent, it migrates:
 | overlay_thread_drawing | false | Draw overlays in a thread |
 | replace_video | false | Replaces original video with frame accurate overlays |
 | fade_step | 0 | How many frames it takes to fade objects out once they are no longer tracked. Set to 0 for high skip_frame values |
+
+**VlmAnswerEvent:** turns a VLM's free-text answer into classes, the way Detect mode turns a
+class list into detections. Pair it with a VLM detector in **Custom** mode whose prompt asks a
+multiple-choice question ("Answer with one letter: A) home run B) strikeout C) anything
+else"), and give it one rule per answer you care about. The Manager offers it as **VLM
+Answers** in the listener editor of a VLM config, and in On-Demand → New Analysis for a VLM
+detector. On the wire it is a `custom` listener:
+
+```json
+"VlmAnswers": { "type": "custom", "class_name": "VlmAnswerEvent", "trigger": "immediate",
+  "enabled": true, "properties": { "rules": [ {"answer": "A", "class_name": "home_run"},
+  {"answer": "C", "class_name": "run_scored"} ], "id3": true } }
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;**Custom Properties:**
+
+| Key | Default | Purpose |
+| -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| rules | null | Required. A list of `{"answer": …, "class_name": …}`. An empty list, or a rule missing either member, leaves the listener inert — no file, no ID3 — with an error in the log naming the listener; the stream itself keeps running |
+| events_file | `vif-vlm-answers/{{stream_name}}.jsonl` | Live streams only: the file each window's row is appended to, relative to the `VideoIntelligenceLogRootDir` server property, with the same `{{…}}` placeholders and the same containment as `LogFileEvent` (a target outside the root is refused, never clamped). File jobs ignore it and write beside their results |
+| id3 | true | Live streams only: inject each window that matched a rule as a `vlm-detection` ID3 tag carrying the mapped detections, which the Manager's Playback page lists in sync with the video. A window that matched nothing injects nothing |
+
+How a rule's `answer` matches is decided by the answer itself:
+
+- **One letter**, optionally bracketed (`A`, `(a)`, `[A]`), matches an answer that **picks that
+  option**: its first letter past any opening bracket, when no other letter follows it. `A`,
+  `A.` and `(A) Home run` pick A; `Answer: A` and `Apple` pick nothing.
+- **Anything longer** matches the **whole answer**, both sides trimmed, case-folded, inner
+  whitespace collapsed and a trailing `.` or `!` dropped. `Home run` matches `home run.` but not
+  `a home run`. There is no substring match: free text would match the wrong option.
+
+Each matched rule emits one detection — `{"class_name": …, "confidence": 1.0, "reasoning":
+<the answer>}` — de-duplicated by class, so two spellings of one answer can map to one class
+and one answer can map to two classes. A custom `response_schema` answer is matched by its
+JSON text.
+
+**Every VLM window becomes one row**, matched or not: the row the results file would store,
+with its `detections` replaced by the mapped ones (empty when nothing matched) and three
+members added — `listener` (the listener's name), `answer` (the raw text, so the file stands
+alone) and, on file jobs, `job_id` and `source_file`. A window with no rule hit is therefore
+told apart from a window that never happened, and the file reads like any results file. On a
+file job the rows land in the job's store as `events/<job id>/<listener name>.jsonl` (the name
+with every character outside `[A-Za-z0-9._-]` replaced by `_`), go with the job when it is
+deleted or evicted, and are served by `GET /v2/vif/vod/jobs/{jobId}/events` — see the
+[VOD guide](VOD_GUIDE.md#outputs); the On-Demand report opens a job on them. Writes never
+fail a stream or a job: a file that cannot be appended to is a warning in the log.
+
+The listener only reads VLM windows: on any other detector it writes nothing, and the Manager
+offers it for VLM configs only. It does not change what other listeners receive — webhooks,
+logs and the stored results keep the raw VLM text.
 
 ## Logging
 By default logging is added to the standard Wowza Streaming log files `wowzastreamingengine_access.log` and `wowzastreamingengine_error.log`.  If you want to log just VIF events from WSE, you can create a new Logger with the name `VIFLogger`.  Add the logger to the `Loggers` section of the `log4j2-config.xml` file.

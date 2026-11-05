@@ -14,14 +14,15 @@ Everything is driven over the Wowza Streaming Engine REST API — the v2 Video I
 4. [Chain analysis](#chain-analysis)
 5. [Inputs](#inputs)
 6. [Outputs](#outputs)
-7. [Playing the source file](#playing-the-source-file)
-8. [On-disk layout](#on-disk-layout)
-9. [Job lifecycle, failures, and resume](#job-lifecycle-failures-and-resume)
-10. [Lifecycle webhooks](#lifecycle-webhooks)
-11. [VOD settings and secrets](#vod-settings-and-secrets)
-12. [Best practices](#best-practices)
-13. [API reference](#api-reference)
-14. [Troubleshooting](#troubleshooting)
+7. [The report's row sources](#the-reports-row-sources)
+8. [Playing the source file](#playing-the-source-file)
+9. [On-disk layout](#on-disk-layout)
+10. [Job lifecycle, failures, and resume](#job-lifecycle-failures-and-resume)
+11. [Lifecycle webhooks](#lifecycle-webhooks)
+12. [VOD settings and secrets](#vod-settings-and-secrets)
+13. [Best practices](#best-practices)
+14. [API reference](#api-reference)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -247,7 +248,7 @@ window checkpoint.
 
 ## Outputs
 
-A job produces up to four things:
+A job produces up to five things:
 
 **1. The job view** — live progress and final status over REST (`GET /vod/jobs/{jobId}`), also the payload of every lifecycle webhook. Fields:
 
@@ -288,12 +289,24 @@ Submitting with `"store_results": false` runs a status-only job: nothing is writ
 
 **4. The thumbnail** — a JPEG of the frame currently being analyzed (running) or a representative frame (finished), at the size the detector actually saw. Clip-based (`synthetic`) jobs never decode a frame and have none — expect 404 there.
 
+**5. Derived event files** — rows a listener derived from the job's detections and kept beside its results. The VLM answer listener (`VlmAnswerEvent`, see the [plugin README](README.wse-plugin.md#built-in-vif-event-listeners)) writes one such row per VLM window: the window's results row with its detections replaced by the classes its rules matched. They are listed by `GET …/events`, paged like the results by `GET …/events/{listener}`, and downloadable by `GET …/events/{listener}/file` — readable while the job runs, and kept whether or not the job stored its results.
+
 Detection events also flow through the **listeners** configured on the job's config, exactly as for a live stream: a log listener writes to the Video Intelligence log, a webhook listener POSTs to your endpoint. Events from a file job carry the job's identity (`vod-<job id>`) as the stream name, plus `job_id` and `source_file` properties. Listeners that need an output stream (overlay, ID3) are skipped for file jobs and named in `listener_warning`.
 
 A file job's detection events carry the context `vhost: _defaultVHost_`, `app: vod`, `appInstance: _definst_`, `stream: vod-<job id>` — a job runs server-scoped, with no application instance of its own, and the shape is filled rather than left partly null because a consumer routes on it. `app: vod` is what tells file-job detections apart from your live streams; there is no server-side filtering to configure, since a webhook listener's destination belongs to the listener and a job's listeners come from the config it names.
 
 > [!NOTE]
 > Detection webhooks and the **lifecycle** webhook are separate channels, and their ordering across each other is not guaranteed: a job's terminal `status_changed` may arrive before its last detection deliveries. The polled `…/results` view stays authoritative for what was analyzed.
+
+## The report's row sources
+
+The Manager's VOD report reads its rows — the score strip, the stat band, the windows list and the row drawer — from one **source** at a time, chosen under the job's details with **Showing:**
+
+- **the listener's file** (named after the listener, e.g. `VlmAnswers`), when the job's listeners wrote one. With several, it is a list of their names. A job opens on it when its configuration ran an enabled `VlmAnswerEvent` and the Engine lists its file, and its rows render as Detect — classes in the strip, the legend and the drawer — even on a Custom-mode job whose stored results are prose. A job submitted with `store_results: false` that has such a file shows the file.
+- **Stored results** — every response the analysis service returned, the page's default.
+- **File…** — an NDJSON file from your own computer, read in the browser and never uploaded. Each line is either a results or events row (it has a `detection_window`) or a home-run style event (`{"event": "home_run", "answer": "A", "from_ms": 40000, "to_ms": 50000, …}`), which is shown as a window from `from_ms` to `to_ms` with one detection of class `event`. Rows are ordered by where their window starts; a line that is neither is counted in the caption ("1 line skipped") rather than failing the file. Files over 50 MB are refused.
+
+The caption under the control names the source and its windows, and **download ▸** (and the header's **Download JSONL**) downloads the rows being shown. The last choice holds for the same job while you stay on the page, so the 2-second refresh of a running job never switches it back; while a job runs, its listener file appears as soon as its first row lands.
 
 ## Playing the source file
 
@@ -329,9 +342,12 @@ vif-vod-jobs/
 ├── results/
 │   └── <job id>.jsonl         # one detection response per line, media-time stamped
 │   └── <job id>.jsonl.gz      # the same file, gzipped — what a completed job leaves
-└── thumbs/
+├── thumbs/
+│   └── <job id>/
+│       └── thumbnail.jpg
+└── events/
     └── <job id>/
-        └── thumbnail.jpg
+        └── <listener>.jsonl   # rows a listener derived (the VLM answer listener's), plain JSONL
 ```
 
 > [!IMPORTANT]
@@ -341,7 +357,7 @@ vif-vod-jobs/
 > - ./wse/vif-vod-jobs:/usr/local/WowzaStreamingEngine/vif-vod-jobs
 > ```
 
-The REST API is the intended way to consume these, but the files are plain JSON/JPEG and safe to read: manifests and thumbnails are replaced atomically, and result rows are appended a whole line at a time as the job runs. When a job completes with its results fully stored, the plain `.jsonl` is swapped for a gzipped `.jsonl.gz` (typically ~10× smaller); a job that can still be resumed — failed, cancelled, or completed with a storage gap — keeps the plain file so the next run can append to it. Reading the compressed form outside the API is one `gunzip` away.
+The REST API is the intended way to consume these, but the files are plain JSON/JPEG and safe to read (an `events/` file is appended a row at a time and never compressed): manifests and thumbnails are replaced atomically, and result rows are appended a whole line at a time as the job runs. When a job completes with its results fully stored, the plain `.jsonl` is swapped for a gzipped `.jsonl.gz` (typically ~10× smaller); a job that can still be resumed — failed, cancelled, or completed with a storage gap — keeps the plain file so the next run can append to it. Reading the compressed form outside the API is one `gunzip` away.
 
 Deleting a terminal job over REST removes its record **and** its files. Automatic eviction (see `max_jobs` / `job_ttl_seconds` below) does the same. If you need results to outlive the job record, copy them out — or read them over REST and store them in your own system as they complete.
 
@@ -546,6 +562,9 @@ All endpoints are under the Engine REST API (default `http://localhost:8087`), p
 | `POST /vod/jobs/{jobId}/resume` | Continue a stopped job from where it got to |
 | `GET  /vod/jobs/{jobId}/results` | The job's detections, one page at a time |
 | `GET  /vod/jobs/{jobId}/results/file` | The whole results file as newline-delimited JSON |
+| `GET  /vod/jobs/{jobId}/events` | The files the job's listeners derived, by listener |
+| `GET  /vod/jobs/{jobId}/events/{listener}` | One listener's derived rows, one page at a time |
+| `GET  /vod/jobs/{jobId}/events/{listener}/file` | One listener's derived rows as newline-delimited JSON |
 | `GET  /vod/jobs/{jobId}/thumbnail` | The job's thumbnail (`image/jpeg`) |
 | `GET/PATCH /persist/vod-settings` | How this Engine runs on-demand analysis |
 | `GET/PATCH /persist/secrets` | The global named credentials — endpoint keys, the service key, webhook authorization — names out, values in |
@@ -563,7 +582,7 @@ Which status means what, throughout the `/vod` world:
 | Status | When |
 |---|---|
 | `400` | Anything wrong with the request body or a query parameter: an unknown stream group config, neither configuration member, a configuration that selects no detector, a missing or unsupported file, a bad webhook URL, an unknown secret name, a webhook header name that is not a legal header or one the delivery owns, a config slot carrying both a literal credential and its `*_secret`, a non-numeric page number, a state that is not a state |
-| `404` | The job id in the path names no job — and, on the results endpoints, a job that stored no rows; a file delete naming a file that is not there |
+| `404` | The job id in the path names no job — and, on the results endpoints, a job that stored no rows; on the events endpoints, a listener that wrote no rows; a file delete naming a file that is not there |
 | `409` | A conflict with the job's own state: cancelling a terminal job, deleting one that is not terminal, every resume refusal, an upload whose name is taken, a file delete while a queued or running job is using the file |
 | `413` | An upload larger than the VOD settings' `max_upload_bytes` |
 | `503` | VOD is unavailable on this Engine — its content or jobs directory could not be resolved or created; the VI log at startup says which |
@@ -809,6 +828,38 @@ curl -s -u "$WSE_ADMIN_USER:$WSE_ADMIN_PASSWORD" -o results.jsonl "$VIF/vod/jobs
 ```
 
 `404` as for the paged results.
+
+### `GET /vod/jobs/{jobId}/events`
+
+The files the job's listeners derived from its detections — today, the VLM answer listener's — with how many complete rows and bytes each holds. An empty list when no listener wrote any, whether or not the job stored its results; `404` only for an unknown job.
+
+```bash
+curl -s -u "$WSE_ADMIN_USER:$WSE_ADMIN_PASSWORD" "$VIF/vod/jobs/$JOB_ID/events"
+```
+
+```json
+{"events": [{"listener": "VlmAnswers", "rows": 120, "bytes": 51234}]}
+```
+
+`listener` is the name the rows are served under: the listener's configured name with every character outside `[A-Za-z0-9._-]` replaced by `_`.
+
+### `GET /vod/jobs/{jobId}/events/{listener}`
+
+One listener's rows, paged and narrowed exactly as [`…/results`](#get-vodjobsjobidresults) pages the stored ones (`offset`, `limit`, `from_ms`, `to_ms`), in the same envelope. Each row has the shape of a stored results row; the VLM answer listener's carry the mapped `detections`, plus `listener`, `answer` and `job_id`/`source_file`.
+
+```bash
+curl -s -u "$WSE_ADMIN_USER:$WSE_ADMIN_PASSWORD" "$VIF/vod/jobs/$JOB_ID/events/VlmAnswers?limit=100"
+```
+
+A listener name outside that character class is a `400`, never a path; a listener that wrote nothing for the job is a `404`.
+
+### `GET /vod/jobs/{jobId}/events/{listener}/file`
+
+The listener's file itself, one JSON object per line, `application/x-ndjson`, as an attachment named `<job id>-<listener>.jsonl`. `400` and `404` as for the paged rows.
+
+```bash
+curl -s -u "$WSE_ADMIN_USER:$WSE_ADMIN_PASSWORD" -o answers.jsonl "$VIF/vod/jobs/$JOB_ID/events/VlmAnswers/file"
+```
 
 ### `GET /vod/jobs/{jobId}/thumbnail`
 
