@@ -304,7 +304,6 @@ The Manager's VOD report reads its rows — the score strip, the stat band, the 
 
 - **the listener's file** (named after the listener, e.g. `VlmAnswers`), when the job's listeners wrote one. With several, it is a list of their names. A job opens on it when its configuration ran an enabled `VlmAnswerEvent` and the Engine lists its file, and its rows render as Detect — classes in the strip, the legend and the drawer — even on a Custom-mode job whose stored results are prose. A job submitted with `store_results: false` that has such a file shows the file.
 - **Stored results** — every response the analysis service returned, the page's default.
-- **File…** — an NDJSON file from your own computer, read in the browser and never uploaded. Each line is either a results or events row (it has a `detection_window`) or a home-run style event (`{"event": "home_run", "answer": "A", "from_ms": 40000, "to_ms": 50000, …}`), which is shown as a window from `from_ms` to `to_ms` with one detection of class `event`. Rows are ordered by where their window starts; a line that is neither is counted in the caption ("1 line skipped") rather than failing the file. Files over 50 MB are refused.
 
 The caption under the control names the source and its windows, and **download ▸** (and the header's **Download JSONL**) downloads the rows being shown. The last choice holds for the same job while you stay on the page, so the 2-second refresh of a running job never switches it back; while a job runs, its listener file appears as soon as its first row lands.
 
