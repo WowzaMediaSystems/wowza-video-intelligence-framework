@@ -889,6 +889,23 @@ that stored only the final result remain readable; unavailable earlier history
 is not reconstructed. Manager shows these records as having incomplete
 historical detail.
 
+A `final` mode result keeps the stage's own response type and also names where
+it came from: `stage_name` is the stage that produced it, and `path_taken` lists
+the stages the window ran through to reach it, so a listener can tell which
+stage answered. A filtered-out window names its gate stage. Both fields are left
+out when the service did not report them, and older Engine modules omit them.
+
+```json
+{
+  "detector_type": "chain",
+  "detections_type": "vlm",
+  "end_reason": "completed",
+  "stage_name": "describe",
+  "path_taken": ["score", "describe"],
+  "detections": [{ "class_name": "description", "reasoning": "The clip shows a person walking." }]
+}
+```
+
 Terminal results carry `end_reason` — on the stored rows and on every listener
 response built from them — answering one question per window: did the chain
 produce an answer, or stop short, and why?
