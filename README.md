@@ -348,6 +348,8 @@ Use this profile only when you intentionally want the VIS container by itself (f
 
 NVIDIA Jetson Orin devices (Orin Nano and AGX Orin) are supported with Jetpack 7.2.  The repository ships with a small overlay, `docker-compose.jetson.yaml`, that merges on top of the base compose file and swaps the image tags that differ.
 
+See [`docs/JETSON_GUIDE.md`](docs/JETSON_GUIDE.md) for the full walkthrough: prerequisites, pinning the VIS version, first-start model builds, choosing a model size, GPU monitoring with `tegrastats`, and troubleshooting.
+
 > [!NOTE]
 > For the Jetson Orin Nano, you will need the 8GB model (Orin Nano ships in 4GB/8GB).  Run the VIS container alone first to build the initial models (~15–20 min).
 > ```
