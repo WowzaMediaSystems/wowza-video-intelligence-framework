@@ -4,7 +4,7 @@ The Video Intelligence framework can run a **vision-language model (VLM)** over 
 
 With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
-The framework **manages the VLM engines for you**. The Video Intelligence Service (VIS) runs one [vLLM](https://docs.vllm.ai) engine per supported model on your GPU, keeps the models you make active serving (several at once, on one or more GPUs), and sizes every engine from the memory your cards actually have free. Streams reach the serving models through VIS's own OpenAI-compatible endpoint, and you choose the model from a dropdown in the Engine Manager. Which models serve is configured once for the deployment, in **Stream Config Defaults → VLM**. You can also point a stream at an endpoint you run yourself instead; see [Appendix: bring your own endpoint](#appendix-bring-your-own-endpoint). The default model is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
+The framework **manages the VLM engines for you**. The Video Intelligence Service (VIS) runs one [vLLM](https://docs.vllm.ai) engine per supported model on your GPU, keeps the models you make active serving (several at once, on one or more GPUs), and sizes every engine from the memory your cards actually have free. Streams reach the serving models through VIS's own OpenAI-compatible endpoint, and you choose the model from a dropdown in the Engine Manager. Which models serve is configured once for the deployment, on the **VLM Config** page. You can also point a stream at an endpoint you run yourself instead; see [Appendix: bring your own endpoint](#appendix-bring-your-own-endpoint). The default model is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
 
 **In this guide**
 
@@ -15,7 +15,7 @@ The framework **manages the VLM engines for you**. The Video Intelligence Servic
 - [Tiers: hot and cold](#tiers-hot-and-cold)
 - [Gated models and the HuggingFace token](#gated-models-and-the-huggingface-token)
 - [Customizing the deployment: the catalog overlay](#customizing-the-deployment-the-catalog-overlay)
-  - [Stream Config Defaults: the VLM section](#stream-config-defaults-the-vlm-section)
+  - [The VLM Config page](#the-vlm-config-page)
 - [Sizing and pre-flight](#sizing-and-pre-flight)
 - [Engine logs and troubleshooting](#engine-logs-and-troubleshooting)
 - [Upgrading from the single sidecar, and going back](#upgrading-from-the-single-sidecar-and-going-back)
@@ -59,7 +59,7 @@ tail -f wse/logs/wowzastreamingengine_vi.log
 
 You'll see one entry per analysis window with each detected class and the model's reasoning. The same results are embedded as ID3 tags in the stream, and an overlay rendition named `vlm-demo-vi` shows detected classes burned into the video (play it from the Engine Manager test player at `http://localhost:8088`, or directly at `http://localhost/live/vlm-demo-vi/playlist.m3u8`).
 
-**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing the stream's file under `wse/conf.modules/vif/` (for the shipped entry, `live_vlmDotStar.json`) and restarting the stream to apply — either by toggling its active state or by restarting the encoder. To serve another model, or several, see [Stream Config Defaults: the VLM section](#stream-config-defaults-the-vlm-section).
+**4. Make it yours.** Change `class_names` to anything you want to find (it's open vocabulary) — either from the Video Intelligence configuration in Engine Manager (`http://localhost:8088`), or by editing the stream's file under `wse/conf.modules/vif/` (for the shipped entry, `live_vlmDotStar.json`) and restarting the stream to apply — either by toggling its active state or by restarting the encoder. To serve another model, or several, see [Stream Config Defaults: the VLM section](#the-vlm-config-page).
 
 ---
 
@@ -73,10 +73,10 @@ stream ─▶ Engine (WSE + plugin) ──WebSocket──▶ VIS ──▶ manag
 ```
 
 - **One engine per model.** The compose file has a `vif-model-<model>` service for every supported model (plus generic [slots](#adding-your-own-model-an-overlay-entry-and-a-slot) for models you add). They all run the stock `vllm/vllm-openai` image through a small launcher (`vif-vlm-launcher.py`) that runs the command VIS wrote for it. Nothing about a model is configured in `.env`: VIS resolves each engine's whole command from its catalog and from the card it runs on.
-- **The active models serve.** Several can serve at once, on one GPU or spread over several. The others rest, either **asleep** (hot tier) or **parked** (cold tier); see [Tiers](#tiers-hot-and-cold). Which models are active is configured in **Stream Config Defaults → VLM**; changing it is a call to VIS, and no container is recreated.
+- **The active models serve.** Several can serve at once, on one GPU or spread over several. The others rest, either **asleep** (hot tier) or **parked** (cold tier); see [Tiers](#tiers-hot-and-cold). Which models are active is configured on the **VLM Config** page; changing it is a call to VIS, and no container is recreated.
 - **One endpoint.** Streams use `http://video-intelligence-service.docker:5001/v1`, VIS's own port. VIS routes each request by the `model_name` it carries. The address the old single sidecar answered on, `http://vlm.docker:8000/v1`, is served the same way, so older configs keep working. The engines sit on an internal network that only VIS joins, and no engine port is ever published.
 - **A stream either follows or pins.** An empty `model_name` (shown as **Default** in the Manager) follows the active model marked **Default**: move the marker to another model and the stream moves with it. A named `model_name` pins the stream to that model, and a pinned stream **degrades** (empty results, `degraded: true`, reported as `engine_asleep`) while that model is not active.
-- **The active models persist.** They are stored in the overlay's `serving` member (see [the VLM section](#stream-config-defaults-the-vlm-section)). When the overlay has none, VIS seeds a set of one: the first catalog model the overlay does not disable (Qwen3-VL 4B), on GPU 0 (or the single card `VLM_GPU_IDS` names).
+- **The active models persist.** They are stored in the overlay's `serving` member (see [the VLM Config page](#the-vlm-config-page)). When the overlay has none, VIS seeds a set of one: the first catalog model the overlay does not disable (Qwen3-VL 4B), on GPU 0 (or the single card `VLM_GPU_IDS` names).
 
 Everything the engines share lives in four bind mounts under `./vis/`:
 
@@ -165,7 +165,7 @@ Multiple engines can share one VIS deployment — point each engine's `VIS_HOST`
 
 "Needs a card of" is the catalog's `min_vram_gb`: [pre-flight](#sizing-and-pre-flight) refuses a model whose floor is above your card's memory. The weights of all five come to about 70 GB of disk under `./vis/vlm-models`. `GET /vlm/models` (below) lists the catalog as your deployment resolved it, including anything you added or disabled in the [overlay](#customizing-the-deployment-the-catalog-overlay).
 
-Which of these models serve is a deployment decision, made once in **Stream Config Defaults → VLM** (see [the VLM section](#stream-config-defaults-the-vlm-section)): the **active models**, one of them marked **Default**. A fresh deployment has one active model, Qwen3-VL 4B.
+Which of these models serve is a deployment decision, made once on the **VLM Config** page (see [The VLM Config page](#the-vlm-config-page)): the **active models**, one of them marked **Default**. A fresh deployment has one active model, Qwen3-VL 4B.
 
 ### Picking a model for a stream
 
@@ -173,7 +173,7 @@ Open the VIF configuration page in the Engine Manager (`http://localhost:8088`),
 
 1. Under **VLM Server**, keep **Managed by this deployment**. The **Model Name** dropdown then lists the deployment's models, each with its state and tier, for example `Gemma 3 4B Instruct (status: not active · asleep · hot tier)`. The **?** beside it explains every status.
 2. The first choice, **Default**, follows the active model that carries the Default marker and names it: `Default (follows Qwen3-VL 4B Instruct (FP8), status: active)`. Picking any model by name pins the stream to it.
-3. Pick a model that is not active and the line under the dropdown says so: `not active: add it in Stream Config Defaults → VLM`. A stream pinned to it degrades until it is added to the active models; nothing here activates it.
+3. Pick a model that is not active and the line under the dropdown says so: `not active: add it in VLM Config`. A stream pinned to it degrades until it is added to the active models; nothing here activates it.
 
 These screens only choose: they never change which models serve, and **Save** saves the stream's config as usual. Under a gated model the **HuggingFace token** field lets you store a token (see [Gated models](#gated-models-and-the-huggingface-token)), and the **Engine logs** disclosure shows the output of any engine.
 
@@ -233,7 +233,7 @@ A cold model holds no GPU memory and about 18 MiB of RAM (the launcher's health 
 
 To make a model hot, use any of these; each writes the overlay's `tier`:
 
-- The **Tier** select (Auto, Hot, Cold) of the model's row in the Manager's [VLM section](#stream-config-defaults-the-vlm-section) (admins only).
+- The **Tier** select (Auto, Hot, Cold) of the model's row in the Manager's [VLM section](#the-vlm-config-page) (admins only).
 - `PUT /vlm/models/<id>/tier` with `{"tier": "hot"}`.
 - An edit of `./vis/models/vlm-catalog.local.json`, for example `"models": [{"id": "google/gemma-3-4b-it", "tier": "hot"}]`, followed by `POST /vlm/overlay/reload`.
 
@@ -244,7 +244,7 @@ A promotion the host's RAM budget cannot hold is refused with `409 tier_refused`
 Four layers, strongest first:
 
 1. **Capability.** A model that cannot sleep is always cold (Nemotron). On a host where sleep mode cannot run, `VLM_FORCE_ALL_COLD=true` makes every model cold (see below).
-2. **The overlay's tier.** An explicit `"tier": "hot"` or `"cold"` on a model's [overlay entry](#customizing-the-deployment-the-catalog-overlay), the only place a tier is kept. Set it in the **All models** list of the Manager's [VLM section](#stream-config-defaults-the-vlm-section), with `PUT /vlm/overlay`, with `PUT /vlm/models/<id>/tier` (`{"tier": "hot"}`, `{"tier": "cold"}`, or `{"tier": null}` to clear it; it writes the overlay's field) or by editing the file. It applies at once, except that a change on a model that is serving waits until it leaves the active models. An explicit `hot` that the RAM budget cannot hold is demoted to cold, and VIS logs the numbers; `PUT /vlm/models/<id>/tier` refuses such a promotion up front with the arithmetic.
+2. **The overlay's tier.** An explicit `"tier": "hot"` or `"cold"` on a model's [overlay entry](#customizing-the-deployment-the-catalog-overlay), the only place a tier is kept. Set it in the **All models** list of the Manager's [VLM section](#the-vlm-config-page), with `PUT /vlm/overlay`, with `PUT /vlm/models/<id>/tier` (`{"tier": "hot"}`, `{"tier": "cold"}`, or `{"tier": null}` to clear it; it writes the overlay's field) or by editing the file. It applies at once, except that a change on a model that is serving waits until it leaves the active models. An explicit `hot` that the RAM budget cannot hold is demoted to cold, and VIS logs the numbers; `PUT /vlm/models/<id>/tier` refuses such a promotion up front with the arithmetic.
 3. **The catalog's tier.** Every shipped model says `cold`. A model you add with an overlay entry says `auto` unless its entry names a tier.
 4. **The RAM budget (`auto`).** For a model set to `auto`, VIS makes the cheapest sleepers hot until the host's RAM budget is spent; explicit `hot` models are counted first. The budget is the host's RAM minus a reserve kept for the serving engine, the page cache, VIS, the Engine and the OS: the larger of 40% of host RAM and 8 GiB, or `VLM_RAM_RESERVE_MIB` when you set it.
 
@@ -281,7 +281,7 @@ A `HF_TOKEN` is also useful for ungated models: it raises HuggingFace's rate lim
 
 ## Customizing the deployment: the catalog overlay
 
-VIS ships the model catalog: every supported model's sizing, tuning per GPU class and resting behaviour. A deployment changes it in one optional file, `./vis/models/vlm-catalog.local.json`, which VIS reads when it starts and again whenever you apply a change. It lives under `./vis/`, which is not tracked, so a framework `git pull` never touches it. Edit it, then apply the edit: **Apply file edit** in the Manager, `POST /vlm/overlay/reload`, or a VIS restart (`docker compose restart video-intelligence-service-gpu`); the engines follow the specs VIS writes them without a restart of their own. The Manager's [VLM section](#stream-config-defaults-the-vlm-section) edits the same file, with no hand editing and no restart. Adding a whole model is the one change that still needs a restart of VIS (see [below](#adding-your-own-model-an-overlay-entry-and-a-slot)).
+VIS ships the model catalog: every supported model's sizing, tuning per GPU class and resting behaviour. A deployment changes it in one optional file, `./vis/models/vlm-catalog.local.json`, which VIS reads when it starts and again whenever you apply a change. It lives under `./vis/`, which is not tracked, so a framework `git pull` never touches it. Edit it, then apply the edit: **Apply file edit** in the Manager, `POST /vlm/overlay/reload`, or a VIS restart (`docker compose restart video-intelligence-service-gpu`); the engines follow the specs VIS writes them without a restart of their own. The Manager's [VLM section](#the-vlm-config-page) edits the same file, with no hand editing and no restart. Adding a whole model is the one change that still needs a restart of VIS (see [below](#adding-your-own-model-an-overlay-entry-and-a-slot)).
 
 ```json
 {
@@ -302,9 +302,9 @@ Disabling an active model is not refused: it keeps serving, the change comes bac
 
 To bring a model back, remove the flag and apply. It returns to the list and rests at its tier: a hot one loads and then goes to sleep, a cold one stays parked until it is added to the active models.
 
-### Stream Config Defaults: the VLM section
+### The VLM Config page
 
-The overlay file and the **VLM** section of the Engine Manager's **Stream Config Defaults** are two views of one document: the section reads the file through VIS and writes the same file, so a change made in either shows in the other. Open the VIF configuration page and go to **Stream Config Defaults**; the section shows whenever VIS reports that it manages engines.
+The overlay file and the Engine Manager's **VLM Config** page (under Configs) are two views of one document: the page reads the file through VIS and writes the same file, so a change made in either shows in the other. Open the VIF configuration page and go to **VLM Config**; the page shows its section whenever VIS reports that it manages engines.
 
 The section configures the deployment, not any one stream: *these settings apply to every stream and job*. It has its own **Apply**, separate from **Save all changes**, and one Apply makes one write of the whole document. Streams and VOD jobs only [pick a model](#picking-a-model-for-a-stream) from what is configured here.
 
@@ -401,7 +401,7 @@ Removing an uploaded adapter offers **Delete the uploaded files too**; Apply del
 The per-stream screens, **Stream Config** and the VOD **New Analysis** form, only pick a model from the **Model Name** dropdown. Their status text is read-only and points here:
 
 - `Default (follows <model>, status: active)`: the option for streams with no `model_name`; it names the active model that carries the Default marker.
-- `not active: add it in Stream Config Defaults → VLM`: the model is not in the active models, so a stream pinned to it degrades until it is.
+- `not active: add it in VLM Config`: the model is not in the active models, so a stream pinned to it degrades until it is.
 
 The **HuggingFace token** field and the **Engine logs** disclosure stay on these screens; see [Choosing a model](#choosing-a-model).
 
@@ -510,7 +510,7 @@ A model you disable (`"disabled": true`) keeps its slot parked, like a shipped o
 
 ### Your own LoRA adapters
 
-A LoRA adapter you trained for one of the models is one more model in the dropdown: streams name it as their `model_name`, and it is served by its base model's engine, which routes each request to the adapter or the base by the name it carries. The Manager does all of this from [Stream Config Defaults → VLM](#lora-enabling-it-and-uploading-adapters): **Enable LoRA** on the base, then **Add adapter** with an upload. This section is the file view of the same steps, and covers adapters placed under the weights directory by hand.
+A LoRA adapter you trained for one of the models is one more model in the dropdown: streams name it as their `model_name`, and it is served by its base model's engine, which routes each request to the adapter or the base by the name it carries. The Manager does all of this from [VLM Config](#lora-enabling-it-and-uploading-adapters): **Enable LoRA** on the base, then **Add adapter** with an upload. This section is the file view of the same steps, and covers adapters placed under the weights directory by hand.
 
 1. **Copy the adapter** (PEFT's `adapter_config.json` and `adapter_model.safetensors`) under `./vis/vlm-models/`, the weights directory every engine shares, e.g. `./vis/vlm-models/lora/acme-forklifts/`. VIS reads it there too, read-only.
 2. **Declare it in the overlay**, with the base's LoRA support in the same file (`enable_lora` and `lora_module_prefixes`, which the section's **Enable LoRA** toggle sets, with `lora_on_fp8_verified` for an FP8 base):
@@ -593,7 +593,7 @@ An engine that is resting is **healthy** as far as Docker is concerned, so `dock
 | You see | Cause and what to do |
 |---|---|
 | Stream shows **AI offline** / empty `vlm_analysis` with `degraded: true` | The managed endpoint could not take the window. Check `GET /vlm/status` or the Manager's status line. Usual causes are in the next rows |
-| Pinned stream degraded, status `engine_asleep` | The model it names is not active, so it is resting (asleep or parked). Add it to the active models in **Stream Config Defaults → VLM**, or set the stream to **Default** to follow the Default model. The VLM section lists the configs that use a model that is not active |
+| Pinned stream degraded, status `engine_asleep` | The model it names is not active, so it is resting (asleep or parked). Add it to the active models on the **VLM Config** page, or set the stream to **Default** to follow the Default model. The VLM Config page lists the configs that use a model that is not active |
 | Degraded only for a few seconds while a model loads or reloads | Normal: streams using that model pause (`paused: switching model`) and resume when it serves |
 | Degraded, status `engine_failed` | The engine that should serve is down or unreachable, or no model is active. Open **Engine logs** for the failing model; a crashed container is restarted by Docker. If nothing serves, `catastrophic_reason` in `GET /vlm/status` says why and what to do |
 | Stream errors with `model_not_found` | `model_name` is not a model this deployment manages (typo, a snapshot path, or a model the overlay disabled). Fix the name; it is deliberately not degraded over |
@@ -627,7 +627,7 @@ Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `
 }
 ```
 
-Or add the model in **Stream Config Defaults → VLM** after the first start, mark it Default and remove Qwen. Custom per-model settings (`VLM_*` in the old `.env`) do not carry over either; write them as fields of the model's entry in the same file (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
+Or add the model on the **VLM Config** page after the first start, mark it Default and remove Qwen. Custom per-model settings (`VLM_*` in the old `.env`) do not carry over either; write them as fields of the model's entry in the same file (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
 
 **Upgrading.**
 
@@ -687,7 +687,7 @@ The managed engines take no model configuration from `.env`: VIS resolves each e
 | `HF_HUB_OFFLINE` | unset | Set to `1` on air-gapped hosts with pre-seeded weights to skip Hub probes at boot |
 | `VLM_FORCE_ALL_COLD` | unset | `true` parks every resting engine instead of putting it to sleep — for hosts where sleep mode cannot run |
 | `VLM_RAM_RESERVE_MIB` | derived | Host RAM kept back from sleeping engines; unset = the larger of 40% of host RAM and 8 GiB |
-| `VLM_GPU_IDS` | unset | Fallback card for an engine with no GPU of its own; a single index also places the first seeded active model. Each active model's GPU is chosen in the [VLM section](#stream-config-defaults-the-vlm-section); leave it unset |
+| `VLM_GPU_IDS` | unset | Fallback card for an engine with no GPU of its own; a single index also places the first seeded active model. Each active model's GPU is chosen in the [VLM section](#the-vlm-config-page); leave it unset |
 | `HF_ENDPOINT` | `https://huggingface.co` | The HuggingFace hub VIS checks a token saved in the Manager against |
 | `VLM_CATALOG_OVERLAY` | `./models/vlm-catalog.local.json` | Path of the [overlay](#customizing-the-deployment-the-catalog-overlay) inside the VIS container (`./vis/models/vlm-catalog.local.json` on the host) |
 

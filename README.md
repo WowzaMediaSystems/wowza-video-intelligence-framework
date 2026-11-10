@@ -249,7 +249,7 @@ ffmpeg -stream_loop -1 -re -i "./videos/vi-object-detection-landscape.mp4" -r 25
    - ID3 metadata is injected into HLS output for analyzed streams.
    - If the `LogFiles` listener is enabled, events are written to `wowzastreamingengine_vi.log` (under `./wse/logs/` when WSE log mounts are enabled).
 
-See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for the managed VLM engines (choosing models and the active models in Stream Config Defaults, hot and cold tiers, gated models, adding your own models and LoRA adapters, sizing, troubleshooting), VLM modes (`Detect`, `Describe`, and `Custom`), stream settings, and bringing your own endpoint.
+See [`docs/VLM_GUIDE.md`](docs/VLM_GUIDE.md) for the managed VLM engines (choosing models and the active models on the VLM Config page, hot and cold tiers, gated models, adding your own models and LoRA adapters, sizing, troubleshooting), VLM modes (`Detect`, `Describe`, and `Custom`), stream settings, and bringing your own endpoint.
 
 ## Analyzing Video Files (VOD)
 
