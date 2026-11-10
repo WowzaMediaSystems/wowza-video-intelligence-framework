@@ -7,6 +7,7 @@ For the general VIS reference (configuration variables, TLS, air-gapped model do
 ## Contents
 
 - [Supported devices](#supported-devices)
+- [Compose files for Jetson](#compose-files-for-jetson)
 - [What the Jetson overlay changes](#what-the-jetson-overlay-changes)
 - [Prerequisites](#prerequisites)
 - [1. Configure `.env`](#1-configure-env)
@@ -31,7 +32,19 @@ For the general VIS reference (configuration variables, TLS, air-gapped model do
 
 All devices require **JetPack 7.2**.
 
-The [Compute Requirements](../README.md#compute-requirements-self-hosted-vif) baseline in the main README (about 8 concurrent 720p streams at up to 10 FPS on RF-DETR Medium) is for discrete NVIDIA GPUs. No equivalent figure is published for Jetson, so measure your own workload with the dashboard described in [Monitoring on Jetson](#monitoring-on-jetson).
+The [Compute Requirements](../README.md#compute-requirements-self-hosted-vif) baseline in the main README (about 8 concurrent 720p streams at up to 10 FPS on RF-DETR Medium) is sized for discrete NVIDIA GPUs. To size a Jetson deployment, measure your own workload with the dashboard described in [Monitoring on Jetson](#monitoring-on-jetson).
+
+## Compose files for Jetson
+
+On a Jetson, run every `docker compose` command with **two** files: the base `docker-compose.yaml` and the Jetson overlay `docker-compose.jetson.yaml`.
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml --profile default up -d
+```
+
+Leaving out the overlay doesn't fail visibly. The base file's VIS image (`1.2.0-gpu`) also has an arm64 build, so Docker pulls it without an error, but it isn't the Jetson image.
+
+To avoid typing both files every time, set `COMPOSE_FILE` in `.env` as shown in [step 1](#1-configure-env). Every `docker compose` command in the directory then uses both files, and the rest of this guide uses that shorter form.
 
 ## What the Jetson overlay changes
 
@@ -91,13 +104,7 @@ Then turn on the Jetson overlay by uncommenting this line in the NVIDIA Jetson s
 COMPOSE_FILE=docker-compose.yaml:docker-compose.jetson.yaml
 ```
 
-With `COMPOSE_FILE` set, every `docker compose` command in this directory (`up`, `down`, `logs`, `pull`) applies the overlay automatically. If you leave it unset, pass both files on every command instead:
-
-```bash
-docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml <command>
-```
-
-The commands in the rest of this guide assume `COMPOSE_FILE` is set.
+With `COMPOSE_FILE` set, every `docker compose` command in this directory (`up`, `down`, `logs`, `pull`) applies the overlay automatically. If you leave it unset, add both `-f` files to each command in this guide, as shown in [Compose files for Jetson](#compose-files-for-jetson).
 
 ## 2. First start: build the models
 
@@ -161,7 +168,7 @@ If you [pinned the VIS version](#what-the-jetson-overlay-changes), update the ta
 |---|---|
 | `unknown or invalid runtime name: nvidia` | The NVIDIA Container Toolkit isn't registered with Docker. `docker info --format '{{json .Runtimes}}'` must include `nvidia`. |
 | `could not select device driver "nvidia"` when starting `wse` | Same cause: Docker can't see the NVIDIA runtime. Fix the toolkit setup, then restart Docker. |
-| VIS uses the `-gpu` image instead of `-jetpack7` | The overlay isn't applied. Check `COMPOSE_FILE` in `.env`, or pass both `-f` files. `docker compose config --images` shows which images will run. |
+| VIS uses the `-gpu` image instead of `-jetpack7` | The overlay isn't applied — see [Compose files for Jetson](#compose-files-for-jetson). `docker compose config --images` shows which images will run. |
 | First start on an Orin Nano doesn't complete | Start VIS alone (`--profile vi-service`) so Engine and Manager aren't running, and confirm the device is the 8GB model. |
 | Manager dashboard shows no Jetson GPU figures; Engine log shows `Could not find tegrastats for Orin GPU info` | The overlay isn't applied, or `/usr/bin/tegrastats` is missing on the host. |
 | Engine connection refused after a restart | VIS takes about a minute to load its models. Engine reconnects automatically once VIS is ready. |
