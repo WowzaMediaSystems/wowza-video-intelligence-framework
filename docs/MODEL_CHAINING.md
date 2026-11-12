@@ -765,8 +765,8 @@ The timeout uses seconds with millisecond precision, from 0.001 through
 2147483.647. Timeout or callback failure finishes the current window with the
 results obtained. Five consecutive callback exceptions disable the listener and
 call its `onShutdown`. `dispatch_intermediate_rings: true` also sends
-intermediate events to ordinary event listeners. They do not count as completed
-VOD windows or create resume checkpoints. Synthetic stages and conditional
+intermediate events to ordinary event listeners, each naming the stage that just
+ran. They do not count as completed VOD windows or create resume checkpoints. Synthetic stages and conditional
 routing are unavailable in dynamic mode.
 
 ## Service compatibility
@@ -888,6 +888,25 @@ results retain the complete terminal history with either setting. Older records
 that stored only the final result remain readable; unavailable earlier history
 is not reconstructed. Manager shows these records as having incomplete
 historical detail.
+
+A `final` mode result keeps the stage's own response type and also names where
+it came from: `stage_name` is the stage that produced it, and `path_taken` lists
+the stages the window ran through to reach it, so a listener can tell which
+stage answered. A filtered-out window names its gate stage. Both fields are left
+out when the service did not report them, and older Engine modules omit them.
+A `rollup` event carries neither: its interval can span windows that took
+different paths.
+
+```json
+{
+  "detector_type": "chain",
+  "detections_type": "vlm",
+  "end_reason": "completed",
+  "stage_name": "describe",
+  "path_taken": ["score", "describe"],
+  "detections": [{ "class_name": "description", "reasoning": "The clip shows a person walking." }]
+}
+```
 
 Terminal results carry `end_reason` — on the stored rows and on every listener
 response built from them — answering one question per window: did the chain
