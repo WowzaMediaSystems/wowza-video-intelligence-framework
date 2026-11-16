@@ -263,7 +263,7 @@ default. Configure your synthetic stream with:
 | --- | --- | --- |
 | Detector Type | `synthetic` | Enables the synthetic detector |
 | Endpoint | `svd.docker:8001` | The in-network sidecar (host:port) |
-| Classification Threshold | `0.3` | A score above this is labeled `"synthetic"` |
+| How strict (classification threshold) | Balanced (`0.44`) | A score above this is labeled `"synthetic"` |
 | Duration | `2.0` | Window length in seconds |
 
 The sidecar can also serve a Video Intelligence Service running on **another
@@ -283,7 +283,7 @@ dev endpoint — **for evaluation only, not production**), **don't** enable the
 | Endpoint | `grpc.nvcf.nvidia.com:443` | The hosted endpoint (host:port) |
 | API Key | `<your key>` | Sent to authenticate the request |
 | Function ID | `<function id>` | Required by NVIDIA's hosted endpoint |
-| Classification Threshold | `0.3` | A score above this is labeled `"synthetic"` |
+| How strict (classification threshold) | Balanced (`0.44`) | A score above this is labeled `"synthetic"` |
 | Duration | `2.0` | Window length in seconds |
 
 - **Transport security is automatic.** TLS is used when the endpoint port is
@@ -438,7 +438,7 @@ to override. Set them from the Manager UI or your stream configuration.
 | --- | --- | --- |
 | `endpoint` | — (required) | The SVD endpoint as `host:port` (not an http URL) |
 | `duration` | `2.0` | Analysis window length in seconds (see [window length](#a-note-on-window-length)) |
-| `classification_threshold` | `0.3` | Scores strictly above this ⇒ verdict `"synthetic"` |
+| `classification_threshold` | `0.44` | Scores strictly above this ⇒ verdict `"synthetic"` |
 | `use_tls` | auto | Force TLS on/off; omit to auto-detect (TLS when any `tls_*` certificate is set or the port is `443`, else plaintext) |
 | `api_key` | none | Only for NVIDIA's hosted evaluation endpoint; a self-hosted detector ignores it |
 | `function_id` | none | Only for NVIDIA's hosted evaluation endpoint; omit otherwise |
@@ -490,10 +490,14 @@ verdicts resume automatically once the endpoint accepts requests again.
 
 ### Choosing a threshold
 
-The default `0.3` is intentionally conservative: it minimizes missed synthetics,
-at the cost of flagging some genuine footage. Use `0.5` for a balanced trade-off
-where false positives and false negatives matter equally. Tune to your own
+The default `0.44` is the detector's balanced setting and suits most uses. Use
+`0.26` to catch more AI-generated video, at the cost of flagging more genuine
+footage. In the Manager these are the **Balanced** and **Catch more** choices
+under **How strict**, and you can also set a score of your own. Tune to your own
 tolerance and review policy.
+
+An installation that already stores a threshold in its defaults keeps that
+value.
 
 ---
 
