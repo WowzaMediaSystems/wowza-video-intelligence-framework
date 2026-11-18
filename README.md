@@ -58,6 +58,7 @@ For a first test, one server with a supported GPU is simplest. For production, w
 - [Model chaining through the v2 API](docs/MODEL_CHAINING.md)
 - [Deploying Your Own VIF Service (Optional)](#deploying-your-own-vif-service-optional)
 - [Deploying on AWS (EC2)](docs/AWS_DEPLOYMENT.md)
+- [Deploying on Google Cloud (Compute Engine)](docs/GCP_DEPLOYMENT.md)
 - [Compute Requirements (Self-Hosted VIF)](#compute-requirements-self-hosted-vif)
 - [Running VIS Only (Optional)](#running-vis-only-optional)
 - [Running on NVIDIA Jetson (Optional)](#running-on-nvidia-jetson-optional)
@@ -316,7 +317,7 @@ See [`docs/SYNTHETIC_VIDEO_DETECTOR.md`](docs/SYNTHETIC_VIDEO_DETECTOR.md) for t
 
 If you want your own Video Intelligence Service deployment (for example on NVIDIA Brev), see [`docs/VIS_DEPLOYMENT.md`](docs/VIS_DEPLOYMENT.md).
 
-To run the full stack (Engine + Manager + VIS) on AWS, see [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md) — EC2 instance sizing, the recommended AMI, security groups, and a first test stream.
+To run the full stack (Engine + Manager + VIS) on AWS, see [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md) — EC2 instance sizing, the recommended AMI, security groups, and a first test stream. For Google Cloud, see [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md) — the same walkthrough for Compute Engine GPU VMs.
 
 ## Compute Requirements (Self-Hosted VIF)
 
