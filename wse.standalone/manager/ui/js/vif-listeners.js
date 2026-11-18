@@ -8,7 +8,7 @@
     // workflow - see the comment there), used below to version the
     // dynamically-constructed listeners/<ClassName>.js script URLs
     // (ensureListenerScriptLoaded).
-    var UI_VERSION = '1.2.0';
+    var UI_VERSION = '1.2.1';
 
     /** A webhook listener's stored or typed settings, compared field by field. */
     VIF.listeners.webhookSettingsOf = function (properties) {
@@ -65,6 +65,13 @@
             LogFileEvent: 'LogFile',
             WebhookEvent2: 'Webhook',
             ObjectTracking: 'ObjectTracker'
+        };
+        var LISTENER_TYPE_LABELS = {
+            OverlayEvent: 'Video overlay',
+            Id3Event: 'ID3 tags',
+            LogFileEvent: 'Log file',
+            WebhookEvent2: 'Webhook',
+            ObjectTracking: 'Object tracking'
         };
         EVENT_METHOD_OPTIONS = [
             { value: 'disabled', label: 'Disabled' },
@@ -209,9 +216,10 @@
             return LISTENER_DEFAULT_DISPLAY_NAMES[shortName] || shortName || 'Listener';
         }
 
+        // Built-in types read by what they do; a listener of your own keeps its class name and version.
         function getListenerTypeDisplayName(className) {
-
             const shortName = resolveClassName(className || '');
+            if (LISTENER_TYPE_LABELS[shortName]) return LISTENER_TYPE_LABELS[shortName];
             const version = defaultConfig.available_event_listeners[shortName] || '?.?.?';
             return (shortName || 'Listener') + ' v' + version;
         }
@@ -223,7 +231,8 @@
 
         function buildListenerOptionLabel(name) {
             const data = eventListenersData[name] || {};
-            const typeName = resolveClassName(data.class_name || '') || 'No type';
+            const shortName = resolveClassName(data.class_name || '');
+            const typeName = LISTENER_TYPE_LABELS[shortName] || shortName || 'No type';
             return name + '  (' + typeName + '): ' + formatEventMethodLabel(getListenerMethod(name));
         }
 
@@ -337,9 +346,8 @@
                     + 'its results stay in the stored rows and reach any Webhook or Log listener.';
                 el.style.display = 'block';
             } else if (chainTypes.indexOf('synthetic') !== -1 && hasLiveOnlyListener) {
-                el.textContent = 'Overlay and ID3 listeners need a live output stream. A chain with a Synthetic stage runs '
-                    + 'only as an on-demand job, which skips them; its results stay in the stored rows and reach any '
-                    + 'Webhook or Log listener.';
+                el.textContent = 'Video overlay and ID3 tags need a live stream. A chain with a Spot AI-generated video step '
+                    + 'runs only on recorded video, so it skips them. Its results still go to any webhook or log file.';
                 el.style.display = 'block';
             } else if (detectorType === 'synthetic' && hasOverlay && !useTranscoder) {
                 el.innerHTML = 'This Overlay listener won’t appear for synthetic detection: synthetic relays the ' +
@@ -413,8 +421,13 @@
                 nameInput.dataset.suggestedValue = '';
             }
             refreshNewListenerTemplateOptions();
+            // A new destination starts blank; another of the last type is rarely what's wanted.
             const templateSelect = document.getElementById('evt-new-listener-template');
-            if (templateSelect) templateSelect.focus();
+            if (templateSelect) {
+                templateSelect.value = '';
+                onNewListenerTemplateChanged();
+                templateSelect.focus();
+            }
         }
 
         function showListenerWarning(message) {
@@ -437,11 +450,11 @@
                 disabled: 'Disabled keeps the listener config in place without emitting any events.'
             };
             const listenerTips = {
-                OverlayEvent: 'OverlayEvent draws boxes, labels, and optional stats back onto the Wowza video output.',
-                Id3Event: 'Id3Event injects timed metadata into the stream for downstream players or consumers.',
-                LogFileEvent: 'LogFileEvent writes detection activity to a file, which is helpful for audits and debugging.',
-                WebhookEvent2: 'WebhookEvent2 POSTs detections to the Destination URL set on this listener, under the secret it names. Send a test event to check the consumer before a detection happens.',
-                ObjectTracking: 'ObjectTracking evaluates tracked objects against configured regions, triggers, directions, counts, and dwell logic.'
+                OverlayEvent: 'Video overlay draws boxes, labels, and optional stats back onto the Wowza video output.',
+                Id3Event: 'ID3 tags inject timed metadata into the stream for downstream players or consumers.',
+                LogFileEvent: 'Log file writes detection activity to a file, which is helpful for audits and debugging.',
+                WebhookEvent2: 'Webhook POSTs detections to the Destination URL set on this listener, under the secret it names. Send a test event to check the consumer before a detection happens.',
+                ObjectTracking: 'Object tracking evaluates tracked objects against configured regions, triggers, directions, counts, and dwell logic.'
             };
 
             const parts = [];
@@ -494,7 +507,7 @@
                 select.disabled = false;
                 readonlyEl.style.display = 'none';
                 readonlyEl.textContent = '';
-                helpEl.textContent = 'Choose the listener type for this new custom listener. You can change it until you save the config.';
+                helpEl.textContent = 'You can change this until you save.';
                 return;
             }
 
@@ -502,7 +515,7 @@
             select.disabled = true;
             readonlyEl.style.display = 'block';
             readonlyEl.textContent = getListenerTypeDisplayName(shortName) || 'Not set';
-            helpEl.textContent = 'Listener type is fixed after save. Remove and recreate the listener to use a different type.';
+            helpEl.textContent = 'Locked once saved. To use a different type, delete this listener and create a new one.';
         }
 
         function isListenerTypeEditable(listenerData) {
@@ -611,6 +624,25 @@
             onListenerSelected();
         }
 
+        // The method a listener type is most useful with. It applies when the detector
+        // allows it; otherwise the first method the detector does allow.
+        const PREFERRED_NEW_LISTENER_METHODS = {
+            Id3Event: 'rollup',
+            OverlayEvent: 'immediate',
+            ObjectTracking: 'immediate',
+            LogFileEvent: 'batch',
+            WebhookEvent2: 'batch'
+        };
+
+        function newListenerMethod(className) {
+            const allowed = getAllowedEventMethodValues(className, getCurrentDetectorType()).filter(function(method) {
+                return method !== 'disabled';
+            });
+            const preferred = PREFERRED_NEW_LISTENER_METHODS[resolveClassName(className || '')];
+            if (allowed.includes(preferred)) return preferred;
+            return allowed[0] || 'disabled';
+        }
+
         function addNewListener() {
             var templateSelect = document.getElementById('evt-new-listener-template');
             var nameInput = document.getElementById('evt-new-listener-name');
@@ -632,7 +664,7 @@
             }
             eventListenersData[name] = {
                 class_name: selectedTemplate,
-                methods: 'disabled',
+                methods: newListenerMethod(selectedTemplate),
                 confidence_threshold: defaultConfidenceThreshold(),
                 properties: {},
                 type_locked: true
@@ -786,6 +818,9 @@
                 if (field.synthetic_methods !== undefined) {
                     metadata.synthetic_methods = normalizeMethodValues(field.synthetic_methods);
                 }
+                if (field.motion_methods !== undefined) {
+                    metadata.motion_methods = normalizeMethodValues(field.motion_methods);
+                }
                 return metadata;
             }, {});
         }
@@ -798,8 +833,12 @@
 
         // Motion confidence is net displacement, not a 0-1 quality score: 0.7 would mean
         // "crossed 70% of the frame", so a motion listener does no further filtering by default.
+        // A chain counts as motion when its last step watches for movement.
         function defaultConfidenceThreshold() {
-            return getCurrentDetectorType() === 'motion' ? 0.0 : 0.7;
+            const type = getCurrentDetectorType();
+            const steps = type === 'chain' ? document.querySelectorAll('#chain-flow .cb-tile') : [];
+            const lastStep = steps.length ? steps[steps.length - 1].dataset.stepType : '';
+            return type === 'motion' || lastStep === 'motion' ? 0.0 : 0.7;
         }
 
         function getCurrentDetectorType() {
@@ -825,7 +864,42 @@
             if (detectorType === 'object') {
                 return metadata.object_methods;
             }
+            if (detectorType === 'motion') {
+                return metadata.motion_methods;
+            }
+            if (detectorType === 'chain') {
+                return chainMethods(metadata);
+            }
             return null;
+        }
+
+        // A chain offers what works for every kind of step whose results go out. When those
+        // kinds share nothing, as object tracking does when objects go out beside other
+        // results, it offers what works for any of them rather than nothing. Every step's
+        // results go out as one combined result, which Rollup can't merge.
+        function chainMethods(metadata) {
+            const streamConfig = window.VIF.streamConfig || {};
+            const sent = streamConfig.chainSentStepTypes ? streamConfig.chainSentStepTypes() : [];
+            const lists = sent.map(function(type) { return resolveDetectorSpecificMethods(metadata, type); })
+                .filter(Array.isArray);
+            if (!lists.length) return null;
+            const shared = lists.reduce(function(common, list) {
+                return common.filter(function(method) { return list.indexOf(method) !== -1; });
+            });
+            const methods = shared.length || lists.every(function(list) { return !list.length; }) ? shared
+                : lists.reduce(function(all, list) {
+                    return all.concat(list.filter(function(method) { return all.indexOf(method) === -1; }));
+                }, []);
+            const combined = streamConfig.chainSendsEveryStep ? streamConfig.chainSendsEveryStep() : false;
+            return combined ? methods.filter(function(method) { return method !== 'rollup'; }) : methods;
+        }
+
+        // The method choices of the destination being edited, after the chain changed what it sends.
+        function refreshListenerMethodChoices() {
+            const select = document.getElementById('evt-listener-select');
+            if (isAddingNewListener || !select || !select.value) return;
+            const current = eventListenersData[select.value];
+            if (current) updateEventMethodOptions(current.class_name, current.methods);
         }
 
         // Shows the per-detector inline help span `${prefix}-${detectorType}` and hides the
@@ -1370,6 +1444,10 @@
                     : (field.default !== undefined && field.default !== null ? String(field.default) : '');
                 if (field.default !== undefined && field.default !== null) {
                     input.placeholder = String(field.default);
+                } else if (field.hint) {
+                    // Shows what blank means without becoming the saved value.
+                    input.placeholder = field.hint;
+                    input.dataset.hintOnly = 'true';
                 }
                 input.dataset[dataAttr] = field.key;
                 input.addEventListener('input', syncPropertyFields);
@@ -1565,7 +1643,7 @@
                     // clear the stored name rather than quietly keep it.
                     props[key] = input.value;
                 } else {
-                    props[key] = input.value !== '' ? input.value : (input.placeholder || '');
+                    props[key] = input.value !== '' || input.dataset.hintOnly ? input.value : (input.placeholder || '');
                 }
             });
 
@@ -1706,6 +1784,7 @@
         window.populateEventListeners = populateEventListeners;
         window.populateClassNameDropdown = populateClassNameDropdown;
         window.updateEventMethodOptions = updateEventMethodOptions;
+        window.refreshListenerMethodChoices = refreshListenerMethodChoices;
         window.updatePropertiesVisibility = updatePropertiesVisibility;
         window.updateSyntheticOverlayWarning = updateSyntheticOverlayWarning;
         window.syncListenerFields = syncListenerFields;

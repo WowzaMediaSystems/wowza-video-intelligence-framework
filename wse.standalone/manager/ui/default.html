@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.1">
     <style>
         .vif-plugin {
             --form-label-width: 200px;
@@ -7,19 +7,6 @@
 
         .vif-plugin.content-wrapper * {
             box-sizing: border-box;
-        }
-
-        .vif-plugin .sticky-page-header {
-            position: sticky;
-            top: 0;
-            z-index: 20;
-            background: #fff;
-        }
-        .vif-plugin .streams-header {
-            align-items: flex-end;
-            /* No gap under the title: the tabs row below carries its own 12px
-               padding — matching shm.html so the row never shifts between tabs. */
-            margin-bottom: 0;
         }
 
         .vif-plugin button {
@@ -96,6 +83,10 @@
 
         /* VIS URL / API key fill the column, matching stream-config.html. */
         .vif-plugin #def-vi-service-url,
+        .vif-plugin #def-synthetic-endpoint,
+        .vif-plugin #def-synthetic-tls-ca-cert,
+        .vif-plugin #def-synthetic-tls-client-cert,
+        .vif-plugin #def-synthetic-function-id,
         .vif-plugin #def-verify-svd-address,
         .vif-plugin #def-verify-review-url,
         .vif-plugin #def-verify-review-model {
@@ -115,6 +106,8 @@
         }
         /* ID selector so this outranks `.form-group input[type="password"]` (which caps at 320px). */
         .vif-plugin #def-vi-service-api-key,
+        .vif-plugin #def-synthetic-api-key,
+        .vif-plugin #def-synthetic-tls-client-key,
         .vif-plugin #def-verify-svd-api-key,
         .vif-plugin #def-verify-review-api-key {
             flex: 1 1 auto;
@@ -125,6 +118,23 @@
         .vif-plugin .input-with-toggle > button {
             flex: 0 0 auto;
         }
+        .vif-plugin #def-synthetic-endpoint {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+        }
+        .vif-plugin .endpoint-test-result {
+            flex-basis: 100%;
+            margin-left: calc(var(--form-label-width) + 10px);
+            margin-top: 2px;
+            font-size: 0.8em;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+        .vif-plugin .endpoint-test-result.ok    { color: #1e9e5a; }
+        .vif-plugin .endpoint-test-result.warn  { color: var(--warn-color); }
+        .vif-plugin .endpoint-test-result.error { color: var(--alert-color); }
 
         /* The literal-or-name mode select above the credential input, and the name picker
            that stands in for the input when the slot holds a reference — same slot pattern
@@ -144,6 +154,8 @@
             flex: 0 1 220px;
         }
         .vif-plugin #def-vi-service-api-key-secret,
+        .vif-plugin #def-synthetic-api-key-secret,
+        .vif-plugin #def-synthetic-tls-client-key-secret,
         .vif-plugin #def-verify-svd-api-key-secret,
         .vif-plugin #def-verify-review-api-key-secret {
             display: block;
@@ -170,7 +182,8 @@
             padding-top: 4px;
         }
         /* The slot's selects look like stream-config.html's form selects. */
-        .vif-plugin .secret-slot select {
+        .vif-plugin .secret-slot select,
+        .vif-plugin #def-synthetic-use-tls {
             font-family: monospace;
             font-size: 0.95em;
             padding: 6px 10px;
@@ -179,7 +192,8 @@
             background: #fff;
             color: #1b2430;
         }
-        .vif-plugin .secret-slot select:focus {
+        .vif-plugin .secret-slot select:focus,
+        .vif-plugin #def-synthetic-use-tls:focus {
             outline: none;
             border-color: #f08a00;
         }
@@ -258,44 +272,18 @@
         }
     </style>
 
-    <div class="content-wrapper vif-plugin">
-        <div class="sticky-page-header">
-        <div class="streams-header">
-            <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
-        </div>
-        <!-- Global VIF nav (same four tabs on every VIF page): this page is the
-             Configs area; the secondary row says which config surface. -->
-        <div class="vif-tabs-row">
-            <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams <span class="vif-tab-count" id="vif-tab-live-count">&ndash;</span></button>
-            <button class="vif-tab" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count">&ndash;</span></button>
-            <span class="vif-tab is-active">Configs</span>
-        </div>
+    <div class="vif-plugin vif-shell">
+    <nav id="vif-sidenav" class="vif-sidenav" aria-label="VIF pages"></nav>
+    <div class="content-wrapper vif-plugin vif-main">
         <script>
-            // Record this page as the last-used tab (down to the config surface):
-            // a fresh entry into the plugin returns here via shm.html's sticky-tab
-            // script, same as the Live/On-Demand tabs.
+            // Record this page as the last-used one (down to the config surface): a
+            // fresh entry into the plugin returns here via shm.html's sticky-tab script.
             try {
                 sessionStorage.setItem('vifLastTab', 'configs');
                 sessionStorage.setItem('vifConfigsPage', 'default.html');
             } catch (e) { /* non-sticky */ }
         </script>
-        <div class="vif-subtabs" style="margin-bottom: 12px;">
-            <button class="vif-subtab" title="Per-stream detector configs.&#10;Streams match by name pattern." onclick="loadAjaxPluginContent('server','vif','stream-config.html','')">Stream Configs</button>
-            <span class="vif-subtab is-active">Stream Config Defaults</span>
-            <button class="vif-subtab" title="On-Demand job settings:&#10;caps, retention, lifecycle webhooks." onclick="try { sessionStorage.setItem('vifVodView','settings'); } catch (e) {} loadAjaxPluginContent('server','vif','vod.html','')">On-Demand Configs</button>
-            <button class="vif-subtab" title="Stored credentials the configs reference by name:&#10;endpoint keys, the service key, webhook secrets." onclick="loadAjaxPluginContent('server','vif','secrets.html','')">Secrets</button>
-        </div>
-        </div>
-        <style>
-            /* Page header, the shape every VIF sub-view carries: a back crumb top
-               left over the page title (the On-Demand pages set the pattern). */
-            .vif-plugin .vif-page-head{padding:14px 0 10px;border-bottom:1px solid #cfd5db;margin-bottom:16px}
-            .vif-plugin .vif-page-crumb{display:inline-block;font-size:12.5px;font-weight:600;color:#f08a00;text-decoration:none;margin-bottom:3px;cursor:pointer}
-            .vif-plugin .vif-page-crumb:hover{text-decoration:underline}
-            .vif-plugin .vif-page-title{margin:0;font-size:20px;font-weight:700}
-        </style>
         <div class="vif-page-head">
-            <a class="vif-page-crumb" href="#" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html',''); return false;">&#8592; Live Streams</a>
             <h2 class="vif-page-title">Stream Config Defaults</h2>
         </div>
 
@@ -410,6 +398,124 @@
                     </div>
                 </div>
 
+            </div>
+
+            <div id="def-synthetic-section" class="form-wrapper" style="margin-top:16px;">
+                <div class="form-section-title">AI-generated Video Defaults</div>
+                <div class="section-help">
+                    The detector server every Synthetic config and every Spot AI-generated video chain step uses where it leaves its own blank.
+                    Optional &mdash; leave the server blank to set no default; clearing a stored value removes it.
+                </div>
+
+                <div class="form-group">
+                    <label title="gRPC host:port of the Synthetic Video Detector">Detector server</label>
+                    <div class="input-with-toggle">
+                        <input type="text" id="def-synthetic-endpoint"
+                               placeholder="e.g. svd.docker:8001"
+                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <button type="button" id="def-synthetic-endpoint-test" onclick="testDefaultSvdEndpoint()" title="Check that the detector answers at this address over the chosen connection, and accepts the key">Verify</button>
+                    </div>
+                    <div class="field-help">
+                        The detector&rsquo;s address as <code>host:port</code>, like <code>svd.docker:8001</code> (not a web address). For NVIDIA&rsquo;s hosted detector, use <code>grpc.nvcf.nvidia.com:443</code>.
+                    </div>
+                    <div id="def-synthetic-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
+                </div>
+
+                <div class="form-group">
+                    <label title="Whether the detector is reached over TLS">Use a secure connection</label>
+                    <select id="def-synthetic-use-tls">
+                        <option value="true">Always (recommended)</option>
+                        <option value="">Automatic</option>
+                        <option value="false">Never</option>
+                    </select>
+                    <div class="field-help">
+                        Use <strong>Always</strong> for a detector reached over the network. <strong>Automatic</strong> uses a secure connection when the address ends in <code>:443</code> or a certificate below is set, and a plain one otherwise. Use <strong>Never</strong> only inside your own network.
+                    </div>
+                </div>
+
+                <!-- Self-hosted only: NVIDIA's hosted detector takes no client certificate. -->
+                <div id="def-synthetic-tls-cert-fields">
+                    <div class="form-group">
+                        <label title="Path to the CA certificate on the analysis service's machine">Server certificate (CA)</label>
+                        <input type="text" id="def-synthetic-tls-ca-cert"
+                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <div class="field-help">
+                            Checks the detector&rsquo;s certificate. Needed when it isn&rsquo;t from a public certificate authority. A file path on the analysis service&rsquo;s machine.
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label title="Path to the client certificate on the analysis service's machine">Client certificate</label>
+                        <input type="text" id="def-synthetic-tls-client-cert"
+                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <div class="field-help">
+                            Proves the stream to the detector (mutual TLS). Set it together with the client key.
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label title="The private key for the client certificate">Client key</label>
+                        <div class="secret-slot">
+                            <select id="def-synthetic-tls-client-key-source" class="secret-source" onchange="secretSourceChanged('def-synthetic-tls-client-key')">
+                                <option value="stored">Use a stored secret</option>
+                                <option value="value">Enter a value</option>
+                            </select>
+                            <div class="input-with-toggle" id="def-synthetic-tls-client-key-value-row">
+                                <input type="text" id="def-synthetic-tls-client-key"
+                                       autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                                <button type="button" class="secret-save-as" disabled onclick="promptStoreSecret('def-synthetic-tls-client-key')" title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                            </div>
+                            <div class="secret-store-row" id="def-synthetic-tls-client-key-store-row" style="display:none">
+                                <input type="text" id="def-synthetic-tls-client-key-store-name" placeholder="secret name">
+                                <button type="button" onclick="confirmStoreSecret('def-synthetic-tls-client-key')">Save</button>
+                                <button type="button" onclick="cancelStoreSecret('def-synthetic-tls-client-key')">Cancel</button>
+                            </div>
+                            <select id="def-synthetic-tls-client-key-secret" style="display:none"></select>
+                        </div>
+                        <div class="field-help">
+                            The private key for the client certificate. A stored key is never shown; leave blank to keep it.
+                            Or pick a stored secret: rotating it on the Secrets page applies with no config change.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NVIDIA's hosted detector only: a self-hosted one checks no key. -->
+                <div id="def-synthetic-nvcf-fields" style="display:none;">
+                    <div class="form-group">
+                        <label title="API key for NVIDIA's hosted detector">API Key</label>
+                        <div class="secret-slot">
+                            <select id="def-synthetic-api-key-source" class="secret-source" onchange="secretSourceChanged('def-synthetic-api-key')">
+                                <option value="stored">Use a stored secret</option>
+                                <option value="value">Enter a value</option>
+                            </select>
+                            <div class="input-with-toggle" id="def-synthetic-api-key-value-row">
+                                <input type="password" id="def-synthetic-api-key"
+                                       autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                                <button type="button" id="def-synthetic-api-key-toggle" onclick="toggleSecretVisibility('def-synthetic-api-key', 'def-synthetic-api-key-toggle')" title="Show/hide API key">Show</button>
+                                <button type="button" class="secret-save-as" disabled onclick="promptStoreSecret('def-synthetic-api-key')" title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                            </div>
+                            <div class="secret-store-row" id="def-synthetic-api-key-store-row" style="display:none">
+                                <input type="text" id="def-synthetic-api-key-store-name" placeholder="secret name">
+                                <button type="button" onclick="confirmStoreSecret('def-synthetic-api-key')">Save</button>
+                                <button type="button" onclick="cancelStoreSecret('def-synthetic-api-key')">Cancel</button>
+                            </div>
+                            <select id="def-synthetic-api-key-secret" style="display:none"></select>
+                        </div>
+                        <div class="field-help">
+                            Bearer token for NVIDIA&rsquo;s hosted endpoint &mdash; use an <strong>invocation-scoped</strong> key. A stored key is never shown; leave blank to keep it.
+                            Or pick a stored secret: rotating it on the Secrets page applies with no config change.
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label title="NVCF function id">Function ID</label>
+                        <input type="text" id="def-synthetic-function-id"
+                               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <div class="field-help">
+                            NVCF function id (sent as <code>function-id</code> metadata).
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div id="def-verify-section" class="form-wrapper" style="margin-top:16px;">
@@ -555,18 +661,21 @@
 
         <!-- Outside the fieldset: Chromium's position:sticky fails inside one. -->
         <div class="form-actions">
+            <button id="def-save-btn" onclick="saveDefaultConfig()">Save all changes</button>
             <span id="status-message"></span>
-            <button id="def-save-btn" onclick="saveDefaultConfig()" style="margin-left:auto;">Save all changes</button>
         </div>
     </div>
+    </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-default-config.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-nav.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-default-config.js?v=1.2.1"></script>
 <script>
+    VIF.nav.mount(document.getElementById('vif-sidenav'), { active: 'defaults' });
     VIF.defaultConfig.init();
 
     VIF.core.armTabCounts();

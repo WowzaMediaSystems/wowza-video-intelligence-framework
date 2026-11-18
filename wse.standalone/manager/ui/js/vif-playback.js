@@ -3,16 +3,292 @@
     var VIF = window.VIF;
     VIF.playback = VIF.playback || {};
 
+    var CONFIDENCE_THRESHOLDS = {
+      HIGH: 0.75,
+      MEDIUM_HIGH: 0.50,
+      MEDIUM_LOW: 0.25
+    };
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function getConfidenceClass(confidence) {
+      if (confidence > CONFIDENCE_THRESHOLDS.HIGH) return 'confidence-high';
+      if (confidence > CONFIDENCE_THRESHOLDS.MEDIUM_HIGH) return 'confidence-medium-high';
+      if (confidence > CONFIDENCE_THRESHOLDS.MEDIUM_LOW) return 'confidence-medium-low';
+      return 'confidence-low';
+    }
+
+    // Normalize a raw detection (object / scene / VLM) to the renderer's shape.
+    // confidence may be a rolled-up object ({avg}), a plain number, or absent:
+    // VLM windows carry no confidence (the server omits the null key), so the
+    // .avg access must be guarded or it throws and the whole event is dropped.
+    // A custom-schema VLM window carries only its structured `data` object (no
+    // meaningful class_name); surface that via `data` so it renders its fields
+    // instead of a generic placeholder label.
+    function normalizeDetection(det, entry) {
+      let confidence = null;
+      if (det.confidence && typeof det.confidence.avg === 'number') confidence = det.confidence.avg;
+      else if (typeof det.confidence === 'number') confidence = det.confidence;
+      return {
+        label: det.class_name ?? det.label ?? null,
+        confidence,
+        reasoning: det.reasoning || null,
+        data: (det.data && typeof det.data === 'object') ? det.data : null,
+        // Response-level outage flag (synthetic: the SVD endpoint was down for
+        // this window) — the verdict is an artifact then, not a result.
+        degraded: !!(entry && entry.degraded),
+      };
+    }
+
+    // One detection as a chip, prose or fields, in the look its kind of result calls for.
+    function detectionHtml(d, isSynthetic) {
+      // Free-form (Describe) windows carry the internal "description" sentinel
+      // with the prose in reasoning — render the prose alone: the sentinel is
+      // plumbing, not a detected class (the burned-in overlay and the VOD
+      // report make the same call).
+      if (d.label === 'description' && d.reasoning) {
+        return `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>`;
+      }
+      // Synthetic chips color by VERDICT, never by the score: the score is a
+      // threat score, so confidence coloring paints a detected deepfake green.
+      // A degraded window is an endpoint outage, not an analysis result — say
+      // so instead of presenting a meaningless "unknown (0.00)".
+      if (isSynthetic) {
+        if (d.degraded) {
+          return `<span class="detection-label verdict-unknown">unknown · AI offline</span>`;
+        }
+        const verdictClass = d.label === 'synthetic' ? 'verdict-synthetic'
+          : d.label === 'real' ? 'verdict-real' : 'verdict-unknown';
+        const scoreStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
+        return `<span class="detection-label ${verdictClass}">${escapeHtml(d.label ?? 'unknown')}${scoreStr}</span>`;
+      }
+      // Custom-schema VLM output: render its structured fields directly — there
+      // is no class to badge and a placeholder label reads as a bogus detection.
+      if (d.data) {
+        const rows = Object.keys(d.data).map(k => {
+          const v = d.data[k];
+          const valStr = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
+          return `<div><span class="detection-data-key">${escapeHtml(k)}:</span> ${escapeHtml(valStr)}</div>`;
+        }).join('');
+        return `<div class="detection-data">${rows}</div>`;
+      }
+      // confidence is absent for VLM (use != null to catch both null and the
+      // omitted/undefined key, else Number(undefined) renders "(NaN)").
+      const confidenceClass = d.confidence != null ? getConfidenceClass(d.confidence) : '';
+      const confidenceStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
+      const reasoningStr = d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
+      const labelStr = d.label != null ? escapeHtml(d.label) : '';
+      return `<span class="detection-label ${confidenceClass}">${labelStr}${confidenceStr}</span>${reasoningStr}`;
+    }
+
+    function byConfidence(a, b) {
+      return (b.confidence ?? -1) - (a.confidence ?? -1);
+    }
+
+    // --- Chain results ---------------------------------------------------------
+    // A chain's ID3 carries one result per clip. With the last step's results it is
+    // that step's own result; with every step's results it is the whole chain, one
+    // ring per step that ran, plus the path the clip took.
+
+    function hasFields(data) {
+      return !!data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length > 0;
+    }
+    // An answer in the user's own format shows as fields when it has some; anything else the
+    // model sent ({}, a list, a bare value) reads as its text.
+    function ownFormatAnswer(data, degraded) {
+      if (hasFields(data)) return { label: null, reasoning: null, confidence: null, data, degraded };
+      const text = (typeof data === 'string' ? data : JSON.stringify(data)).trim();
+      return text ? { label: 'description', reasoning: text, confidence: null, data: null, degraded } : null;
+    }
+    // One AI model answer (a vlm[] entry) as findings.
+    function entryAnswers(entry) {
+      if (entry && entry.content && typeof entry.content === 'object') {
+        return [ownFormatAnswer(entry.content, !!entry.degraded)].filter(Boolean);
+      }
+      return VIF.chainResults.vlmAnswers(entry)
+        .map(f => (f.label === null ? ownFormatAnswer(f.data, f.degraded) : f)).filter(Boolean);
+    }
+    // An AI model step's findings, from the model's own text or already read into detections.
+    function ringAnswers(ring) {
+      const vlm = Array.isArray(ring.vlm) ? ring.vlm : (ring.content ? [ring] : []);
+      if (vlm.length) return vlm.reduce((all, entry) => all.concat(entryAnswers(entry)), []);
+      return VIF.chainResults.aiFindings(ring).map(f => (f.data === null || hasFields(f.data) ? f
+        : f.label != null || f.reasoning ? Object.assign({}, f, { data: null }) : ownFormatAnswer(f.data, f.degraded)))
+        .filter(Boolean);
+    }
+
+    // What one ring of a chain found, whatever kind of step ran it.
+    function ringDetections(ring) {
+      if (ring.detections_type === 'vlm' && Array.isArray(ring.vlm)) return ringAnswers(ring);
+      if (ring.detections_type === 'synthetic' && ring.synthetic) {
+        const s = ring.synthetic;
+        return s.verdict ? [{ label: s.verdict, confidence: s.synthetic_score ?? null, reasoning: null, data: null, degraded: !!s.degraded }] : [];
+      }
+      return (Array.isArray(ring.detections) ? ring.detections : []).map(det => normalizeDetection(det, ring));
+    }
+
+    const SHOWN = 5; // a step that found more shows the first five and folds the rest under "+N more"
+    function foldedHtml(lines) {
+      if (lines.length <= SHOWN) return lines.join('');
+      return lines.slice(0, SHOWN).join('')
+        + `<details class="chain-rest"><summary>+${lines.length - SHOWN} more</summary>${lines.slice(SHOWN).join('')}</details>`;
+    }
+
+    // A step's finds as one line per thing found, strongest first, in the On-Demand report's
+    // words, each opening to the single finds.
+    function groupedFindsHtml(ring) {
+      const results = VIF.chainResults;
+      const type = ring.detections_type;
+      return foldedHtml(results.groups(ring.detections).map(group => {
+        const detail = results.groupDetail(group, type);
+        const chipClass = type === 'motion' ? 'chain-chip-plain' : (group.best !== null ? getConfidenceClass(group.best) : '');
+        const finds = group.items.slice().sort((a, b) => (results.score(b) ?? -1) - (results.score(a) ?? -1));
+        const each = finds.length > 1
+          ? `<details class="chain-each"><summary>Show each</summary><ul>${finds.map(d => `<li>${escapeHtml([
+            results.sure(results.score(d)),
+            d.track_id != null ? (type === 'motion' ? 'moving area #' : 'object #') + d.track_id : null,
+            d.frame_id != null ? 'frame ' + d.frame_id : null].filter(Boolean).join(' · '))}</li>`).join('')}</ul></details>`
+          : '';
+        return `<div class="chain-group"><span class="detection-label ${chipClass}">${escapeHtml(group.name)}</span>`
+          + (detail ? `<span class="chain-group-detail">${escapeHtml(detail)}</span>` : '') + each + '</div>';
+      }));
+    }
+
+    // A description is born cut to its first lines with a "more"; the page keeps both only on
+    // text the cut actually shortens, once it can measure it.
+    let proseCount = 0;
+    function proseHtml(text) {
+      const id = 'chain-prose-' + (++proseCount);
+      return `<div class="detection-reasoning chain-prose clamped" id="${id}">${escapeHtml(text)}</div>`
+        + `<button type="button" class="chain-more" aria-expanded="false" aria-controls="${id}">more</button>`;
+    }
+
+    // AI model findings, in arrival order (they carry no score): the description, the things a
+    // check named with the model's reasoning, or the fields of an answer in the user's own format.
+    function aiFindingsHtml(found) {
+      return foldedHtml(found.map(f => (f.data ? detectionHtml(f, false)
+        : f.label === 'description' && f.reasoning ? proseHtml(f.reasoning)
+          : `<div class="chain-answer"><span class="detection-label">${escapeHtml(f.label || '?')}</span>`
+            + (f.reasoning ? `<span class="chain-reason">${escapeHtml(f.reasoning)}</span>` : '') + '</div>')));
+    }
+    // One AI model call, or why it gave no answer.
+    function aiAnswerHtml(entry) {
+      const found = entryAnswers(entry);
+      const answered = typeof entry.content === 'string' ? entry.content.trim() : entry.content;
+      const said = found.length ? aiFindingsHtml(found)
+        : `<span class="chain-step-none">${entry.degraded ? 'No answer: the AI model couldn’t be reached.'
+          : answered ? 'Found none of these.' : 'No answer came back.'}</span>`;
+      return `<div class="chain-call">${said}`
+        + (entry.truncated ? '<span class="chain-cut">answer cut short</span>' : '') + '</div>';
+    }
+
+    function stepBodyHtml(ring) {
+      const kind = ring.detections_type;
+      const calls = kind === 'vlm' && Array.isArray(ring.vlm) ? ring.vlm.filter(Boolean) : [];
+      if (calls.length) return foldedHtml(calls.map(aiAnswerHtml));
+      const answers = kind === 'vlm' ? ringAnswers(ring) : [];
+      if (answers.length) return aiFindingsHtml(answers);
+      const verdicts = kind === 'synthetic' ? ringDetections(ring) : [];
+      if (verdicts.length) return verdicts.map(d => detectionHtml(d, true)).join('');
+      if (Array.isArray(ring.detections) && ring.detections.length) return groupedFindsHtml(ring);
+      const nothing = !VIF.chainResults.unreachable(ring) ? 'Found nothing.'
+        : kind === 'vlm' ? 'No answer: the AI model couldn’t be reached.' : 'No result: the service couldn’t be reached.';
+      return `<span class="chain-step-none">${nothing}</span>`;
+    }
+
+    // A step's kind as the chain builder names it ("Find objects"), and its name when
+    // someone chose one rather than taking the builder's (objects, scene-2, …).
+    function stepKindLabel(kind) {
+      return VIF.chainBuilder && kind ? VIF.chainBuilder.stepLabel(kind) : (kind || 'Step');
+    }
+    function chosenStepName(name) {
+      const trimmed = typeof name === 'string' ? name.trim() : '';
+      if (!trimmed) return '';
+      return VIF.chainPresets && VIF.chainPresets.isGivenName(trimmed) ? '' : trimmed;
+    }
+    /**
+     * Each row's kind label and chosen name. Rows that would read the same are told apart:
+     * different steps are numbered in the order they first ran, and a step that ran again
+     * says which run it is. The clip doesn't carry the chain, so the number is not the step's
+     * place in it.
+     */
+    function rowHeads(rings) {
+      const heads = rings.map(ring => ({ label: stepKindLabel(ring.detections_type), name: chosenStepName(ring.stage_name) }));
+      const stepOf = (ring, i) => (typeof ring.stage_name === 'string' && ring.stage_name ? 'n:' + ring.stage_name : 'i:' + i);
+      return heads.map((head, i) => {
+        const alike = rings.map((ring, j) => j).filter(j => heads[j].label === head.label && heads[j].name === head.name);
+        const steps = Array.from(new Set(alike.map(j => stepOf(rings[j], j))));
+        const step = stepOf(rings[i], i);
+        const run = alike.filter(j => j <= i && stepOf(rings[j], j) === step).length;
+        return { label: head.label + (steps.length > 1 ? ' (' + (steps.indexOf(step) + 1) + ')' : '')
+          + (run > 1 ? ' · run ' + run : ''), name: head.name };
+      });
+    }
+
+    const DESCRIBED = 'described by the AI model';
+    /**
+     * One clip of a chain as { html, copy }: what it found in one line, then a row per step
+     * that ran, in run order, with what that step found. Null for a quiet clip, where no step
+     * found or said anything and every step was reached.
+     */
+    function chainClip(entry, timestamp) {
+      const results = VIF.chainResults;
+      const rings = Array.isArray(entry.rings) && entry.rings.length ? entry.rings : [entry];
+      const unavailable = rings.some(results.unreachable);
+      // The description reads in full in its own row, so the clip's line doesn't quote it.
+      const describes = ring => ring.detections_type === 'vlm'
+        && ringAnswers(ring).some(f => f.label === 'description' && f.reasoning);
+      const told = rings.filter(ring => !describes(ring));
+      const described = told.length < rings.length;
+      if (!results.clipFinding(rings) && !unavailable && !described) return null;
+      let finding = results.clipFinding(told);
+      if (described && (!finding || finding === 'movement')) finding = DESCRIBED;
+      const path = Array.isArray(entry.path_taken) ? entry.path_taken : [];
+      const copy = { timestamp, path, steps: [] };
+      const heads = rowHeads(rings);
+      const rows = rings.map((ring, i) => {
+        const label = heads[i].label;
+        const name = heads[i].name;
+        const sorted = ringDetections(ring).sort(byConfidence);
+        copy.steps.push({
+          step: label,
+          name: name || undefined,
+          unreachable: results.unreachable(ring) || undefined,
+          detections: sorted.map(d => {
+            const out = { class_name: d.label ?? undefined };
+            if (d.confidence != null) out.confidence = d.confidence;
+            if (d.reasoning) out.reasoning = d.reasoning;
+            if (d.data) out.data = d.data;
+            return out;
+          }),
+        });
+        const nameHtml = name ? ` <span class="chain-step-name">${escapeHtml(name)}</span>` : '';
+        return `<div class="chain-step" data-step-kind="${escapeHtml(ring.detections_type || '')}">`
+          + `<div class="chain-step-head">${escapeHtml(label)}${nameHtml}</div>`
+          + `<div class="chain-step-body">${stepBodyHtml(ring)}</div></div>`;
+      });
+      const summary = `<div class="chain-summary">${escapeHtml(finding || 'nothing found')}`
+        + (unavailable ? ' <span class="chain-unavailable">service unavailable</span>' : '') + '</div>';
+      const html = `<div class="event-item event-item-chain" data-formatted="${escapeHtml(JSON.stringify(copy))}">`
+        + `<div class="event-time">${escapeHtml(timestamp)}</div>${summary}`
+        + `<div class="event-data">${rows.join('')}</div></div>`;
+      return { html, copy };
+    }
+
+    VIF.playback.chain = { clip: chainClip, stepBodyHtml: stepBodyHtml };
+
     VIF.playback.init = function () {
     var CONFIG = {
       EVENT_TYPE_SCENE_DETECTION_POSTIFX: 'detection',
       EVENT_TYPE_PDT: 'programDateTime',
 
-      CONFIDENCE_THRESHOLDS: {
-        HIGH: 0.75,
-        MEDIUM_HIGH: 0.50,
-        MEDIUM_LOW: 0.25
-      },
       BADGE_COLORS: {
         LOADING: '#f0ad4e',
         READY: '#ff8400',
@@ -83,6 +359,28 @@
     if (elements.overlayToggle) {
       elements.overlayToggle.addEventListener('change', onOverlayToggleChange);
     }
+    // A long AI answer opens and closes in place.
+    elements.eventDisplay.addEventListener('click', (event) => {
+      const more = event.target.closest('.chain-more');
+      if (!more) return;
+      const prose = more.previousElementSibling;
+      const open = prose.classList.toggle('clamped') === false;
+      more.textContent = open ? 'less' : 'more';
+      more.setAttribute('aria-expanded', String(open));
+      if (!open) fitProse(prose.parentElement);
+    });
+    // Text folded under "+N more" can be measured once the fold opens.
+    elements.eventDisplay.addEventListener('toggle', (event) => {
+      if (event.target.open) fitProse(event.target);
+    }, true);
+    // The Formatted View showing, or its width changing, changes which text the cut shortens.
+    var measuredWidth = elements.eventDisplay.clientWidth;
+    new ResizeObserver(() => {
+      const width = elements.eventDisplay.clientWidth;
+      if (width === measuredWidth) return;
+      measuredWidth = width;
+      if (width) fitProse(elements.eventDisplay);
+    }).observe(elements.eventDisplay);
 
     function getOverlayListenerName(listeners) {
       if (listeners && listeners.Overlays !== undefined) return 'Overlays';
@@ -305,13 +603,6 @@
       else elements.rawView.classList.add('active');
     }
 
-    function getConfidenceClass(confidence) {
-      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.HIGH) return 'confidence-high';
-      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.MEDIUM_HIGH) return 'confidence-medium-high';
-      if (confidence > CONFIG.CONFIDENCE_THRESHOLDS.MEDIUM_LOW) return 'confidence-medium-low';
-      return 'confidence-low';
-    }
-
     function clearPlaceholder(element) {
       const placeholder = element.querySelector('.placeholder-text');
       if (placeholder) element.innerHTML = '';
@@ -371,99 +662,80 @@
       elements.logDisplay.scrollTop = 0;
     }
 
+    function moreButton(prose) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'chain-more';
+      more.setAttribute('aria-expanded', 'false');
+      more.setAttribute('aria-controls', prose.id);
+      more.textContent = 'more';
+      return more;
+    }
+    // Only text the cut actually shortens keeps it and its "more"; text someone opened stays
+    // open. Hidden text can't be measured, so it is measured again when it shows.
+    function fitProse(root) {
+      root.querySelectorAll('.chain-prose').forEach(prose => {
+        let more = prose.nextElementSibling;
+        if (more && !more.classList.contains('chain-more')) more = null;
+        if (more && more.getAttribute('aria-expanded') === 'true') return;
+        if (!prose.clientHeight) return;
+        prose.classList.add('clamped');
+        const cut = prose.scrollHeight > prose.clientHeight + 1;
+        if (cut && !more) prose.after(moreButton(prose));
+        if (!cut) {
+          prose.classList.remove('clamped');
+          if (more) more.remove();
+        }
+      });
+    }
+
+    function displayChainEntry(entry, timestamp) {
+      const clip = VIF.playback.chain.clip(entry, timestamp);
+      if (!clip) return false;
+      clearPlaceholder(elements.eventDisplay);
+      elements.eventDisplay.insertAdjacentHTML('afterbegin', clip.html);
+      fitProse(elements.eventDisplay.firstElementChild);
+      return true;
+    }
+
+    function displayChainEvent(parsed, timestamp) {
+      const entries = Array.isArray(parsed.vif_data) ? parsed.vif_data : [parsed];
+      let shown = false;
+      entries.forEach(entry => { if (entry && displayChainEntry(entry, timestamp)) shown = true; });
+      if (!shown) return;
+      trimHistory(elements.eventDisplay, '.event-item', CONFIG.MAX_HISTORY_ITEMS);
+      elements.eventDisplay.scrollTop = 0;
+      noteDetectionRendered();
+    }
+
     function displayEvent(eventType, data, timestamp) {
       if (!eventType.endsWith(CONFIG.EVENT_TYPE_SCENE_DETECTION_POSTIFX)) return;
 
       try {
         const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-
-        // Normalize a raw detection (object / scene / VLM) to the renderer's shape.
-        // confidence may be a rolled-up object ({avg}), a plain number, or absent:
-        // VLM windows carry no confidence (the server omits the null key), so the
-        // .avg access must be guarded or it throws and the whole event is dropped.
-        // A custom-schema VLM window carries only its structured `data` object (no
-        // meaningful class_name); surface that via `data` so it renders its fields
-        // instead of a generic placeholder label.
-        const normalize = (det, entry) => {
-          let confidence = null;
-          if (det.confidence && typeof det.confidence.avg === 'number') confidence = det.confidence.avg;
-          else if (typeof det.confidence === 'number') confidence = det.confidence;
-          return {
-            label: det.class_name ?? det.label ?? null,
-            confidence,
-            reasoning: det.reasoning || null,
-            data: (det.data && typeof det.data === 'object') ? det.data : null,
-            // Response-level outage flag (synthetic: the SVD endpoint was down for
-            // this window) — the verdict is an artifact then, not a result.
-            degraded: !!(entry && entry.degraded),
-          };
-        };
-
+        if (eventType === 'chain-detection') {
+          displayChainEvent(parsed, timestamp);
+          return;
+        }
         let detections = [];
         if (parsed.vif_data && Array.isArray(parsed.vif_data)) {
           parsed.vif_data.forEach((viEntry) => {
             if (viEntry.detections && viEntry.detections.length > 0) {
-              viEntry.detections.forEach(det => detections.push(normalize(det, viEntry)));
-            } else if (Array.isArray(viEntry.rings)) {
-              // A combined-result_mode chain response carries its detections
-              // per ring, with no top-level aggregate on the wire.
-              viEntry.rings.forEach((ring) => {
-                (Array.isArray(ring.detections) ? ring.detections : []).forEach(
-                  det => detections.push(normalize(det, viEntry)));
-              });
+              viEntry.detections.forEach(det => detections.push(normalizeDetection(det, viEntry)));
             }
           });
         } else if (parsed.detections && Array.isArray(parsed.detections)) {
-          detections = parsed.detections.map((det) => normalize(det, parsed));
+          detections = parsed.detections.map((det) => normalizeDetection(det, parsed));
         } else {
           return;
         }
 
-        detections = detections
-          .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+        detections = detections.sort(byConfidence);
 
         if (detections.length === 0) return;
 
         const isSynthetic = eventType === 'synthetic-detection';
-        const labels = detections.map(d => {
-          // Free-form (Describe) windows carry the internal "description" sentinel
-          // with the prose in reasoning — render the prose alone: the sentinel is
-          // plumbing, not a detected class (the burned-in overlay and the VOD
-          // report make the same call).
-          if (d.label === 'description' && d.reasoning) {
-            return `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>`;
-          }
-          // Synthetic chips color by VERDICT, never by the score: the score is a
-          // threat score, so confidence coloring paints a detected deepfake green.
-          // A degraded window is an endpoint outage, not an analysis result — say
-          // so instead of presenting a meaningless "unknown (0.00)".
-          if (isSynthetic) {
-            if (d.degraded) {
-              return `<span class="detection-label verdict-unknown">unknown · AI offline</span>`;
-            }
-            const verdictClass = d.label === 'synthetic' ? 'verdict-synthetic'
-              : d.label === 'real' ? 'verdict-real' : 'verdict-unknown';
-            const scoreStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
-            return `<span class="detection-label ${verdictClass}">${escapeHtml(d.label ?? 'unknown')}${scoreStr}</span>`;
-          }
-          // Custom-schema VLM output: render its structured fields directly — there
-          // is no class to badge and a placeholder label reads as a bogus detection.
-          if (d.data) {
-            const rows = Object.keys(d.data).map(k => {
-              const v = d.data[k];
-              const valStr = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
-              return `<div><span class="detection-data-key">${escapeHtml(k)}:</span> ${escapeHtml(valStr)}</div>`;
-            }).join('');
-            return `<div class="detection-data">${rows}</div>`;
-          }
-          // confidence is absent for VLM (use != null to catch both null and the
-          // omitted/undefined key, else Number(undefined) renders "(NaN)").
-          const confidenceClass = d.confidence != null ? getConfidenceClass(d.confidence) : '';
-          const confidenceStr = d.confidence != null ? ` (${Number(d.confidence).toFixed(2)})` : '';
-          const reasoningStr = d.reasoning ? `<div class="detection-reasoning">${escapeHtml(d.reasoning)}</div>` : '';
-          const labelStr = d.label != null ? escapeHtml(d.label) : '';
-          return `<span class="detection-label ${confidenceClass}">${labelStr}${confidenceStr}</span>${reasoningStr}`;
-        }).join('');
+        const labels = detections.map(d => detectionHtml(d, isSynthetic)).join('');
 
         const content = `
           <div class="event-item">
@@ -588,15 +860,6 @@
       elements.errorMessage.classList.add('hidden');
     }
 
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-    }
-
     function isPlaybackMounted() {
       return !!document.getElementById('playerElement') && !!document.getElementById('playerUrl');
     }
@@ -709,6 +972,8 @@
       const isVlm = type === 'vlm-detection';
       const items = Array.from(document.querySelectorAll('#eventDisplay .event-item'));
       const out = items.reverse().map(item => {
+        // A chain clip keeps what it showed, step by step, from when it was rendered.
+        if (item.dataset.formatted) return JSON.parse(item.dataset.formatted);
         const timeEl = item.querySelector('.event-time');
 
         const detections = isVlm ? vlmDetectionsFromItem(item) : labeledDetectionsFromItem(item);
@@ -751,7 +1016,7 @@
       });
 
       return {
-        type: 'scene-detection',
+        type: rawEventType(),
         view: 'raw',
         events: out
       };

@@ -38,22 +38,35 @@
 
         var wrap = document.createElement('div');
         wrap.className = 'vlm-schema-row-wrap';
+        // One box per field; a nested field's box is white so it stands out from its parent's.
+        var nestedField = !!container.closest('.vlm-schema-row-wrap');
+        wrap.style.cssText = 'margin-bottom:8px; padding:8px; border:1px solid #e1e5ea; border-radius:4px; background:'
+            + (nestedField ? '#fff' : '#f7f8fa') + ';';
 
         var rowEl = document.createElement('div');
         rowEl.className = 'vlm-schema-row';
-        rowEl.style.cssText = 'display:flex; gap:8px; margin-bottom:6px; align-items:center;';
+        // Two lines at any width: name, type and remove, then the description and required. The
+        // description's basis leaves room for required beside it but never for the first line's
+        // fields, so it always starts the second line. The sizes are inline so they win over the
+        // page's caps on form inputs.
+        rowEl.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; align-items:center;';
 
         var nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.className = 'vlm-schema-name';
         nameInput.placeholder = 'field (e.g. reading)';
         nameInput.value = row.name || '';
-        nameInput.style.flex = '2';
+        nameInput.style.flex = '1 1 0';
+        nameInput.style.minWidth = '48px';
+        nameInput.style.maxWidth = 'none';
         nameInput.addEventListener('input', dirty);
 
         var typeSelect = document.createElement('select');
         typeSelect.className = 'vlm-schema-type';
-        typeSelect.style.flex = '0 0 116px';
+        typeSelect.style.flex = '0 0 auto';
+        typeSelect.style.width = 'auto';
+        typeSelect.style.maxWidth = 'none';
+        typeSelect.style.paddingLeft = typeSelect.style.paddingRight = '4px';
         SCHEMA_TYPES.forEach(function (t) {
             var opt = document.createElement('option');
             opt.value = t;
@@ -67,12 +80,14 @@
         descInput.className = 'vlm-schema-desc';
         descInput.placeholder = 'optional description';
         descInput.value = row.description || '';
-        descInput.style.flex = '3';
+        descInput.style.flex = '1 1 calc(100% - 96px)';
+        descInput.style.minWidth = '0';
+        descInput.style.maxWidth = 'none';
         descInput.addEventListener('input', dirty);
 
         var reqLabel = document.createElement('label');
         reqLabel.className = 'inline-control-label';
-        reqLabel.style.cssText = 'display:inline-flex; align-items:center; gap:4px; font-weight:normal; white-space:nowrap;';
+        reqLabel.style.cssText = 'display:inline-flex; flex:0 0 auto; align-items:center; gap:4px; font-weight:normal; white-space:nowrap;';
         var reqInput = document.createElement('input');
         reqInput.type = 'checkbox';
         reqInput.className = 'vlm-schema-required';
@@ -86,19 +101,20 @@
         removeBtn.className = 'btn-danger';
         removeBtn.textContent = '×';
         removeBtn.title = 'Remove field';
+        removeBtn.style.flex = '0 0 auto';
         removeBtn.onclick = function () { wrap.remove(); dirty(); };
 
         rowEl.appendChild(nameInput);
         rowEl.appendChild(typeSelect);
+        rowEl.appendChild(removeBtn);
         rowEl.appendChild(descInput);
         rowEl.appendChild(reqLabel);
-        rowEl.appendChild(removeBtn);
         wrap.appendChild(rowEl);
 
         // Enum allowed-values input (shown only when type === 'enum').
         var enumArea = document.createElement('div');
         enumArea.className = 'vlm-schema-enum-area';
-        enumArea.style.cssText = 'display:none; margin:2px 0 8px 26px; align-items:center; gap:8px;';
+        enumArea.style.cssText = 'display:none; margin-top:6px; align-items:center; gap:8px;';
         // Plain inline label — deliberately NOT class "field-help" (that class is
         // flex-basis:100% + a big left margin, meant for full-width help text below
         // a form-group; inside this flex row it would squeeze the input to nothing).
@@ -120,7 +136,7 @@
         // Nested sub-builder (shown only when type is object / object[]).
         var nested = document.createElement('div');
         nested.className = 'vlm-schema-nested';
-        nested.style.cssText = 'display:none; margin:2px 0 8px 26px; padding-left:10px; border-left:2px solid #d7dde3;';
+        nested.style.cssText = 'display:none; margin-top:8px; padding-left:8px; border-left:2px solid #d7dde3;';
         var nestedRows = document.createElement('div');
         nestedRows.className = 'vlm-schema-rows';
         var addBtn = document.createElement('button');
@@ -297,12 +313,15 @@
     function builderIn(root) {
         var prefix = (root.dataset && root.dataset.vifPrefix) || '';
 
+        // A chain step may lift the format fields out of its form; their ids keep the prefix.
         function el(id) {
-            return root.querySelector('#' + CSS.escape(prefix + id));
+            var lifted = root.vifLiftedInto;
+            return root.querySelector('#' + CSS.escape(prefix + id)) || (lifted ? lifted.querySelector('#' + CSS.escape(prefix + id)) : null);
         }
 
         function radios(groupId, name) {
-            return root.querySelectorAll('#' + CSS.escape(prefix + groupId) + ' input[name="' + prefix + name + '"]');
+            var group = el(groupId);
+            return group ? group.querySelectorAll('input[name="' + prefix + name + '"]') : [];
         }
 
         function checkedValue(groupId, name, fallback) {
@@ -421,11 +440,11 @@
             var help = el('vlm-schema-kind-help');
             if (help) {
                 if (kind === 'freeform') {
-                    help.textContent = 'The model follows your prompt; output is free-form text.';
+                    help.textContent = 'The model answers in its own words. In a chain, a condition after this step can’t act on that, so the chain goes on every time.';
                 } else if (kind === 'default') {
                     help.textContent = defaultClassSchema()
-                        ? 'Structured per-class verdicts — the model returns {class_name, reasoning} for each class you list above (the built-in detection schema). Requires Classes.'
-                        : 'Per-class verdicts use the built-in schema reported by the VI service, which is currently unreachable — reload once it is up, or use Custom schema.';
+                        ? 'For each item in the list above, the model answers whether it’s there, with a short reason. In a chain, a condition can act on the answers. Needs the list.'
+                        : 'This format comes from the analysis service, which can’t be reached right now. Reload once it’s running, or use Fields you name.';
                 } else {
                     help.textContent = '';
                 }

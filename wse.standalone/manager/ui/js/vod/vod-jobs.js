@@ -158,7 +158,11 @@ VIF.vod = VIF.vod || {};
 				'This job’s record carries no config snapshot — only the detector type ('
 				+ (type || 'unknown') + ') is known.'));
 		}
-		modal(groupName ? 'Config ' + groupName : 'Inline config' + (meta ? ' — ' + meta.name : ''),
+		// Named as the Stream Configs page names it (live / camera.*), not by its stored file name.
+		const group = groupName ? (V.store.groups || []).find((x) => String(x.name).toLowerCase() === String(groupName).toLowerCase()) : null;
+		const rule = group && group.match && group.match.application && group.match.streamPattern
+			? group.match.application + ' / ' + group.match.streamPattern : groupName;
+		modal(groupName ? 'Config ' + rule : 'Inline config' + (meta ? ' — ' + meta.name : ''),
 			h('div', null, body),
 			groupName ? [{
 				label: 'Open in Stream Configs',
@@ -523,10 +527,10 @@ VIF.vod = VIF.vod || {};
 				// A webhook shows as its host (the whole URL in the tooltip) — "set"
 				// answered nothing; a missing URL parses as the literal fallback.
 				let webhookLabel = 'none';
-				let webhookTitle = 'Every job’s lifecycle changes POST to this URL.\nA job can name its own webhook instead.\nNone is configured.';
+				let webhookTitle = 'Every job’s status changes (running, completed, failed, cancelled) POST to this URL.\nA job can name its own webhook.\nNone is configured.';
 				if (vod.lifecycleWebhook) {
 					try { webhookLabel = new URL(vod.lifecycleWebhook).host; } catch (e) { webhookLabel = 'set'; }
-					webhookTitle = 'Every job’s lifecycle changes POST here.\nA job can name its own webhook instead.\n' + vod.lifecycleWebhook;
+					webhookTitle = 'Every job’s status changes (running, completed, failed, cancelled) POST here.\nA job can name its own webhook.\n' + vod.lifecycleWebhook;
 				}
 				root.appendChild(h('div', { class: 'strip-cfg' },
 					h('span', { title: 'How many jobs run at once; the rest wait their turn.\nSet on On-Demand Configs.' },
@@ -535,7 +539,7 @@ VIF.vod = VIF.vod || {};
 						'Retention ', h('b', null, (vod.maxJobs ?? 25) + ' jobs · ' + (vod.jobTtlSeconds ? 'expire after ' + vod.jobTtlSeconds + 's' : 'no expiry'))),
 					vod.contentDir ? h('span', { title: 'Where a job’s source file is resolved from.' },
 						'Content root ', h('b', null, vod.contentDir)) : null,
-					h('span', { title: webhookTitle }, 'Global webhook ', h('b', null, webhookLabel)),
+					h('span', { title: webhookTitle }, 'Job status webhook ', h('b', null, webhookLabel)),
 					h('span', { title: 'A job stopped by a transient failure resumes on its own.\nTransient: dropped connection, service restart, unreachable endpoint.\nUp to 3 attempts; the counter resets on progress.\nOff leaves such jobs failed for a manual resume.' },
 						'Auto-resume ', h('b', null, vod.autoResume === false ? 'off' : 'on'))));
 			}
@@ -597,8 +601,7 @@ VIF.vod = VIF.vod || {};
 							(V.DETECTOR_META[job.detectorType] || {}).name || job.detectorType || '—'),
 						h('div', { class: 'l2 mono' }, (job.streamGroupConfig || job.detectorType)
 							? h('a', { href: '#', class: 'cfglink',
-								// No name preview here: the modal this opens is titled with the
-								// config's stored name, where the context explains it.
+								// No name preview here: the modal this opens carries the config.
 								title: 'Show the analysis options this job ran with',
 								onclick: (e) => { e.preventDefault(); V.showJobOptions(job); } },
 								configRule(job.streamGroupConfig) || 'inline config')

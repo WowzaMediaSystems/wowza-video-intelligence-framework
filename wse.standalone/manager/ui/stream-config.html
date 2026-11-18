@@ -1,5 +1,5 @@
 
-    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
+    <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.1">
     <style>
         .vif-plugin {
             --form-label-width: 240px;
@@ -12,19 +12,100 @@
             box-sizing: border-box;
         }
 
-        .vif-plugin .sticky-page-header {
+        .vif-plugin .config-bar {
             position: sticky;
             top: 0;
             z-index: 20;
-            background: #fff;
+            margin-bottom: 0;
+            padding-bottom: 6px;
+            border-bottom: 0;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
         }
-        .vif-plugin .streams-header {
-            align-items: flex-end;
-            /* No gap under the title: the tabs row below carries its own 12px
-               padding — matching shm.html so the row never shifts between tabs. */
+        .vif-plugin .config-bar.is-compact {
+            border-bottom: 1px solid #e3e6ea;
+            box-shadow: 0 2px 6px rgba(43, 52, 64, 0.08);
+        }
+        .vif-plugin .config-bar .top-config-toolbar {
             margin-bottom: 0;
         }
-
+        .vif-plugin .config-bar #status-message {
+            display: none;
+            margin: 8px 0 0;
+        }
+        .vif-plugin .config-bar #status-message.visible {
+            display: block;
+        }
+        .vif-plugin .config-bar {
+            padding: 12px 20px 10px;
+        }
+        .vif-plugin .top-config-toolbar #cfg-stream-select {
+            min-height: 36px;
+        }
+        .vif-plugin .top-config-details {
+            padding: 10px 20px 12px;
+        }
+        .vif-plugin .top-config-grid,
+        .vif-plugin #new-stream-fields {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 24px;
+            align-items: flex-start;
+        }
+        /* The three fields sit together on the left; the row does not spread them out. */
+        .vif-plugin #new-stream-fields {
+            flex: 0 1 auto;
+            min-width: 0;
+        }
+        .vif-plugin .top-field {
+            flex: 1 1 220px;
+            min-width: 0;
+            width: 440px;
+            max-width: 440px;
+        }
+        .vif-plugin .top-field-type {
+            flex: 0 1 440px;
+        }
+        .vif-plugin .top-field > label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.8em;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #5d6771;
+        }
+        .vif-plugin .top-field input[type="text"],
+        .vif-plugin .top-field select {
+            width: 100%;
+            min-height: 36px;
+            box-sizing: border-box;
+            padding: 6px 10px;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
+            background: #fff;
+            color: #2b3440;
+            font-size: 13.5px;
+        }
+        .vif-plugin .top-field input[type="text"] {
+            font-family: ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
+        }
+        .vif-plugin .top-field input[type="text"]:focus,
+        .vif-plugin .top-field select:focus {
+            outline: 0;
+            border-color: #f08a00;
+            box-shadow: 0 0 0 3px #fde3c2;
+        }
+        .vif-plugin .top-field .field-help {
+            margin: 5px 0 0;
+            font-size: 0.8em;
+        }
+        .vif-plugin .top-config-details {
+            border-top: 0;
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+            padding-top: 0;
+        }
         .vif-plugin button {
             padding: 7px 12px;
             font-family: inherit;
@@ -108,6 +189,32 @@
             margin-right: 0 !important;
         }
 
+        .vif-plugin .top-config-toolbar #btn-new-top {
+            flex: none;
+            min-width: 36px;
+            min-height: 36px;
+            margin: 0;
+            padding: 0 10px;
+            font-size: 1.2em;
+            line-height: 1;
+        }
+
+        .vif-plugin .top-config-item-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+
+        .vif-plugin .top-config-item-actions button {
+            margin-bottom: 0;
+        }
+
+        .vif-plugin .top-config-item-actions button.icon-only {
+            padding: 7px 10px;
+            font-size: 0.95em;
+        }
+
         .vif-plugin .top-config-toolbar-actions {
             display: flex;
             align-items: center;
@@ -173,6 +280,18 @@
             font-size: 0.9em;
             line-height: normal;
         }
+        /* A field label inside its control's row: the field label's type, not its column. */
+        .vif-plugin .form-group label.inline-field-label {
+            flex: 0 0 auto;
+            max-width: none;
+        }
+        .vif-plugin #chain-panel .form-group label.inline-field-label {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #2b3440;
+            text-transform: none;
+            letter-spacing: 0;
+        }
         /* Reset the native radio/checkbox's asymmetric UA margins so the label's
            align-items:center actually centers the control on its text (the gap:6px
            on the label supplies the spacing the margin used to). */
@@ -222,11 +341,19 @@
             max-width: 120px !important;
         }
 
-        /* Short enum select: fixed 100px rather than stretching to the column. */
+        .vif-plugin .video-height-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1 1 200px;
+            max-width: 320px;
+        }
+
+        /* Wide enough for its longest choice, "Match the model (default)". */
         .vif-plugin #cfg-inference-video-height-mode {
             flex: 0 0 auto;
-            width: 100px;
-            max-width: 100px;
+            width: 230px;
+            max-width: 100%;
         }
 
         /* Connection fields (VLM model / endpoint URL / API key, VI service URL / API key) hold long
@@ -249,7 +376,8 @@
             min-width: 0;
             max-width: none;
             display: flex;
-            gap: 8px;
+            flex-wrap: wrap;
+            gap: 6px 8px;
             align-items: center;
         }
         /* ID selectors so these outrank `.form-group input[type="password"]` (which caps at 300px).
@@ -339,6 +467,12 @@
             font-size: 0.8em;
             line-height: 1.4;
             overflow-wrap: anywhere;
+        }
+        .vif-plugin .form-group.needs-attention {
+            outline: 2px solid var(--warn-color);
+            outline-offset: 6px;
+            border-radius: 3px;
+            background: var(--warn-bg);
         }
         .vif-plugin .endpoint-test-result.ok    { color: #1e9e5a; }
         .vif-plugin .endpoint-test-result.warn  { color: var(--warn-color); }
@@ -450,6 +584,18 @@
 .vif-plugin .top-config-panel .form-group input[type="number"]:focus,
 .vif-plugin .top-config-panel .form-group select:focus {
             border-color: #f08a00;
+        }
+
+        /* A saved config's application and stream name can't be edited, so they must not look
+           like they can: these outrank the panel's white field and orange focus above. */
+        .vif-plugin .top-config-panel .top-field input[type="text"][readonly],
+        .vif-plugin .top-config-panel .top-field input[type="text"][readonly]:focus {
+            background: #f4f6f8;
+            color: #5d6771;
+            border-color: #dfe3e8;
+            box-shadow: none;
+            outline: 0;
+            cursor: default;
         }
 
         .vif-plugin .form-group input[type="text"]:focus,
@@ -614,6 +760,12 @@
             color: #1e9e5a;
         }
 
+        .vif-plugin #status-message.note {
+            background: #fff6e5;
+            border-color: #e09600;
+            color: #7a4800;
+        }
+
         .vif-plugin #status-message.error {
             background: var(--alert-bg);
             border-color: var(--alert-color);
@@ -745,9 +897,27 @@
             margin-bottom: 0;
         }
 
-        /* Create sits at the right edge of the row, apart from the selection actions. */
+        /* The chain's forms drop the row gap, so the actions keep their own space under the list. */
+        .vif-plugin #chain-listeners-host .listener-list-actions {
+            margin-top: 10px;
+        }
+
+        /* Adding another destination leads the row, under the list, styled like the builder's other add actions. */
         .vif-plugin .listener-list-actions #evt-show-new-listener-btn {
-            margin-left: auto;
+            order: -1;
+            margin-right: auto;
+            padding: 4px 10px;
+            font-size: 0.85em;
+            text-transform: none;
+            letter-spacing: 0;
+            background: #fff;
+            color: #a35d00;
+            border: 1px dashed #f0b866;
+            border-radius: 4px;
+        }
+        .vif-plugin .listener-list-actions #evt-show-new-listener-btn:hover {
+            background: #fffaf3;
+            border-color: #f08a00;
         }
 
         .vif-plugin .listener-create-template {
@@ -892,6 +1062,12 @@
                 margin-left: 0;
             }
 
+            /* In a column, a flex basis would set this wrapper's height, not its width. */
+            .vif-plugin .video-height-field {
+                flex: 0 0 auto;
+                max-width: none;
+            }
+
             /* The single-column fallback stacks label/list/actions full width. */
             .vif-plugin .listener-list-group {
                 align-items: stretch;
@@ -1017,7 +1193,7 @@
             display: block;
         }
 
-        .vif-plugin .array-item-body .form-group label:not(.switch) {
+        .vif-plugin .array-item-body .form-group label:not(.switch):not(.inline-control-label) {
             min-width: 140px;
             font-size: 0.8em;
         }
@@ -1122,25 +1298,23 @@
             overflow-wrap: anywhere;
             max-width: 65%;
         }
-        .vif-plugin .chain-status.ok {
-            color: #1e9e5a;
-            background: #e9f7ef;
-            border-color: #b7e4c7;
+        .vif-plugin button.chain-status {
+            margin: 0;
+            font-family: inherit;
+            line-height: normal;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: pointer;
         }
         .vif-plugin .chain-status.error {
             color: var(--alert-color);
             background: #fdecea;
             border-color: #e7b6b4;
         }
-        .vif-plugin .chain-status.warn,
-        .vif-plugin .chain-status.vod-only {
+        .vif-plugin .chain-status.warn {
             color: var(--warn-color);
             background: var(--warn-bg);
             border-color: var(--warn-color);
-        }
-        .vif-plugin .chain-status.vod-only {
-            letter-spacing: 0.08em;
-            white-space: nowrap;
         }
         .vif-plugin .chain-chips {
             display: flex;
@@ -1158,10 +1332,10 @@
             white-space: pre-line;
         }
         .vif-plugin .chain-level-warnings {
-            margin-left: calc(var(--form-label-width) + 10px);
+            margin: 0 0 12px;
         }
         .vif-plugin .chain-gate > .chain-warnings {
-            margin: 6px 0 0;
+            margin: 6px 0 12px;
         }
         .vif-plugin .chain-seg {
             display: flex;
@@ -1184,11 +1358,6 @@
         .vif-plugin .chain-seg > button.is-active:disabled {
             background: #f08a00;
             color: #fff;
-        }
-        .vif-plugin .chain-cadence {
-            margin: 0 0 14px calc(var(--form-label-width) + 10px);
-            font-size: 0.85em;
-            color: #2b3440;
         }
         .vif-plugin .chain-stages {
             display: flex;
@@ -1350,13 +1519,6 @@
         .vif-plugin .chain-disclosure > .chain-disclosure-body {
             margin: 8px 0 0 calc(-1 * (var(--form-label-width) + 10px));
         }
-        .vif-plugin .chain-crop-rail {
-            padding-left: 12px;
-            border-left: 3px solid #f08a00;
-        }
-        .vif-plugin .chain-crop-actions {
-            margin-left: calc(var(--form-label-width) + 10px);
-        }
         .vif-plugin .chain-stage-errors {
             color: var(--alert-color);
             font-size: 0.8em;
@@ -1380,7 +1542,6 @@
             justify-content: space-between;
             gap: 12px;
             flex-wrap: wrap;
-            margin-left: calc(var(--form-label-width) + 10px);
         }
         .vif-plugin .chain-confirm-actions {
             display: flex;
@@ -1474,7 +1635,6 @@
             display: block;
         }
         .vif-plugin .chain-rule,
-        .vif-plugin .chain-rule-head,
         .vif-plugin .chain-prop {
             display: grid;
             grid-template-columns: minmax(0, 1fr) 140px 110px 80px;
@@ -1485,15 +1645,8 @@
         .vif-plugin .chain-prop {
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 80px;
         }
-        .vif-plugin .chain-rule.chain-rule-motion,
-        .vif-plugin .chain-rule-head.chain-rule-motion {
+        .vif-plugin .chain-rule.chain-rule-motion {
             grid-template-columns: minmax(0, 1fr) 110px 80px;
-        }
-        .vif-plugin .chain-rule-head {
-            font-size: 0.75em;
-            font-weight: 600;
-            color: #5d6771;
-            margin-bottom: 4px;
         }
         .vif-plugin .chain-rule input,
         .vif-plugin .chain-prop input {
@@ -1507,13 +1660,115 @@
         .vif-plugin .chain-props > button {
             margin: 0;
         }
+        /* A condition panel is built from the same controls as a step's. */
+        .vif-plugin .cg-rule {
+            margin: 0 0 6px;
+        }
+        .vif-plugin .cg-rule .cs-field {
+            margin: 0 0 14px;
+        }
+        .vif-plugin .cg-rule + .cg-rule {
+            padding-top: 10px;
+            border-top: 1px solid #e3e6ea;
+        }
+        .vif-plugin .cg-rule-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin: 0 0 8px;
+            font-size: 0.82em;
+            font-weight: 600;
+            color: #5d6771;
+        }
+        .vif-plugin .cg-targets {
+            margin: 6px 0 4px;
+        }
+        /* The rules, how they combine, and where the chain goes, each with room of its own. */
+        .vif-plugin .chain-gate-editor > .chain-link-add {
+            margin: 2px 0 16px;
+        }
+        .vif-plugin .chain-gate-editor > .chain-sentence {
+            margin: 0 0 16px;
+        }
+        .vif-plugin .chain-gate-editor > .cg-targets {
+            margin: 0 0 8px;
+        }
+        /* A condition reads as sentences, the inputs sitting in the words. */
+        .vif-plugin .chain-gate-editor .chain-sentence {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 8px;
+            margin: 0 0 10px;
+            font-size: 0.88em;
+            color: #2b3440;
+        }
+        .vif-plugin .chain-gate-editor .chain-sentence input[type="text"] {
+            flex: 0 1 220px;
+            width: 220px;
+            min-width: 120px;
+        }
+        .vif-plugin .chain-gate-editor .chain-sentence input[type="number"] {
+            flex: 0 0 64px;
+            width: 64px;
+        }
+        .vif-plugin .chain-gate-editor .chain-sentence select {
+            flex: 0 1 260px;
+            min-height: 30px;
+            padding: 3px 8px;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
+            background: #fff;
+            font-family: inherit;
+            font-size: inherit;
+        }
+        .vif-plugin .chain-seg.chain-seg-small {
+            flex: 0 0 auto;
+        }
+        .vif-plugin .chain-seg.chain-seg-small button {
+            padding: 2px 12px;
+        }
+        .vif-plugin .chain-link-add,
+        .vif-plugin .chain-link-remove {
+            margin: 0 0 10px;
+            padding: 0;
+            border: 0;
+            background: none;
+            font-size: 0.85em;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: pointer;
+        }
+        .vif-plugin .chain-link-add {
+            color: #a35d00;
+        }
+        .vif-plugin .chain-link-remove {
+            color: #c0392b;
+        }
+        .vif-plugin .chain-link-add:hover,
+        .vif-plugin .chain-link-remove:hover {
+            background: none;
+            text-decoration: underline;
+        }
+        .vif-plugin .chain-gate-editor .chain-sentence .chain-link-remove {
+            margin: 0;
+        }
         .vif-plugin .chain-rules-empty {
             font-size: 0.8em;
             color: #6b7480;
             margin: 0 0 8px;
         }
+        /* The Go on choice: two short labels, each on one line, sized like the selects beside them. */
         .vif-plugin .chain-gate-editor .chain-seg {
-            flex: 0 0 240px;
+            flex: 0 0 auto;
+        }
+        .vif-plugin .chain-gate-editor .chain-seg > button {
+            flex: 0 0 auto;
+            min-height: 30px;
+            padding: 4px 14px;
+            font-size: inherit;
+            font-weight: 600;
+            white-space: nowrap;
         }
         .vif-plugin .chain-gate-actions {
             display: flex;
@@ -1563,106 +1818,1453 @@
             font-size: 0.8em;
         }
 
+        /* step controls */
+        .vif-plugin .chain-lines {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 10px;
+            font-size: 0.95em;
+            color: #5d6771;
+        }
+        /* Standard buttons; the one whose section the panel shows stays marked. */
+        .vif-plugin .cb-setting {
+            margin: 0;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        .vif-plugin .cb-setting.is-open {
+            border-color: #f08a00;
+            background: #fff8ef;
+            color: #a35d00;
+        }
+        .vif-plugin .cb-setting .cb-fact-off {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 1px 8px;
+            border-radius: 10px;
+            background: var(--alert-bg);
+            color: var(--alert-color);
+            font-size: 0.85em;
+            font-weight: 700;
+            line-height: 1.5;
+            vertical-align: 1px;
+        }
+        .vif-plugin .cb-fact-add {
+            color: #a35d00;
+        }
+        .vif-plugin .cb-lines-scope {
+            margin-right: 6px;
+        }
+        .vif-plugin .cb-flow {
+            position: relative;
+        }
+        .vif-plugin .cb-sep {
+            margin: 0 2px;
+        }
+        .vif-plugin .cb-host .collapsible-body {
+            display: block;
+        }
+        /* Every form inside the builder panel takes the step panel's shape: the label above
+           its control in body type, no uppercase column. The standalone panels keep theirs. */
+        .vif-plugin #chain-panel .form-group {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+            margin-bottom: 14px;
+        }
+        /* A label beside its field breaks where it reads best; above the field it runs on one line. */
+        .vif-plugin #chain-panel label > br.label-break {
+            display: none;
+        }
+        .vif-plugin #chain-panel .form-group > label:not(.switch):not(.inline-control-label) {
+            display: block;
+            flex: none;
+            max-width: none;
+            min-width: 0;
+            margin: 0 0 6px;
+            padding: 0;
+            font-size: 0.9em;
+            font-weight: 600;
+            line-height: 1.4;
+            color: #2b3440;
+            text-transform: none;
+            letter-spacing: 0;
+            text-align: left;
+        }
+        .vif-plugin #chain-panel .form-group input[type="text"],
+        .vif-plugin #chain-panel .form-group input[type="password"],
+        .vif-plugin #chain-panel .form-group select,
+        .vif-plugin #chain-panel .form-group textarea {
+            flex: none;
+            font-family: inherit;
+            font-size: 0.9em;
+            width: 300px;
+            max-width: 100%;
+        }
+        /* The service address is long; it fills the panel instead of the 300px box. */
+        .vif-plugin #chain-panel .form-group #cfg-vi-service-url {
+            width: 100%;
+        }
+        .vif-plugin #chain-panel .form-group input[type="number"] {
+            flex: none;
+            font-family: inherit;
+            font-size: 0.9em;
+            width: 130px;
+        }
+        .vif-plugin #chain-panel .form-group .video-height-field,
+        .vif-plugin #chain-panel .form-group .chain-props {
+            flex: none;
+            width: 300px;
+            max-width: 100%;
+        }
+        .vif-plugin #chain-panel .form-group .chain-props {
+            width: auto;
+        }
+        .vif-plugin #chain-panel .form-group .chain-prop input {
+            width: auto;
+        }
+        .vif-plugin #chain-panel .form-group .switch {
+            display: inline-block;
+            vertical-align: middle;
+            align-self: flex-start;
+        }
+        .vif-plugin #chain-panel .field-help {
+            flex: none;
+            margin: 6px 0 0;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-listeners-host {
+            position: static;
+            flex: none;
+            border: 0;
+            border-radius: 0;
+            padding: 0;
+            background: transparent;
+        }
+        .vif-plugin .cs-main,
+        .vif-plugin .cs-more,
+        .vif-plugin .cs-advanced {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .vif-plugin .cs-main,
+        .vif-plugin .cs-advanced:not(:empty) {
+            margin-bottom: 14px;
+        }
+        .vif-plugin .cs-more:not(:empty) {
+            margin: 4px 0 12px;
+        }
+        .vif-plugin .cs-head {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 6px;
+        }
+        .vif-plugin .cs-label {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #2b3440;
+        }
+        /* The Manager's label margin would sink the help tip below the label's text. */
+        .vif-plugin .cs-head > .cs-label {
+            margin-bottom: 0;
+        }
+        .vif-plugin .cs-default {
+            margin-left: auto;
+            display: inline-flex;
+            align-items: baseline;
+            gap: 8px;
+            font-size: 0.8em;
+            color: #5d6771;
+        }
+        .vif-plugin .cs-reset {
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: #a35d00;
+            font-size: inherit;
+            font-weight: 600;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: pointer;
+        }
+        .vif-plugin .cs-reset:hover {
+            background: none;
+            text-decoration: underline;
+        }
+        .vif-plugin .cs-help {
+            margin: 6px 0 0;
+            font-size: 0.8em;
+            color: #5d6771;
+        }
+        .vif-plugin .cs-range-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .vif-plugin .cs-range {
+            flex: 1 1 auto;
+            min-width: 0;
+            margin: 0;
+            accent-color: #f08a00;
+        }
+        .vif-plugin .cs-number {
+            flex: none;
+            width: 76px;
+        }
+        .vif-plugin .cs-unit {
+            font-size: 0.85em;
+        }
+        .vif-plugin .cs-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .vif-plugin .cs-chip {
+            margin: 0;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid #cfd4da;
+            background: #fff;
+            color: #2b3440;
+            font-size: 0.85em;
+            font-weight: 500;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: pointer;
+        }
+        .vif-plugin .cs-chip:hover {
+            border-color: #f08a00;
+        }
+        .vif-plugin .cs-chip.is-on {
+            border-color: #f08a00;
+            background: #fff3e0;
+            color: #a35d00;
+        }
+        .vif-plugin .cs-empty {
+            font-size: 0.85em;
+            color: #5d6771;
+        }
+        .vif-plugin .cs-add {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .vif-plugin .cs-note {
+            color: #9a5b00;
+        }
+        /* Everything a model finds, under headings, so nothing has to be guessed. */
+        .vif-plugin .cs-groups {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .vif-plugin .cs-group {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 4px 12px;
+            align-items: start;
+        }
+        .vif-plugin .cs-crop {
+            margin: 14px 0 6px;
+            padding-top: 12px;
+            border-top: 1px solid #e3e6ea;
+        }
+        .vif-plugin .cs-crop-fields {
+            margin-top: 12px;
+            padding-left: 12px;
+            border-left: 3px solid #fde3c2;
+        }
+        .vif-plugin .cs-crop .cs-field,
+        .vif-plugin .cs-sub .cs-field,
+        .vif-plugin .cs-sub .cs-switch-row {
+            margin: 0 0 12px;
+        }
+        /* Settings that belong to the switch above them. */
+        .vif-plugin .cs-sub {
+            margin: 10px 0 14px;
+            padding-left: 12px;
+            border-left: 3px solid #fde3c2;
+        }
+        .vif-plugin .cs-links {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+            font-size: 11.2px;
+        }
+        /* Select all / Unselect all sit evenly between the label and the picks. */
+        .vif-plugin .cs-links.cs-bulk {
+            margin: 2px 0 8px;
+        }
+        .vif-plugin .cs-group-title {
+            padding-top: 5px;
+            font-size: 11.2px;
+            font-weight: 600;
+            color: #5d6771;
+        }
+        @media (max-width: 700px) {
+            .vif-plugin .cs-group {
+                grid-template-columns: 1fr;
+            }
+        }
+        .vif-plugin .cs-add-input {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .vif-plugin .cs-add button {
+            margin: 0;
+        }
+        .vif-plugin .cs-seg {
+            flex: 0 1 auto;
+        }
+        .vif-plugin .cs-switch-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .vif-plugin .cs-switch-text {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .vif-plugin .cs-switch-text .cs-help {
+            margin-top: 4px;
+        }
+        .vif-plugin .cs-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .vif-plugin .cs-card {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin: 0;
+            padding: 10px 12px;
+            text-align: left;
+            text-transform: none;
+            letter-spacing: 0;
+            font-weight: 400;
+            color: #2b3440;
+            background: #fff;
+            border: 1px solid #cfd4da;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .vif-plugin .cs-card:hover {
+            border-color: #f08a00;
+        }
+        .vif-plugin .cs-card.is-on {
+            border-color: #f08a00;
+            box-shadow: 0 0 0 3px #fde3c2;
+        }
+        .vif-plugin .cs-card-title {
+            font-weight: 600;
+        }
+        .vif-plugin .cs-card-text {
+            font-size: 0.82em;
+            color: #5d6771;
+        }
+        .vif-plugin .cs-text,
+        .vif-plugin .cs-line,
+        .vif-plugin .cs-select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 10px;
+            border: 1px solid #cfd4da;
+            border-radius: 3px;
+            background: #fff;
+            color: #2b3440;
+            font-family: inherit;
+            font-size: 12.6px;
+        }
+        .vif-plugin .cs-line:focus,
+        .vif-plugin .cs-select:focus {
+            border-color: #f08a00;
+            outline: none;
+            box-shadow: 0 0 0 2px #fde3c2;
+        }
+        .vif-plugin .cs-text {
+            resize: vertical;
+        }
+        /* The plain controls span the panel, so the disclosures under them start at the left edge. */
+        .vif-plugin .cb-panel .chain-disclosure {
+            margin-left: 0;
+        }
+        .vif-plugin .cb-panel .chain-disclosure > .chain-disclosure-body {
+            margin-left: 0;
+        }
+        /* A disclosure's plain controls get the same room as the panel's. */
+        .vif-plugin .cb-panel .chain-disclosure > .chain-disclosure-body {
+            padding: 4px 0 2px;
+        }
+        .vif-plugin .cb-panel .chain-disclosure-body > .cs-field {
+            margin: 0 0 14px;
+        }
+        .vif-plugin .cb-panel .chain-disclosure-body > .cs-field:last-child {
+            margin-bottom: 8px;
+        }
+        .vif-plugin .cs-more-box {
+            margin-top: 4px;
+        }
+        .vif-plugin .cs-all-box {
+            margin-top: 8px;
+        }
+
+        /* ── Model chain builder ─────────────────────────────────────────── */
+        .vif-plugin .chain-builder {
+            margin-bottom: 16px;
+        }
+        .vif-plugin .chain-builder-body {
+            padding: 2px 16px 16px;
+        }
+        .vif-plugin .chain-builder .chain-head {
+            align-items: flex-start;
+        }
+        .vif-plugin .cb-decide {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 12px;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e3e6ea;
+        }
+        .vif-plugin .cb-decide-label {
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .vif-plugin .cb-decide .field-help {
+            flex: 1 1 100%;
+            margin: 0;
+        }
+        .vif-plugin .cb-workspace {
+            display: grid;
+            grid-template-columns: minmax(260px, 1fr) minmax(360px, 1.15fr);
+            grid-template-areas: "flow panel";
+            gap: 16px;
+            align-items: start;
+        }
+        @media (max-width: 1200px) {
+            .vif-plugin .cb-workspace {
+                grid-template-columns: minmax(0, 1fr);
+                grid-template-areas: "flow" "panel";
+            }
+        }
+        .vif-plugin .cb-flow { grid-area: flow; }
+        .vif-plugin .cb-panel { grid-area: panel; }
+        .vif-plugin .cb-heading {
+            margin: 0 0 2px;
+            font-size: 0.95em;
+            font-weight: 700;
+        }
+        .vif-plugin .cb-hint {
+            margin: 0 0 10px;
+            font-size: 0.8em;
+            color: #5d6771;
+        }
+        /* The step chips sit under the last step, where a new step lands. */
+        .vif-plugin .cb-palette {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px;
+            margin: 4px 0 10px;
+        }
+        .vif-plugin .cb-palette .cb-heading {
+            margin: 0 2px 0 0;
+            font-size: 0.82em;
+            font-weight: 600;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-palette .cb-step {
+            padding: 2px 8px 2px 3px;
+            gap: 5px;
+            font-size: 0.82em;
+        }
+        .vif-plugin .cb-palette .cb-step .cb-icon {
+            width: 20px;
+            height: 20px;
+        }
+        .vif-plugin .cb-palette .cb-step .cb-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+        .vif-plugin .cb-step,
+        .vif-plugin .cb-tile-main,
+        .vif-plugin .cb-decision,
+        .vif-plugin .cb-choice,
+        .vif-plugin .cb-pick {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            width: 100%;
+            margin: 0;
+            padding: 10px 12px;
+            text-align: left;
+            text-transform: none;
+            letter-spacing: 0;
+            font-weight: 400;
+            color: #2b3440;
+            background: #fff;
+            border: 1px solid #cfd4da;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .vif-plugin .cb-step:hover:not(:disabled),
+        .vif-plugin .cb-tile-main:hover,
+        .vif-plugin .cb-decision:hover,
+        .vif-plugin .cb-choice:hover,
+        .vif-plugin .cb-pick:hover:not(:disabled) {
+            border-color: #f08a00;
+            background: #fffaf3;
+        }
+        .vif-plugin .cb-step {
+            width: auto;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 12px 5px 6px;
+            border-radius: 18px;
+            cursor: grab;
+        }
+        .vif-plugin .cb-step .cb-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 5px;
+        }
+        .vif-plugin .cb-step.is-blocked,
+        .vif-plugin .cb-pick:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+        .vif-plugin .cb-step.is-blocked:hover {
+            border-color: #cfd4da;
+            background: #fff;
+        }
+        .vif-plugin .cb-icon {
+            flex: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            background: #fff3e0;
+            color: #a35d00;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .vif-plugin .cb-step-text,
+        .vif-plugin .cb-tile-text,
+        .vif-plugin .cb-pick-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+        .vif-plugin .cb-step-label,
+        .vif-plugin .cb-tile-label,
+        .vif-plugin .cb-pick-title,
+        .vif-plugin .cb-choice-title {
+            font-weight: 600;
+        }
+        .vif-plugin .cb-step-blurb,
+        .vif-plugin .cb-tile-summary,
+        .vif-plugin .cb-pick-blurb,
+        .vif-plugin .cb-choice-text {
+            font-size: 0.82em;
+            color: #5d6771;
+            overflow-wrap: anywhere;
+        }
+
+        /* flow */
+        .vif-plugin .cb-flow {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .vif-plugin .cb-flow-label {
+            margin: 4px 0 2px;
+            font-size: 0.75em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-flow-sub {
+            display: block;
+            margin: 4px 0 8px;
+            line-height: 1.45;
+            font-weight: 400;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+        .vif-plugin .cb-drop {
+            height: 14px;
+            margin: 0;
+            border-radius: 4px;
+            transition: height 0.1s ease;
+        }
+        .vif-plugin .cb-drop.is-over {
+            height: 34px;
+            margin-left: 0;
+            border-left: 0;
+            background: #fff3e0;
+            outline: 2px dashed #f08a00;
+        }
+        .vif-plugin .cb-drop.cb-drop-empty {
+            height: auto;
+            padding: 28px 16px;
+            text-align: center;
+            font-size: 0.85em;
+            color: #5d6771;
+            border: 2px dashed #cfd4da;
+        }
+        .vif-plugin .cb-drop.cb-drop-empty.is-over {
+            border-color: #f08a00;
+            outline: 0;
+        }
+        .vif-plugin .cb-tile {
+            position: relative;
+        }
+        /* The selected step's move arrows sit on its own bar, at the right. */
+        .vif-plugin .cb-tile.has-moves .cb-tile-main {
+            padding-right: 92px;
+        }
+        .vif-plugin .cb-tile-moves {
+            position: absolute;
+            top: 50%;
+            right: 12px;
+            transform: translateY(-50%);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .vif-plugin .cb-tile-pinned {
+            font-size: 0.78em;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-tile-move {
+            margin: 0;
+            padding: 2px 9px;
+            line-height: 1.3;
+            font-size: 0.95em;
+            text-transform: none;
+            letter-spacing: 0;
+            color: #5d6771;
+            background: #fff;
+            border: 1px solid #cfd4da;
+            border-radius: 4px;
+        }
+        .vif-plugin .cb-tile-move:hover:not(:disabled) {
+            color: #1b2430;
+            border-color: #f08a00;
+            background: #fffaf3;
+        }
+        .vif-plugin .cb-tile-move:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .vif-plugin .cb-tile.is-dragging {
+            opacity: 0.5;
+        }
+        .vif-plugin .cb-tile-main {
+            cursor: grab;
+        }
+        .vif-plugin .cb-tile.is-selected .cb-tile-main,
+        .vif-plugin .cb-decision.is-selected,
+        .vif-plugin .cb-cond.is-selected,
+        .vif-plugin .cb-pick.is-on {
+            border-color: #f08a00;
+            box-shadow: 0 0 0 3px #fde3c2;
+        }
+        .vif-plugin .cb-tile.has-error .cb-tile-main,
+        .vif-plugin .cb-decision.has-error,
+        .vif-plugin .cb-cond.has-error {
+            border-color: var(--alert-color);
+        }
+        .vif-plugin .cb-tile.has-warning .cb-tile-main {
+            border-color: #d9a400;
+        }
+        .vif-plugin .cb-tile-title {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 4px 8px;
+        }
+        .vif-plugin .cb-tile-num {
+            min-width: 20px;
+            height: 20px;
+            padding: 0 4px;
+            border-radius: 3px;
+            background: #2b3440;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .vif-plugin .cb-tile-name {
+            font-family: ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
+            font-size: 0.8em;
+            color: #5d6771;
+        }
+        /* With your code deciding, a step's name is its badge: it is what the code returns. */
+        .vif-plugin .cb-flow.is-dynamic .cb-tile-name,
+        .vif-plugin #chain-panel-title .cb-tile-name {
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: #2b3440;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .vif-plugin #chain-panel-title .cb-tile-name {
+            margin-left: 8px;
+            vertical-align: 2px;
+        }
+        /* The step that runs first hands its results to your code; each picked step comes back. */
+        .vif-plugin .cb-dyn-link {
+            position: relative;
+            height: 20px;
+            margin-left: 26px;
+            border-left: 2px solid #cfd4da;
+        }
+        .vif-plugin .cb-dyn-link::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: -6px;
+            border: 5px solid transparent;
+            border-top: 7px solid #b9c0c8;
+            border-bottom: 0;
+        }
+        .vif-plugin .cb-dyn-link + .cb-decision {
+            margin-top: 0;
+        }
+        .vif-plugin .cb-dyn-back {
+            margin: 6px 0 0;
+            font-size: 0.8em;
+            color: #5d6771;
+        }
+        /* A step's Advanced holds the detector's own settings: the step panel already says what
+           the step is, so the section's heading goes, and its own Advanced opens flat inside. */
+        .vif-plugin .cs-advanced-box .form-section > .form-section-title,
+        .vif-plugin .cs-advanced-box .form-section > .section-help,
+        .vif-plugin #chain-panel .cs-advanced-box .form-group:has(> label > [id$="cfg-vlm-advanced-caret"]) {
+            display: none;
+        }
+        .vif-plugin .cs-advanced-box [id$="cfg-vlm-advanced"] {
+            display: block !important;
+        }
+        /* The prompting guide's buttons read as buttons, not as plain text. */
+        .vif-plugin .vlm-guide-button {
+            border-color: #cfd4da;
+            background: #fff;
+        }
+        .vif-plugin .vlm-guide-button:hover {
+            border-color: #f08a00;
+        }
+        .vif-plugin #chain-panel .vlm-guide-button {
+            margin-left: 0 !important;
+        }
+        /* A chain step offers the guide beside its instructions, so Advanced doesn't repeat it,
+           and the text boxes left in Advanced span the panel. */
+        .vif-plugin #chain-panel .cs-all-box [id$="vlm-mode-custom"] > .form-group:first-child {
+            display: none !important;
+        }
+        .vif-plugin #chain-panel .cs-all-box .form-group textarea {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .vif-plugin .cb-pick-set {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 10px;
+            margin-top: 6px;
+        }
+        .vif-plugin .cb-pick-set .cb-tile.has-moves .cb-tile-main {
+            padding-right: 12px;
+            padding-bottom: 40px;
+        }
+        .vif-plugin .cb-pick-set .cb-tile-moves {
+            top: auto;
+            bottom: 10px;
+            transform: none;
+        }
+        /* A step's flag keeps one place, top right, whether or not the step is selected: the
+           move arrows go under it. */
+        .vif-plugin .cb-tile-flag {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            font-size: 0.75em;
+            font-weight: 600;
+            line-height: 1.2;
+            color: var(--alert-color);
+        }
+        .vif-plugin .cb-flow .cb-tile.has-flag .cb-tile-main {
+            padding-right: 124px;
+        }
+        .vif-plugin .cb-flow .cb-tile.has-flag .cb-tile-moves {
+            top: auto;
+            bottom: 6px;
+            transform: none;
+        }
+        .vif-plugin .cb-tile-flag.cb-tile-off {
+            color: #8a929b;
+        }
+        .vif-plugin .cb-tile-flag.cb-tile-warn,
+        .vif-plugin .cb-cond-flag {
+            color: var(--warn-color);
+        }
+        .vif-plugin .cb-cond-flag {
+            font-weight: 600;
+        }
+        .vif-plugin .cb-conn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 0 0 0 26px;
+            padding: 6px 0 6px 16px;
+            border-left: 2px solid #cfd4da;
+            font-size: 0.85em;
+            color: #5d6771;
+        }
+        /* The chain reads as a flowchart: a line runs down from each step, past its condition
+           (which hangs off it), into an arrowhead on the next step, and past the step chips into
+           Send results. Not when your code picks the next step: those steps are a set, not a sequence. */
+        .vif-plugin .cb-conn::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 16px;
+            height: 2px;
+            margin-top: -1px;
+            background: #cfd4da;
+        }
+        /* Room for the stop marker drawBranches puts after the condition, so it stays in the steps column. */
+        .vif-plugin .cb-conn.cb-conn-stops {
+            padding-right: 32px;
+        }
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-tile + .cb-drop,
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-conn + .cb-drop {
+            margin-left: 26px;
+            border-left: 2px solid #cfd4da;
+        }
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-drop:not(.cb-drop-empty) + .cb-palette {
+            margin: 0 0 0 26px;
+            padding: 4px 0 10px 16px;
+            border-left: 2px solid #cfd4da;
+        }
+        .vif-plugin .cb-send-slot,
+        .vif-plugin .cb-end {
+            position: relative;
+        }
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-drop:not(:first-child) + .cb-tile::before,
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-palette + .cb-send-slot::before,
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-drop:not(.cb-drop-empty) + .cb-send-slot::before,
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-palette + .cb-end::before,
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-drop:not(.cb-drop-empty) + .cb-end::before {
+            content: '';
+            position: absolute;
+            top: -7px;
+            left: 22px;
+            border: 5px solid transparent;
+            border-top: 7px solid #b9c0c8;
+            border-bottom: 0;
+            pointer-events: none;
+        }
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-conn + .cb-drop.cb-drop-off {
+            border-left-color: transparent;
+        }
+        .vif-plugin .cb-flow:not(.is-dynamic) > .cb-drop.cb-drop-off + .cb-tile::before {
+            display: none;
+        }
+        /* Branch lines, drawn over the flow once the steps are laid out (drawBranches). */
+        .vif-plugin .cb-branches {
+            position: absolute;
+            top: 0;
+            left: 0;
+            overflow: visible;
+            pointer-events: none;
+        }
+        .vif-plugin .cb-branches > path,
+        .vif-plugin .cb-branches > g > path {
+            fill: none;
+            stroke: #f08a00;
+            stroke-width: 2;
+            stroke-linejoin: round;
+        }
+        .vif-plugin .cb-branches circle,
+        .vif-plugin .cb-branches polygon {
+            fill: #f08a00;
+        }
+        /* Where the chain goes when the condition isn't met: grey and dashed, beside the solid
+           orange of where it goes when it is. */
+        .vif-plugin .cb-branches > .is-otherwise > path {
+            stroke: #7d8894;
+            stroke-dasharray: 6 4;
+        }
+        .vif-plugin .cb-branches > .is-otherwise polygon {
+            fill: #7d8894;
+        }
+        .vif-plugin .cb-cond-else {
+            color: #5d6771;
+            font-weight: 400;
+            text-decoration: underline dashed #7d8894;
+            text-underline-offset: 3px;
+        }
+        .vif-plugin .cb-branches > .is-active,
+        .vif-plugin .cb-branches > .is-hot,
+        .vif-plugin .cb-branches > .is-active > path,
+        .vif-plugin .cb-branches > .is-hot > path {
+            stroke-width: 3;
+        }
+        .vif-plugin .cb-then {
+            font-weight: 600;
+        }
+        .vif-plugin .cb-add-cond {
+            margin: 0;
+            padding: 4px 10px;
+            font-size: 0.85em;
+            text-transform: none;
+            letter-spacing: 0;
+            background: #fff;
+            color: #a35d00;
+            border: 1px dashed #f0b866;
+            border-radius: 4px;
+        }
+        .vif-plugin .chain-stage .cs-covered {
+            display: none !important;
+        }
+        .vif-plugin .cb-back {
+            align-self: flex-start;
+            margin: 10px 0 0;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: #5d6771;
+            font-size: 0.85em;
+            text-transform: none;
+            letter-spacing: 0;
+            text-decoration: underline dotted #b9c0c8;
+            text-underline-offset: 3px;
+            cursor: pointer;
+        }
+        .vif-plugin .cb-back:hover {
+            color: #f08a00;
+            background: none;
+        }
+        .vif-plugin .cb-cond {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 2px 6px;
+            margin: 0;
+            padding: 6px 10px;
+            text-align: left;
+            text-transform: none;
+            letter-spacing: 0;
+            font-weight: 400;
+            color: #9a5b00;
+            background: #fdf1e0;
+            border: 1px solid #f0d2a6;
+            border-left: 3px solid #f08a00;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .vif-plugin .cb-cond-when {
+            font-weight: 600;
+        }
+        .vif-plugin .cb-cond-then {
+            color: #2b3440;
+        }
+        /* The chain's type scale, in px so nesting doesn't shrink it: 13 for names, 12 for
+           conditions and controls, 11.2 for secondary text, matching the side panel. */
+        .vif-plugin .cb-flow .cb-tile-label {
+            font-size: 13px;
+        }
+        .vif-plugin .cb-cond,
+        .vif-plugin .cb-add-cond,
+        .vif-plugin .cb-palette .cb-heading,
+        .vif-plugin .cb-palette .cb-step {
+            font-size: 12px;
+        }
+        .vif-plugin .cb-flow .cb-tile-summary,
+        .vif-plugin .cb-pick-blurb,
+        .vif-plugin .cb-choice-text {
+            font-size: 11.2px;
+        }
+        .vif-plugin .cb-pick-title,
+        .vif-plugin .cb-choice-title {
+            font-size: 13px;
+        }
+        .vif-plugin .cb-decision {
+            margin: 4px 0;
+            background: #f4f6f8;
+            border-style: dashed;
+        }
+        /* The card that ends the chain: where its results go. */
+        .vif-plugin .cb-send {
+            border: 1px dashed #b9c0c8;
+            border-radius: 6px;
+            background: #fff;
+            padding: 8px 12px 10px;
+        }
+        .vif-plugin .cb-send.is-selected {
+            border-style: solid;
+            border-color: #f08a00;
+            box-shadow: 0 0 0 3px #fde3c2;
+            position: relative;
+            z-index: 1;
+        }
+        .vif-plugin .cb-send-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: none;
+            text-align: left;
+            text-transform: none;
+            letter-spacing: 0;
+            color: #2b3440;
+            cursor: pointer;
+        }
+        .vif-plugin .cb-send-head .cb-icon {
+            width: 26px;
+            height: 26px;
+            background: #f4f6f8;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-send-title {
+            font-weight: 600;
+            font-size: 13px;
+        }
+        .vif-plugin .cb-send-change {
+            margin-left: auto;
+            font-size: 11.2px;
+            font-weight: 600;
+            color: #a35d00;
+        }
+        .vif-plugin .cb-send-text {
+            margin: 4px 0 8px 34px;
+            font-size: 11.2px;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-send-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-left: 34px;
+        }
+        .vif-plugin .cb-send-chip,
+        .vif-plugin .cb-send-add {
+            margin: 0;
+            padding: 2px 9px;
+            font-size: 11.2px;
+            text-transform: none;
+            letter-spacing: 0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .vif-plugin .cb-send-chip {
+            background: #f4f6f8;
+            border: 1px solid #cfd4da;
+            color: #2b3440;
+        }
+        .vif-plugin .cb-send-chip.is-off {
+            color: #8a939c;
+        }
+        .vif-plugin .cb-send-chip:hover,
+        .vif-plugin .cb-send-add:hover {
+            border-color: #f08a00;
+            background: #fffaf3;
+        }
+        .vif-plugin .cb-send-add {
+            background: #fff;
+            border: 1px dashed #f0b866;
+            color: #a35d00;
+        }
+        .vif-plugin .cb-end {
+            align-self: flex-start;
+            padding: 3px 10px;
+            border-radius: 10px;
+            background: #f4f6f8;
+            font-size: 0.75em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #5d6771;
+        }
+
+        /* settings panel */
+        .vif-plugin .cb-panel {
+            min-width: 0;
+            border: 1px solid #cfd4da;
+            border-radius: 6px;
+            padding: 12px 14px;
+            background: #fff;
+            --form-label-width: 150px;
+        }
+        /* A chain settings section, in the colour of the button that opened it. */
+        .vif-plugin .cb-panel.is-chain-wide {
+            background: #fffaf3;
+            border-color: #f0b866;
+            border-top: 3px solid #f08a00;
+        }
+        .vif-plugin .cb-panel.is-chain-wide .cb-panel-head {
+            border-bottom-color: #f3d9b1;
+        }
+        .vif-plugin .cb-panel-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e3e6ea;
+        }
+        .vif-plugin .cb-panel-heading {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+        .vif-plugin .cb-panel-title {
+            margin: 0;
+            font-size: 1em;
+            font-weight: 700;
+        }
+        .vif-plugin .cb-panel-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .vif-plugin .cb-panel-actions button {
+            margin: 0;
+        }
+        .vif-plugin .cb-panel-remove {
+            padding: 2px 4px;
+            border: 0;
+            background: none;
+            color: #c0392b;
+            font-size: 0.85em;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        .vif-plugin .cb-panel-remove:hover {
+            background: none;
+            text-decoration: underline;
+        }
+        .vif-plugin .cb-panel .chain-stage.array-item {
+            border: 0;
+            box-shadow: none;
+            background: transparent;
+        }
+        .vif-plugin .cb-panel .chain-stage > .array-item-header {
+            display: none;
+        }
+        .vif-plugin .cb-panel .chain-stage-body {
+            display: block;
+            padding: 0;
+        }
+        .vif-plugin .cb-panel .chain-gate .chain-gate-plain,
+        .vif-plugin .cb-panel .chain-gate .gstrip {
+            display: none;
+        }
+        .vif-plugin .cb-panel .chain-gate .chain-gate-editor {
+            display: block;
+            border: 0;
+            padding: 0;
+        }
+        .vif-plugin .cb-settings .chain-advanced {
+            margin-top: 12px;
+        }
+
+        /* Get started */
+        .vif-plugin .cb-getstarted {
+            max-width: 980px;
+            padding: 6px 0 4px;
+        }
+        .vif-plugin .cb-eyebrow {
+            font-size: 0.75em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #a35d00;
+        }
+        .vif-plugin .cb-title {
+            margin: 2px 0 4px;
+            font-size: 1.35em;
+            font-weight: 700;
+        }
+        .vif-plugin .cb-lead {
+            margin: 0 0 14px;
+            color: #5d6771;
+        }
+        .vif-plugin .cb-choices,
+        .vif-plugin .cb-picks {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 10px;
+        }
+        .vif-plugin .cb-choice {
+            flex-direction: column;
+            gap: 6px;
+            min-height: 120px;
+        }
+        .vif-plugin .cb-choice-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+        }
+        .vif-plugin .cb-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #fff3e0;
+            border: 1px solid #f0d2a6;
+            color: #a35d00;
+            font-size: 0.75em;
+            font-weight: 600;
+        }
+        .vif-plugin .cb-pick-reason {
+            font-size: 0.8em;
+            color: #9a5b00;
+        }
+        .vif-plugin .cb-check {
+            flex: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1.5px solid #cfd4da;
+            background: #fff;
+        }
+        .vif-plugin .cb-pick.is-on .cb-check {
+            border-color: #f08a00;
+            background: #f08a00 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5 9-10'/%3E%3C/svg%3E") center / 14px no-repeat;
+        }
+        .vif-plugin .cb-preview {
+            margin: 14px 0 0;
+        }
+        .vif-plugin .cb-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #e3e6ea;
+        }
+        .vif-plugin .cb-actions button {
+            margin: 0;
+        }
+        .vif-plugin .cb-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* results strip */
     </style>
 
-    <div class="content-wrapper vif-plugin">
-
-        <div class="sticky-page-header">
-        <div class="streams-header">
-            <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
-        </div>
-        <!-- Global VIF nav (same four tabs on every VIF page): this page is the
-             Configs area; the secondary row says which config surface. -->
-        <div class="vif-tabs-row">
-            <button class="vif-tab" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html','')">Live Streams <span class="vif-tab-count" id="vif-tab-live-count">&ndash;</span></button>
-            <button class="vif-tab" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count">&ndash;</span></button>
-            <span class="vif-tab is-active">Configs</span>
-        </div>
+    <div class="vif-plugin vif-shell">
+    <nav id="vif-sidenav" class="vif-sidenav" aria-label="VIF pages"></nav>
+    <div class="content-wrapper vif-plugin vif-main">
         <script>
-            // Record this page as the last-used tab (down to the config surface):
-            // a fresh entry into the plugin returns here via shm.html's sticky-tab
-            // script, same as the Live/On-Demand tabs.
+            // Record this page as the last-used one (down to the config surface): a
+            // fresh entry into the plugin returns here via shm.html's sticky-tab script.
             try {
                 sessionStorage.setItem('vifLastTab', 'configs');
                 sessionStorage.setItem('vifConfigsPage', 'stream-config.html');
             } catch (e) { /* non-sticky */ }
         </script>
-        <div class="vif-subtabs" style="margin-bottom: 12px;">
-            <span class="vif-subtab is-active">Stream Configs</span>
-            <button class="vif-subtab" title="Defaults every stream config inherits.&#10;A config that sets its own value pins it." onclick="loadAjaxPluginContent('server','vif','default.html','')">Stream Config Defaults</button>
-            <button class="vif-subtab" title="On-Demand job settings:&#10;caps, retention, lifecycle webhooks." onclick="try { sessionStorage.setItem('vifVodView','settings'); } catch (e) {} loadAjaxPluginContent('server','vif','vod.html','')">On-Demand Configs</button>
-            <button class="vif-subtab" title="Stored credentials the configs reference by name:&#10;endpoint keys, the service key, webhook secrets." onclick="loadAjaxPluginContent('server','vif','secrets.html','')">Secrets</button>
-        </div>
-        <style>
-            /* Page header, the shape every VIF sub-view carries: a back crumb top
-               left over the page title (the On-Demand pages set the pattern). */
-            .vif-plugin .vif-page-head{padding:14px 0 10px;border-bottom:1px solid #cfd5db;margin-bottom:16px}
-            .vif-plugin .vif-page-crumb{display:inline-block;font-size:12.5px;font-weight:600;color:#f08a00;text-decoration:none;margin-bottom:3px;cursor:pointer}
-            .vif-plugin .vif-page-crumb:hover{text-decoration:underline}
-            .vif-plugin .vif-page-title{margin:0;font-size:20px;font-weight:700}
-        </style>
         <div class="vif-page-head">
-            <a class="vif-page-crumb" href="#" onclick="try{sessionStorage.setItem('vifNavExplicit','1')}catch(e){} loadAjaxPluginContent('server','vif','shm.html',''); return false;">&#8592; Live Streams</a>
             <h2 class="vif-page-title">Stream Configs</h2>
         </div>
 
-        <!-- Stream Selector -->
-        <div class="form-wrapper top-config-panel" style="margin-bottom: 16px;">
-
+        <!-- Stream Selector: only this bar stays pinned while the page scrolls. -->
+        <div class="form-wrapper top-config-panel config-bar">
             <div class="top-config-toolbar">
                 <div class="top-config-toolbar-main">
                     <div class="top-config-toolbar-heading">
                         <div class="form-section-title" style="margin-bottom:0;">Incoming Stream</div>
                     </div>
+                    <button type="button" id="btn-new-top" onclick="newConfig()" title="New stream config" aria-label="New stream config">+</button>
                     <select id="cfg-stream-select" onchange="onStreamSelected()" style="font-family:monospace; font-size:0.95em; padding:6px 10px; border:1px solid #cfd4da; border-radius:3px;">
                         <option value="">Loading streams...</option>
                     </select>
+                    <div class="top-config-item-actions">
+                        <button id="btn-upload-top" class="icon-only" onclick="document.getElementById('cfg-upload-file').click()" style="display:none;" title="Upload a config file as a new stream config" aria-label="Upload a config file as a new stream config"><i class="fa fa-upload" aria-hidden="true"></i></button>
+                        <input type="file" id="cfg-upload-file" accept=".json,application/json" style="display:none;" onchange="uploadConfigFile(this)">
+                        <button id="btn-download-top" class="icon-only" onclick="downloadConfig()" style="display:none;" title="Download this config as a file" aria-label="Download this config as a file"><i class="fa fa-download" aria-hidden="true"></i></button>
+                        <button id="btn-clone-top" class="icon-only" onclick="cloneConfig()" style="display:none;" title="Clone this config as a new stream config" aria-label="Clone this config as a new stream config"><i class="fa fa-files-o" aria-hidden="true"></i></button>
+                        <button id="btn-delete-top" class="btn-danger" onclick="deleteConfig()" style="display:none;">Delete Config</button>
+                    </div>
                 </div>
                 <div class="top-config-toolbar-actions">
+                    <div id="dirty-indicator" style="visibility:hidden;">Saved</div>
                     <button id="btn-save-top" data-save-config-btn="true" onclick="saveConfig()">Save all changes</button>
-                    <button id="btn-clone-top" onclick="cloneConfig()" style="display:none;">Clone Config</button>
-                    <button id="btn-delete-top" class="btn-danger" onclick="deleteConfig()" style="display:none;">Delete Config</button>
                 </div>
-                <div class="section-help" style="margin-top:6px; margin-bottom:0;">
-                    Choose which incoming streams VIF should analyze. <strong>Application</strong> must match exactly. <strong>Stream Name</strong> can be an exact name or a regex pattern — e.g. application <code>live</code> and stream name <code>traffic.*</code> matches <code>rtmp://…/live/traffic_cam1</code>.
-                    Fields you leave unset inherit from the <a href="#" onclick="loadAjaxPluginContent('server','vif','default.html',''); return false;">Stream Config Defaults</a>.
-                </div>
-
             </div>
-            <div class="save-meta">
-                <div id="status-message"></div>
-                <div id="dirty-indicator" style="visibility:hidden;">Saved</div>
-            </div>
-
-            <div id="new-stream-fields" style="display:none;">
-                <div class="form-group">
-                    <label>Application</label>
-                    <input type="text" id="cfg-new-app-name" value="" placeholder="live" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="updateMatchOverlapNote()">
-                    <div class="field-help">Exact application match, such as <code>live</code>.</div>
+            <div id="status-message"></div>
+        </div>
+        <div class="form-wrapper top-config-panel top-config-details" style="margin-bottom: 16px;">
+            <div class="top-config-grid">
+                <div class="top-field top-field-type">
+                    <label for="cfg-detector-type">Detector type</label>
+                <select id="cfg-detector-type">
+                    <option value="object" selected>Object (Find objects)</option>
+                    <option value="scene">Scene (Recognize a scene)</option>
+                    <option value="motion">Motion (Watch for movement)</option>
+                    <option value="vlm">VLM (Ask an AI model)</option>
+                    <option value="synthetic">Synthetic (Spot AI-generated video)</option>
+                    <option value="verify">Verify (Review a recording for AI-generated video)</option>
+                    <option value="chain">Chain (Run several steps)</option>
+                </select>
+                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-motion" style="display:none">Differences consecutive frames and reports sustained movement as <code>motion</code> boxes &mdash; no model inference, so it is cheap enough to run on every stream or to gate heavier stages as a chain's entry.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated content (a Real-vs-Fake verdict).</span><span id="detector-help-verify" style="display:none">Two-stage verification of a file for AI-generated content: the NVIDIA Synthetic Video Detector scores every window, and a vision-language model reviews the windows that cross the gate. Used by On-Demand &rarr; New Analysis &rarr; Verify; the application and stream name only identify this config, and a live stream that matches it is refused.</span><span id="detector-help-chain" style="display:none">Runs several steps on the same video. Set the steps up in the Model chain panel below.</span></div>
                 </div>
-                <div class="form-group">
-                    <label>Stream Name (exact or regex)</label>
-                    <input type="text" id="cfg-new-stream-name" value="" placeholder="e.g. traffic.*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="updateMatchOverlapNote()">
-                    <div class="field-help">Use an exact name like <code>traffic_cam1</code> or a regex pattern like <code>traffic.*</code>.</div>
-                    <div id="match-overlap-note" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:#9a5b00; margin:6px 0 0;"></div>
+                <div id="new-stream-fields" style="display:none;">
+                    <div class="top-field">
+                        <label for="cfg-new-app-name">Application</label>
+                        <input type="text" id="cfg-new-app-name" value="" placeholder="live" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="updateMatchOverlapNote()">
+                        <div class="field-help" data-match-help="new">The application the stream is published to, such as <code>live</code>. Streams published anywhere else are not analyzed.</div>
+                        <div class="field-help" data-match-help="stored" style="display:none;">The application the stream must be published to.</div>
+                    </div>
+                    <div class="top-field">
+                        <label for="cfg-new-stream-name">Stream name</label>
+                        <input type="text" id="cfg-new-stream-name" value="" placeholder="e.g. traffic.*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="updateMatchOverlapNote()">
+                        <div class="field-help" data-match-help="new">An exact name like <code>traffic_cam1</code>, or a pattern like <code>traffic.*</code>. Analysis starts as soon as a matching stream is published.<span class="vif-help-tip" aria-label="Help" data-vif-tip="Example: APPLICATION live with STREAM NAME traffic.* will analyze streams including&#10;&#10;• rtmp://your-engine/live/traffic_cam1&#10;• rtmp://your-engine/live/traffic_cam2"></span></div>
+                        <div class="field-help" data-match-help="stored" style="display:none;">Analysis starts as soon as a stream with an exact name, or one matching a regex pattern, is published.<span class="vif-help-tip" aria-label="Help" data-vif-tip="Example: APPLICATION live with STREAM NAME traffic.* will analyze streams including&#10;&#10;• rtmp://your-engine/live/traffic_cam1&#10;• rtmp://your-engine/live/traffic_cam2"></span></div>
+                        <div id="match-overlap-note" style="display:none; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:#9a5b00; margin:6px 0 0;"></div>
+                    </div>
                 </div>
             </div>
         </div>
-        </div><!-- end sticky-page-header -->
+
+        <!-- Model chain builder: full width above the columns; shown when Detector Type is Chain. -->
+        <div class="form-wrapper has-header chain-builder" id="chain-pipeline-section" style="display:none;">
+            <div class="form-panel-header">Model chain</div>
+            <div class="chain-builder-body">
+                <div class="chain-head" id="chain-head">
+                    <div class="chain-lines">
+                        <span class="cb-eyebrow cb-lines-scope">Chain settings</span>
+                        <button type="button" id="chain-video-line" class="cb-setting">Video Settings</button>
+                        <button type="button" id="chain-settings-open" class="cb-setting">Chain conditional logic</button>
+                        <button type="button" id="chain-advanced-open" class="cb-setting">Advanced options</button>
+                    </div>
+                    <div class="chain-chips">
+                        <button type="button" id="chain-status" class="chain-status" style="display:none;"></button>
+                    </div>
+                </div>
+                <div id="chain-warnings" class="inline-warning chain-warnings chain-level-warnings" style="display:none;"></div>
+                <div id="chain-getstarted" class="cb-getstarted" style="display:none;"></div>
+                <div id="chain-workspace" class="cb-workspace">
+                    <div id="chain-flow" class="cb-flow" role="region" aria-label="Chain steps"></div>
+                    <div id="chain-panel" class="cb-panel" role="region" aria-labelledby="chain-panel-title">
+                        <div class="cb-panel-head">
+                            <div class="cb-panel-heading">
+                                <div id="chain-panel-scope" class="cb-eyebrow"></div>
+                                <h4 id="chain-panel-title" class="cb-panel-title"></h4>
+                            </div>
+                            <div id="chain-panel-actions" class="cb-panel-actions"></div>
+                        </div>
+                        <p id="chain-panel-note" class="cs-help cb-panel-note" style="display:none;"></p>
+                        <div id="chain-stages" class="chain-stages"></div>
+                        <div id="chain-gates" class="chain-gates"></div>
+                        <div id="chain-video-host" class="cb-host" style="display:none;"></div>
+                        <div id="chain-listeners-host" class="cb-host event-listeners-panel cb-listeners-host" style="display:none;"></div>
+                        <div id="chain-advanced-host" class="cb-host" style="display:none;"></div>
+                        <div id="chain-settings" class="cb-settings">
+                        <div id="chain-decide-row" class="cb-decide">
+                            <span id="chain-mode-label" class="cb-decide-label">What runs next is decided by</span>
+                            <div id="chain-mode" class="chain-seg" role="group" aria-labelledby="chain-mode-label">
+                                <button type="button" data-mode="conditional">Conditions you set</button>
+                                <button type="button" data-mode="dynamic">Your code</button>
+                            </div>
+                            <div class="field-help"><span id="chain-mode-help-conditional">Steps run in order. Add a condition between two steps to run the next one only when the step before it finds something.</span><span id="chain-mode-help-dynamic" style="display:none">Your code, installed on the Streaming Engine, picks the next step after each one runs.</span></div>
+                        </div>
+                        <div id="chain-mode-confirm" class="inline-warning chain-confirm" style="display:none;">
+                            <span id="chain-mode-confirm-text"></span>
+                            <div class="chain-confirm-actions">
+                                <button type="button" id="chain-mode-confirm-yes" class="btn-danger"></button>
+                                <button type="button" id="chain-mode-confirm-no" class="btn-secondary">Cancel</button>
+                            </div>
+                        </div>
+                            <div id="chain-decision-panel" class="chain-decision" style="display:none;">
+                                <div class="chain-decision-title">Your code<span class="vif-help-tip" aria-label="Help" data-vif-tip="A Java class you install on this Wowza Streaming Engine: its JAR goes in the Engine’s lib folder, and Streaming Engine must restart to see it. After each step runs, it picks the next step or ends the clip. A chain can’t be saved until Engine has the class, and if the class fails when the stream starts, the stream will not be analyzed."></span></div>
+                                <div id="chain-decision-errors" class="chain-stage-errors"></div>
+                                <div class="form-group">
+                                    <label for="chain-decision-class">Class name <span class="chain-required">Required</span></label>
+                                    <input type="text" id="chain-decision-class" placeholder="e.g. com.example.MyDecider" autocomplete="off" spellcheck="false">
+                                </div>
+                                <div class="form-group">
+                                    <label for="chain-decision-timeout">Wait for a decision (seconds)<span class="vif-help-tip" aria-label="Help" data-vif-tip="The longest your code may take to pick the next step, and the longest a picked step may take to finish, 5 seconds by default. Past that, the clip ends with the results it has. If your code fails five times in a row it is switched off for that stream until the stream restarts."></span></label>
+                                    <input type="number" id="chain-decision-timeout" placeholder="5">
+                                </div>
+                                <div class="form-group">
+                                    <label for="chain-dispatch-intermediate">Send results after every step<span class="vif-help-tip" aria-label="Help" data-vif-tip="Also send each step's results to the event listeners as it finishes, not only when the clip is done. Your code always receives every step's results."></span></label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="chain-dispatch-intermediate">
+                                        <span class="slider-switch"></span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label>Settings for your code<span class="vif-help-tip" aria-label="Help" data-vif-tip="Names and values your code receives when the stream starts, as text. The Engine adds stream_name and detector_type on its own."></span></label>
+                                    <div class="chain-props">
+                                        <div id="chain-decision-properties"></div>
+                                        <button type="button" id="chain-property-add" class="btn-secondary">+ Add setting</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="chain-advanced" class="chain-advanced">
+                                <div id="chain-advanced-errors" class="chain-stage-errors"></div>
+                                <div class="form-group">
+                                    <label for="chain-max-rings">Maximum step runs per clip<span class="vif-help-tip" aria-label="Help" data-vif-tip="How many times steps may run on one clip before the chain stops, 8 by default. A condition can send the clip back to an earlier step, so this keeps a chain from running forever. Keep it at or above your number of steps, or the chain is cut short."></span></label>
+                                    <input type="number" id="chain-max-rings" placeholder="8">
+                                </div>
+                                <div class="form-group">
+                                    <label for="chain-result-mode">What destinations receive<span class="vif-help-tip" aria-label="Help" data-vif-tip="What your webhooks, overlays, ID3 tags and log files receive when a clip finishes the chain.&#10;&#10;The last step’s results: only what the last step to run found. If a condition finds nothing and stops the chain early, the clip is still sent, just with no results. To skip those, turn on Suppress Empty Detections in that destination’s settings.&#10;&#10;Every step’s results: what each step found, sent together in one message, including clips a condition stopped early. Rollup can’t be used with this choice.&#10;&#10;On-Demand jobs always keep every step’s results."></span></label>
+                                    <select id="chain-result-mode">
+                                        <option value="">The last step's results (default)</option>
+                                        <option value="combined">Every step's results</option>
+                                    </select>
+                                    <div id="chain-result-mode-note" class="field-help" style="display:none">Each step’s results already go out as it finishes, so only the last step’s results go out when the clip ends. Turn off Send results after every step to choose.</div>
+                                </div>
+                            </div>
+                            <details id="chain-json" class="chain-json">
+                                <summary>View this chain as JSON</summary>
+                                <pre id="chain-json-body"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Two column layout -->
         <div class="two-column">
 
         <!-- Left column: Video Processing + Debug Options -->
         <div class="left-column">
-        <div class="form-wrapper has-header">
+        <div class="form-wrapper has-header" id="video-processing-panel">
             <div class="form-panel-header collapsible-header" onclick="togglePanel(this)" title="Expand/collapse video processing">
                 <span class="collapse-chevron">&#9660;</span>
                 Video Processing
             </div>
             <div class="collapsible-body">
             <div class="section-help">
-               Stream configuration settings that control how VIF processes incoming video for this stream. Adjust these to balance performance and accuracy.
+               How VIF handles incoming video for this stream. Leave a setting blank to use the <a href="#" onclick="loadAjaxPluginContent('server','vif','default.html',''); return false;">Stream Config Defaults</a>.
             </div>
 
             <div class="form-group">
@@ -1674,19 +3276,6 @@
                 <div class="field-help">Turns VIF processing on or off for streams matching this rule.</div>
             </div>
 
-            <div class="form-group">
-                <label>Detector Type</label>
-                <select id="cfg-detector-type">
-                    <option value="object" selected>Object</option>
-                    <option value="scene">Scene</option>
-                    <option value="motion">Motion</option>
-                    <option value="vlm">VLM</option>
-                    <option value="synthetic">Synthetic</option>
-                    <option value="verify">Verify</option>
-                    <option value="chain">Chain</option>
-                </select>
-                <div class="field-help"><span id="detector-help-object">Tracks objects like person/car as bounding boxes across frames.</span><span id="detector-help-scene" style="display:none">Classifies the whole frame against your target scene phrases.</span><span id="detector-help-motion" style="display:none">Differences consecutive frames and reports sustained movement as <code>motion</code> boxes &mdash; no model inference, so it is cheap enough to run on every stream or to gate heavier stages as a chain's entry.</span><span id="detector-help-vlm" style="display:none">Sends frames to a Vision Language Model endpoint for free-text analysis.</span><span id="detector-help-synthetic" style="display:none">Checks each video window for AI-generated content (a Real-vs-Fake verdict).</span><span id="detector-help-verify" style="display:none">Two-stage verification of a file for AI-generated content: the NVIDIA Synthetic Video Detector scores every window, and a vision-language model reviews the windows that cross the gate. Used by On-Demand &rarr; New Analysis &rarr; Verify; the application and stream name only identify this config, and a live stream that matches it is refused.</span><span id="detector-help-chain" style="display:none">Runs a pipeline of named stages on each window; every stage is its own Object, Scene, VLM or Synthetic detector.</span></div>
-            </div>
 
             <div class="form-group">
                 <label>Grayscaled</label>
@@ -1719,25 +3308,24 @@
                 <input type="number" id="cfg-inference-fps" value="" placeholder="30" min="-1" max="120" step="1">
                 <div class="field-help"><span id="inference-fps-help-object">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-scene" style="display:none">Frames per second sent for analysis. Lower values reduce load but may miss short events. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-motion" style="display:none">Frames per second differenced for motion. Lower values cut CPU further but miss brief movement; displacement is measured across whichever frames are sent. Set to <code>-1</code> to match the stream frame rate.</span><span id="inference-fps-help-vlm" style="display:none">Frames per second sent for analysis. Lower values reduce load but may miss short events. VLM sends one request per window carrying Duration × Inference FPS images, and the endpoint accepts at most 8 per request — a config asking for more, or set to <code>-1</code> (match source), does not save.</span><span id="inference-fps-help-verify" style="display:none">Frames per second sampled from each window for the review model. Set to <code>-1</code> to match the stream frame rate; the service evenly subsamples a window that exceeds the endpoint's image cap.</span><span id="inference-fps-help-chain" style="display:none">Frames per second sent for analysis, shared by every stage. Set to <code>-1</code> to match the stream frame rate.</span></div>
             </div>
-            <div class="form-group">
-                <label>Inference Video Height</label>
-                <div style="display:flex; flex-direction:column; gap:4px; flex:1 1 200px; max-width:320px;">
-                    <select id="cfg-inference-video-height-mode">
-                        <option value="">DEFAULT</option>
-                        <option value="source">SOURCE</option>
-                        <option value="model">MODEL</option>
-                        <option value="custom">CUSTOM</option>
-                    </select>
-                    <input type="number" id="cfg-inference-video-height-custom" value="" placeholder="pixels (≥ 2)" min="2" step="1" style="display:none;">
-                </div>
-                <div class="field-help">SOURCE sends frames at the original stream height. MODEL uses the model's native input size. CUSTOM lets you specify an exact pixel height.</div>
-            </div>
-
             <div class="form-group" id="cfg-duration-group">
                 <label>Duration (seconds)</label>
                 <input type="number" id="cfg-duration" value="" placeholder="2" min="0" max="5" step="0.1">
-                    <div class="field-help"><span id="duration-help-scene">Length of each analysis window (seconds) sent to the Video Intelligence Service (VIS).</span><span id="duration-help-vlm" style="display:none">Length of each analysis window (seconds). VLM sends one request per window carrying Duration × Inference-FPS images, and the endpoint accepts at most 8 per request — a config asking for more does not save.</span><span id="duration-help-synthetic" style="display:none">Target length of each analysis window (seconds). Windows snap to the next keyframe — set Duration ≥ your source's GOP.</span><span id="duration-help-verify" style="display:none">Target length of each verified window (seconds). Each window is scored whole and its sampled frames are what the review model sees; windows snap to the next keyframe.</span><span id="duration-help-chain" style="display:none">Length of each analysis window (seconds) the stages run on. The limit follows the stages: 8 with a VLM stage, 30 with a Synthetic stage, 5 otherwise.</span></div>
+                    <div class="field-help"><span id="duration-help-scene">Length of each analysis window (seconds) sent to the Video Intelligence Service (VIS).</span><span id="duration-help-vlm" style="display:none">Length of each analysis window (seconds). VLM sends one request per window carrying Duration × Inference-FPS images, and the endpoint accepts at most 8 per request — a config asking for more does not save.</span><span id="duration-help-synthetic" style="display:none">Target length of each analysis window (seconds). Windows snap to the next keyframe — set Duration ≥ your source's GOP.</span><span id="duration-help-verify" style="display:none">Target length of each verified window (seconds). Each window is scored whole and its sampled frames are what the review model sees; windows snap to the next keyframe.</span><span id="duration-help-chain" style="display:none">How many seconds of video each clip holds, up to 30. A Spot AI-generated video step ignores Inference FPS and looks at every frame of the clip. Its clips end on the first keyframe after this length, so they run longer when keyframes are further apart.</span></div>
                 <div id="vlm-images-meter" class="field-help" style="display:none;"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Inference Video Height</label>
+                <div class="video-height-field">
+                    <select id="cfg-inference-video-height-mode">
+                        <option value="">Match the model (default)</option>
+                        <option value="source">Keep the stream’s height</option>
+                        <option value="custom">Exact height</option>
+                    </select>
+                    <input type="number" id="cfg-inference-video-height-custom" value="" placeholder="pixels (≥ 2)" min="2" step="1" style="display:none;">
+                </div>
+                <div class="field-help">Match the model is usually best. Keep the stream’s height helps with small or distant objects, at more GPU cost. Exact height lets you set the pixels yourself.</div>
             </div>
 
             <div class="form-group" id="cfg-auto-frame-throttle-group">
@@ -1764,84 +3352,6 @@
                 <div class="field-help"><span id="catchup-behind-help-scene">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span><span id="catchup-behind-help-vlm" style="display:none">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span><span id="catchup-behind-help-chain" style="display:none">How far behind live detections may fall before catch-up skips ahead. Leave blank for auto (~2s).</span></div>
             </div>
 
-            <div class="form-section chain-pipeline" id="chain-pipeline-section" style="display:none;">
-                <div class="chain-head">
-                    <div class="form-section-title">Chain Pipeline<span class="vif-help-tip" aria-label="Help" data-vif-tip="A chain runs several detectors in turn on each captured window. Every stage is an ordinary detector, and the fields you leave blank inherit that detector type's defaults."></span></div>
-                    <div class="chain-chips">
-                        <span id="chain-vod-only" class="chain-status vod-only" style="display:none;">VOD ONLY</span>
-                        <span id="chain-status" class="chain-status"></span>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Execution Mode<span class="vif-help-tip" aria-label="Help" data-vif-tip="Linear runs every stage in order. Conditional lets each stage's route pick what runs next from its detections. Dynamic hands that choice to a decision listener class installed on the server."></span></label>
-                    <div id="chain-mode" class="chain-seg" role="group">
-                        <button type="button" data-mode="linear">Linear</button>
-                        <button type="button" data-mode="conditional">Conditional</button>
-                        <button type="button" data-mode="dynamic">Dynamic</button>
-                    </div>
-                    <div class="field-help"><span id="chain-mode-help-linear">Every stage runs in order on each window.</span><span id="chain-mode-help-conditional" style="display:none">Each stage's route picks which stage runs next.</span><span id="chain-mode-help-dynamic" style="display:none">A decision listener picks which stage runs next after each run.</span></div>
-                </div>
-                <div id="chain-mode-confirm" class="inline-warning chain-confirm" style="display:none;">
-                    <span id="chain-mode-confirm-text"></span>
-                    <div class="chain-confirm-actions">
-                        <button type="button" id="chain-mode-confirm-yes" class="btn-danger"></button>
-                        <button type="button" id="chain-mode-confirm-no" class="btn-secondary">Cancel</button>
-                    </div>
-                </div>
-                <div id="chain-cadence" class="chain-cadence"></div>
-                <div id="chain-warnings" class="inline-warning chain-warnings chain-level-warnings" style="display:none;"></div>
-                <div id="chain-decision-panel" class="chain-decision" style="display:none;">
-                    <div class="chain-decision-title">Decision Listener<span class="vif-help-tip" aria-label="Help" data-vif-tip="The Java class, installed on the server, that picks the next stage or ends the window after each stage run."></span></div>
-                    <div id="chain-decision-errors" class="chain-stage-errors"></div>
-                    <div class="form-group">
-                        <label>Class Name <span class="chain-required">Required</span></label>
-                        <input type="text" id="chain-decision-class" placeholder="e.g. com.example.MyDecider" autocomplete="off" spellcheck="false">
-                    </div>
-                    <div class="form-group">
-                        <label>Decision Timeout (seconds)<span class="vif-help-tip" aria-label="Help" data-vif-tip="How long one decision may take, 5 seconds by default. On a timeout the window completes with the results it already has."></span></label>
-                        <input type="number" id="chain-decision-timeout" placeholder="5">
-                    </div>
-                    <div class="form-group">
-                        <label>Dispatch Intermediate<span class="vif-help-tip" aria-label="Help" data-vif-tip="Also deliver each intermediate stage run to the event listeners, not only the finished window. The decision listener always receives every run."></span></label>
-                        <label class="switch">
-                            <input type="checkbox" id="chain-dispatch-intermediate">
-                            <span class="slider-switch"></span>
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label>Properties<span class="vif-help-tip" aria-label="Help" data-vif-tip="Key and value pairs handed to the decision listener exactly as entered."></span></label>
-                        <div class="chain-props">
-                            <div id="chain-decision-properties"></div>
-                            <button type="button" id="chain-property-add" class="btn-secondary">+ Add property</button>
-                        </div>
-                    </div>
-                </div>
-                <div id="chain-stages" class="chain-stages"></div>
-                <div id="chain-end" class="chain-end">End of window</div>
-                <details id="chain-advanced" class="chain-disclosure chain-advanced">
-                    <summary><span class="collapse-chevron">&#9660;</span>Advanced</summary>
-                    <div class="chain-disclosure-body">
-                        <div id="chain-advanced-errors" class="chain-stage-errors"></div>
-                        <div class="form-group">
-                            <label>Max Executions<span class="vif-help-tip" aria-label="Help" data-vif-tip="The most stage runs one window may take, 8 by default. It bounds loops and revisits; a linear chain stops at whichever is smaller, this or the number of stages."></span></label>
-                            <input type="number" id="chain-max-rings" placeholder="8">
-                        </div>
-                        <div class="form-group">
-                            <label>Result Mode<span class="vif-help-tip" aria-label="Help" data-vif-tip="What event listeners — ID3, overlays and webhooks — receive per window: only the final stage’s result (a window filtered out by a routing miss delivers no detections), or every stage’s. Stored VOD results keep the full history either way."></span></label>
-                            <select id="chain-result-mode">
-                                <option value="">Default (Final)</option>
-                                <option value="final">Final (last stage)</option>
-                                <option value="combined">Combined (every stage)</option>
-                            </select>
-                        </div>
-                    </div>
-                </details>
-                <details id="chain-json" class="chain-json">
-                    <summary>View JSON</summary>
-                    <pre id="chain-json-body"></pre>
-                </details>
-            </div>
-
             <template id="vif-detector-sections">
             <!-- Object Analysis Section -->
             <div class="form-section" id="object-analysis-section">
@@ -1859,7 +3369,7 @@
                         <option value="large">Large</option>
                         <option value="custom">Custom</option>
                     </select>
-                    <div class="field-help">Choose the built-in model size or select <code>custom</code> to load custom object detection models / model weights from the checkpoint path.</div>
+                    <div class="field-help">Choose the built-in model size, or Custom to use a model of your own from Checkpoint Path.<span class="vif-help-tip" aria-label="Help" data-vif-tip="Use your own object model&#10;&#10;1. Save your trained RF-DETR model as a .pt or .pth file.&#10;2. Copy it into the Video Intelligence Service’s models folder. In the standard setup, that’s vis/models.&#10;3. Restart the Video Intelligence Service.&#10;4. Reload this page. Your model appears under Checkpoint Path under its file name, with the objects it’s trained to find.&#10;&#10;Only add model files you trust: the service can run code inside a model file when loaded."></span></div>
                 </div>
                 <div class="form-group" id="checkpoint-path-group" style="display:none;">
                     <label>Checkpoint Path</label>
@@ -2085,78 +3595,82 @@
 
             <!-- Synthetic Analysis Section -->
             <div class="form-section" id="synthetic-analysis-section" style="display:none;">
-                <div class="form-section-title"><span id="synthetic-title-synthetic">Synthetic (AI generated) Detection</span><span id="synthetic-title-verify" style="display:none">Stage 1 &mdash; Scoring (NVIDIA Synthetic Video Detector)</span></div>
+                <div class="form-section-title"><span id="synthetic-title-synthetic">AI-generated video detection</span><span id="synthetic-title-verify" style="display:none">Stage 1 &mdash; Scoring (NVIDIA Synthetic Video Detector)</span></div>
                 <div class="section-help">
-                    <span id="synthetic-help-synthetic">Relay each source H.264 window to the NVIDIA Synthetic Video Detector NIM (over gRPC) for a per-window Real-vs-Fake verdict. Opt-in / bring-your-own endpoint; H.264-only; no re-encode.</span><span id="synthetic-help-verify" style="display:none">Every window of the file is relayed to the NVIDIA Synthetic Video Detector NIM (over gRPC) and scored for AI-generated content. Blank fields inherit the Verify baseline of the Stream Config Defaults.</span>
+                    <span id="synthetic-help-synthetic">Checks each stretch of video for signs it was AI-generated and scores it. Needs an NVIDIA Synthetic Video Detector server, set below. Works with H.264 video.</span><span id="synthetic-help-verify" style="display:none">Every window of the file is relayed to the NVIDIA Synthetic Video Detector NIM (over gRPC) and scored for AI-generated content. Blank fields inherit the Verify baseline of the Stream Config Defaults.</span>
                 </div>
 
                 <div class="form-group">
-                    <label>Endpoint</label>
+                    <label>Detector server</label>
                     <div class="input-with-toggle">
-                        <input type="text" id="cfg-synthetic-endpoint" placeholder="svd.docker:8001">
-                        <button type="button" id="cfg-synthetic-endpoint-test" title="Verify that an SVD service answers at this endpoint over the chosen transport and accepts the credentials">Verify</button>
+                        <input type="text" id="cfg-synthetic-endpoint" placeholder="e.g. svd.docker:8001 (no default set)">
+                        <button type="button" id="cfg-synthetic-endpoint-test" title="Check that the detector answers at this address over the chosen connection, and accepts the key">Verify</button>
                     </div>
-                    <div class="field-help">SVD NIM as a gRPC <code>host:port</code> (not an http URL). Local sidecar: <code>svd.docker:8001</code>; NVCF hosted dev: <code>grpc.nvcf.nvidia.com:443</code>.</div>
+                    <div class="field-help">The detector&rsquo;s address as <code>host:port</code>, like <code>svd.docker:8001</code> (not a web address). For NVIDIA&rsquo;s hosted detector, use <code>grpc.nvcf.nvidia.com:443</code>. Blank uses Stream Config Defaults.</div>
                     <div id="cfg-synthetic-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
                 </div>
 
-                <div class="form-group">
-                    <label>Transport Security (TLS)</label>
-                    <select id="cfg-synthetic-use-tls">
-                        <option value="true">Force TLS (recommended)</option>
-                        <option value="">Auto-detect</option>
-                        <option value="false">Force plaintext</option>
-                    </select>
-                    <div class="field-help">Force TLS for any endpoint reached over the network (pair it with the certificate paths under <strong>TLS Certificates</strong> below; TLS uses the system trust store otherwise). Auto-detect picks TLS when any certificate path below is set or the endpoint port is <code>:443</code> (e.g. NVCF), and plaintext otherwise &mdash; plaintext is only appropriate for an in-network sidecar.</div>
-                </div>
-
-                <!-- Shown for any non-NVCF (self-hosted) endpoint: a self-hosted detector has no
-                     API-key auth, so mTLS is the only built-in client authentication. -->
-                <div id="synthetic-mtls-hint" class="inline-warning" style="display:none;">
-                    A self-hosted detector does not check API keys &mdash; anyone who can reach the
-                    endpoint can use it. If the endpoint is reachable from other machines, secure it
-                    with <strong>mutual TLS</strong> &mdash; see
-                    <a href="https://github.com/WowzaMediaSystems/wowza-video-intelligence-framework/blob/main/docs/SYNTHETIC_VIDEO_DETECTOR.md#securing-the-connection-mtls"
-                       target="_blank" rel="noopener">Securing the connection</a>
-                    in the Synthetic Video Detector guide.
-                </div>
-
-                <!-- TLS certificate paths (collapsed disclosure). Hidden for NVCF endpoints
-                     (public certs, no client-cert auth) together with the mTLS hint above. -->
-                <div id="synthetic-tls-certs-group" style="display:none;">
+                <!-- The connection settings wait behind one disclosure: most detectors run beside the
+                     stack and need none of them. It opens on its own when a config sets any. -->
+                <div id="synthetic-tls-certs-group">
                     <div class="form-group">
-                        <label style="cursor:pointer; user-select:none;"><span id="cfg-synthetic-tls-certs-caret">&#9656;</span> TLS Certificates</label>
+                        <label style="cursor:pointer; user-select:none;"><span id="cfg-synthetic-tls-certs-caret">&#9656;</span> Secure connection</label>
                     </div>
                     <div id="cfg-synthetic-tls-certs" style="display:none;">
                         <div class="form-group">
-                            <label>CA Certificate Path</label>
-                            <input type="text" id="cfg-synthetic-tls-ca-cert" placeholder="">
-                            <div class="field-help">CA (or self-signed server) certificate for verifying the detector, as a file path readable by the <strong>Video Intelligence Service</strong> (e.g. <code>/certs/ca-cert.pem</code>). Needed whenever the server certificate is not from a public CA.</div>
+                            <label>Use a secure connection</label>
+                            <select id="cfg-synthetic-use-tls">
+                                <option value="true">Always (recommended)</option>
+                                <option value="">Automatic</option>
+                                <option value="false">Never</option>
+                            </select>
+                            <div class="field-help">Use <strong>Always</strong> for a detector reached over the network. <strong>Automatic</strong> uses a secure connection when the address ends in <code>:443</code> or a certificate below is set, and a plain one otherwise. Use <strong>Never</strong> only inside your own network.</div>
                         </div>
-                        <div class="form-group">
-                            <label>Client Certificate Path</label>
-                            <input type="text" id="cfg-synthetic-tls-client-cert" placeholder="">
-                            <div class="field-help">Client certificate for mutual TLS, as a file path readable by the Video Intelligence Service. Set together with Client Key Path.</div>
+
+                        <!-- Shown for any non-NVCF (self-hosted) endpoint: a self-hosted detector has no
+                             API-key auth, so mTLS is the only built-in client authentication. -->
+                        <div id="synthetic-mtls-hint" class="inline-warning" style="display:none;">
+                            A detector you run yourself doesn&rsquo;t check keys: anyone who can reach it can use it.
+                            If other machines can reach it, secure it with certificates (see
+                            <a href="https://github.com/WowzaMediaSystems/wowza-video-intelligence-framework/blob/main/docs/SYNTHETIC_VIDEO_DETECTOR.md#securing-the-connection-mtls"
+                               target="_blank" rel="noopener">Securing the connection</a>
+                            in the Synthetic Video Detector guide).
                         </div>
-                        <div class="form-group">
-                            <label>Client Key Path</label>
-                            <div class="secret-slot">
-                                <select id="cfg-synthetic-tls-client-key-source" class="secret-source">
-                                    <option value="stored">Use a stored secret</option>
-                                    <option value="value">Enter a value</option>
-                                </select>
-                                <div id="cfg-synthetic-tls-client-key-value-row">
-                                    <input type="text" id="cfg-synthetic-tls-client-key" placeholder="">
-                                    <button type="button" class="secret-save-as" disabled title="Store the typed value in the secrets document and use it by name">Save as secret</button>
-                                </div>
-                                <div class="secret-store-row" id="cfg-synthetic-tls-client-key-store-row" style="display:none">
-                                    <input type="text" id="cfg-synthetic-tls-client-key-store-name" placeholder="secret name">
-                                    <button type="button" class="secret-store-confirm">Save</button>
-                                    <button type="button" class="secret-store-cancel">Cancel</button>
-                                </div>
-                                <select id="cfg-synthetic-tls-client-key-secret" style="display:none"></select>
+
+                        <!-- Certificate paths. Hidden for NVCF endpoints (public certs, no client-cert
+                             auth) together with the hint above. -->
+                        <div id="synthetic-tls-cert-fields">
+                            <div class="field-help" style="margin-bottom:8px;">Each certificate is a file path on the analysis service&rsquo;s machine, like <code>/certs/ca-cert.pem</code>.</div>
+                            <div class="form-group">
+                                <label>Server certificate (CA)</label>
+                                <input type="text" id="cfg-synthetic-tls-ca-cert" placeholder="">
+                                <div class="field-help">Checks the detector&rsquo;s certificate. Needed when it isn&rsquo;t from a public certificate authority. Blank uses Stream Config Defaults.</div>
                             </div>
-                            <div class="field-help">Private key for the client certificate above, as a file path readable by the Video Intelligence Service.</div>
+                            <div class="form-group">
+                                <label>Client certificate</label>
+                                <input type="text" id="cfg-synthetic-tls-client-cert" placeholder="">
+                                <div class="field-help">Proves this stream to the detector (mutual TLS). Set it together with the client key. Blank uses Stream Config Defaults.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Client key</label>
+                                <div class="secret-slot">
+                                    <select id="cfg-synthetic-tls-client-key-source" class="secret-source">
+                                        <option value="stored">Use a stored secret</option>
+                                        <option value="value">Enter a value</option>
+                                    </select>
+                                    <div id="cfg-synthetic-tls-client-key-value-row">
+                                        <input type="text" id="cfg-synthetic-tls-client-key" placeholder="">
+                                        <button type="button" class="secret-save-as" disabled title="Store the typed value in the secrets document and use it by name">Save as secret</button>
+                                    </div>
+                                    <div class="secret-store-row" id="cfg-synthetic-tls-client-key-store-row" style="display:none">
+                                        <input type="text" id="cfg-synthetic-tls-client-key-store-name" placeholder="secret name">
+                                        <button type="button" class="secret-store-confirm">Save</button>
+                                        <button type="button" class="secret-store-cancel">Cancel</button>
+                                    </div>
+                                    <select id="cfg-synthetic-tls-client-key-secret" style="display:none"></select>
+                                </div>
+                                <div class="field-help">The private key for the client certificate. Blank uses Stream Config Defaults.</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2188,20 +3702,33 @@
                             </div>
                             <select id="cfg-synthetic-api-key-secret" style="display:none"></select>
                         </div>
-                        <div class="field-help">Bearer token for NVIDIA&rsquo;s hosted endpoint &mdash; use an <strong>invocation-scoped</strong> key (an NGC pull key is not authorized to invoke); a value typed here, or a secret picked by name (rotates centrally on the Secrets page).</div>
+                        <div class="field-help">Bearer token for NVIDIA&rsquo;s hosted endpoint &mdash; use an <strong>invocation-scoped</strong> key (an NGC pull key is not authorized to invoke); a value typed here, or a secret picked by name (rotates centrally on the Secrets page). Blank uses Stream Config Defaults.</div>
                     </div>
 
                     <div class="form-group">
                         <label>Function ID</label>
                         <input type="text" id="cfg-synthetic-function-id" placeholder="">
-                        <div class="field-help">NVCF function id (sent as <code>function-id</code> metadata).</div>
+                        <div class="field-help">NVCF function id (sent as <code>function-id</code> metadata). Blank uses Stream Config Defaults.</div>
                     </div>
                 </div>
 
                 <div class="form-group" id="cfg-synthetic-classification-threshold-group">
-                    <label>Classification Threshold</label>
-                    <input type="number" id="cfg-synthetic-classification-threshold" value="" placeholder="0.3" min="0" max="1" step="0.05">
-                    <div class="field-help">Score above which a window is classified <code>synthetic</code> (0.0&ndash;1.0). NIM reference default 0.3 (conservative); 0.5 balanced.</div>
+                    <label>How strict</label>
+                    <div class="input-with-toggle">
+                        <select id="synthetic-strictness" title="Pick a setting, or set your own beside it">
+                            <option value="default">Default</option>
+                            <option value="balanced">Balanced (44%)</option>
+                            <option value="catch">Catch more (26%)</option>
+                            <option value="custom">My own setting</option>
+                        </select>
+                        <span id="synthetic-strictness-own-row" style="display:none; align-items:center; gap:6px;">
+                            <label class="inline-field-label" for="synthetic-strictness-own">Flag video scoring above</label>
+                            <input type="number" id="synthetic-strictness-own" value="" min="0" max="100" step="1" style="width:80px; flex:0 0 auto;">
+                            %
+                        </span>
+                        <input type="number" id="cfg-synthetic-classification-threshold" value="" placeholder="0.3" min="0" max="1" step="0.01" style="display:none">
+                    </div>
+                    <div class="field-help">A stretch of video counts as AI-generated when its score is above the setting. <strong>Balanced</strong> (44%) suits most uses. <strong>Catch more</strong> (26%) misses fewer AI-generated videos but flags more real ones.</div>
                 </div>
             </div>
 
@@ -2243,17 +3770,17 @@
                 </div>
 
                 <div class="form-group">
-                    <label>VLM Server</label>
+                    <label>AI model server</label>
                     <div class="input-with-toggle">
                         <input type="text" id="cfg-vlm-endpoint-url" placeholder="vlm.docker:8000">
-                        <button type="button" id="cfg-vlm-endpoint-test" title="Verify the VLM server and that it serves the configured model">Verify</button>
+                        <button type="button" id="cfg-vlm-endpoint-test" title="Check that the server answers and runs this model">Verify</button>
                     </div>
-                    <div class="field-help">Address of the VLM server (e.g. <em>vlm.docker:8000</em>). If omitted, <code>http://</code> and the <code>/v1</code> path are added on save; an explicit scheme or path is kept as typed. Leave empty to use the default.</div>
+                    <div class="field-help">The address of the server that runs the AI model, like <em>vlm.docker:8000</em>. <code>http://</code> and <code>/v1</code> are added if you leave them out. Blank uses Stream Config Defaults.</div>
                     <div id="cfg-vlm-endpoint-test-result" class="endpoint-test-result" style="display:none;"></div>
                 </div>
 
                 <div class="form-group">
-                    <label>API Key</label>
+                    <label>Server key</label>
                     <div class="secret-slot">
                         <select id="cfg-vlm-api-key-source" class="secret-source">
                             <option value="stored">Use a stored secret</option>
@@ -2272,13 +3799,13 @@
                         </div>
                         <select id="cfg-vlm-api-key-secret" style="display:none"></select>
                     </div>
-                    <div class="field-help">API key for authenticating with the VLM endpoint — a value typed here, or a secret picked by name (rotates centrally on the Secrets page, no config change).</div>
+                    <div class="field-help">The key the AI model server needs, if it needs one. Type it here, or pick a stored secret, which you can change later on the Secrets page without editing this config.</div>
                 </div>
 
                 <div class="form-group">
-                    <label>Request Timeout (seconds)</label>
+                    <label>Wait for an answer <br class="label-break">(seconds)</label>
                     <input type="number" id="cfg-vlm-request-timeout" value="" placeholder="30" min="0" step="0.1">
-                    <div class="field-help">Timeout in seconds for each VLM API request.</div>
+                    <div class="field-help">How long to wait for the AI model server to answer each request, including time waiting in its queue. Streams that use the same server and key all wait as long as the first one to connect.</div>
                 </div>
 
                 <div id="vlm-analysis-prompting">
@@ -2317,13 +3844,13 @@
                          per-class verdicts. High (default) is most robust; Low/Medium trade
                          robustness for speed. VIS applies the per-level presets server-side. -->
                     <div class="form-group">
-                        <label>Reasoning Level</label>
+                        <label>How carefully it checks</label>
                         <div id="cfg-vlm-reasoning-level" style="display:flex; gap:18px; align-items:center; margin:4px 0;">
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="low" checked> Low</label>
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="medium"> Medium</label>
-                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="high"> High</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="low" checked> Quick</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="medium"> Balanced</label>
+                            <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-reasoning-level" value="high"> Careful</label>
                         </div>
-                        <div class="field-help">How much the model deliberates before answering. <strong>Low</strong> is fastest; <strong>High</strong> is most robust against false positives. Applies to Detect only.</div>
+                        <div class="field-help"><strong>Careful</strong> makes the fewest false alarms but answers slowest. <strong>Quick</strong> answers fastest.</div>
                     </div>
                 </div>
 
@@ -2336,51 +3863,51 @@
 
                 <div id="vlm-mode-custom" class="vlm-mode-panel" style="display:none;">
                     <div class="form-group" style="display:block;">
-                        <button type="button" class="btn-secondary" style="font-weight:600; margin-left:calc(var(--form-label-width) + 10px);">Prompting guide &amp; defaults</button>
+                        <button type="button" class="btn-secondary vlm-guide-button" style="font-weight:600; margin-left:calc(var(--form-label-width) + 10px);">How to write instructions</button>
                     </div>
                     <div id="vlm-guide-modal" class="overlay-backdrop">
                         <div class="overlay-card" style="width:min(880px,100%); max-height:85vh; overflow-y:auto;">
                             <button type="button" class="btn-secondary overlay-close" title="Close">&times;</button>
-                            <h3 style="margin:0 28px 8px 0;">VLM prompting guide</h3>
+                            <h3 style="margin:0 28px 8px 0;">Writing your own instructions</h3>
                             <div id="vlm-prompt-guide"></div>
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>System Prompt</label>
-                        <textarea id="cfg-vlm-system-prompt" rows="3" placeholder="Leave empty to use the built-in default."></textarea>
-                        <div class="field-help">Optional. Overrides the built-in system prompt. Supports the placeholders listed under the user prompt.</div>
+                        <label>Background <br class="label-break">for the model</label>
+                        <textarea id="cfg-vlm-system-prompt" rows="3" placeholder="Blank uses a built-in one."></textarea>
+                        <div class="field-help">Optional. Who the model is and the rules it follows for every answer, like &ldquo;You are a safety inspector at a construction site.&rdquo; Blank uses a built-in one. It can use the same <code>{class_list}</code>, <code>{frame_count}</code> and <code>{duration_seconds}</code> as your instructions.</div>
                     </div>
                     <div class="form-group">
-                        <label>User Prompt <span style="color:#d64541;">*</span></label>
-                        <textarea id="cfg-vlm-user-prompt" rows="4" placeholder="Required in Custom mode &mdash; your instruction to the model."></textarea>
-                        <div class="field-help">Required in Custom mode. Placeholders (substituted in both prompts): <code>{class_list}</code> (the classes below, when set), <code>{frame_count}</code> (images in the window), <code>{duration_seconds}</code> (window length in seconds).</div>
+                        <label>Your instructions <span style="color:#d64541;">*</span></label>
+                        <textarea id="cfg-vlm-user-prompt" rows="4" placeholder="What the model should do with each clip, like &ldquo;Is anyone climbing the fence? Answer yes or no, then explain.&rdquo;"></textarea>
+                        <div class="field-help">Required. What the model should do with each clip. These are filled in before it&rsquo;s sent: <code>{class_list}</code> (the list below), <code>{frame_count}</code> (how many pictures it gets), <code>{duration_seconds}</code> (how long the clip is).</div>
                     </div>
                     <!-- Same per-class repeater as Detect mode (class + optional hint),
                          align-items:flex-start so the label stays pinned beside the
                          first row. The classes feed {class_list} in the operator's
                          prompts; a hint is inlined as `- class: hint`. -->
                     <div class="form-group" style="align-items:flex-start;">
-                        <label>Classes (optional)</label>
+                        <label>List to fill in <br class="label-break"><code>{class_list}</code></label>
                         <div style="flex:1; min-width:0;">
                             <div id="cfg-vlm-custom-classes"></div>
-                            <button type="button" class="btn-secondary" style="margin-top:6px;">+ Add class</button>
+                            <button type="button" class="btn-secondary" style="margin-top:6px;">+ Add item</button>
                         </div>
-                        <div class="field-help">Optional. One row per class, each with an optional hint. Injected wherever <code>{class_list}</code> appears in your prompts (a class with a hint renders as <code>- class: hint</code>). Leave empty for prompts that don't reference a class list.</div>
-                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#d64541;">Classes are set but neither prompt contains <code>{class_list}</code>, so the classes won't be injected into the prompt.</div>
+                        <div class="field-help">Optional. One item per row, each with an optional hint. The list goes wherever <code>{class_list}</code> appears in your instructions or the background, an item with a hint as <code>- item: hint</code>. Leave it empty if neither uses <code>{class_list}</code>.</div>
+                        <div id="vlm-custom-classlist-warning" class="field-help" style="display:none; color:#d64541;">The list is set, but neither your instructions nor the background contain <code>{class_list}</code>, so it won&rsquo;t be sent.</div>
                     </div>
                     <!-- align-items:flex-start so the label pins to the top of the
                          kind selector / sub-editor stack. -->
                     <div class="form-group" style="align-items:flex-start;">
-                        <label>Output Schema</label>
+                        <label>Answer format</label>
                         <div style="flex:1; min-width:0;">
                             <!-- Output kind: Free-form (default) leaves output free; Per-class
                                  verdicts posts the built-in detection schema (relayed live from
                                  VIS at /vlm/defaults) so VIS enforces the {class_name, reasoning}
                                  contract; Custom reveals the Fields/Raw builder. -->
-                            <div id="cfg-vlm-schema-kind" style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:2px 0;">
-                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="freeform" checked> Free-form</label>
-                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="default"> Per-class verdicts</label>
-                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="custom"> Custom schema</label>
+                            <div id="cfg-vlm-schema-kind" style="display:flex; flex-direction:column; gap:10px; align-items:flex-start; margin:2px 0;">
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:8px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="freeform" checked> In its own words</label>
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:8px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="default"> Yes or no for each list item</label>
+                                <label class="inline-control-label" style="display:inline-flex; align-items:center; gap:8px; font-weight:normal;"><input type="radio" name="vlm-schema-kind" value="custom"> Fields you name</label>
                             </div>
                             <div id="vlm-schema-kind-help" class="field-help" style="margin-left:0; margin-top:4px;"></div>
                             <!-- Custom schema editor (shown only for the Custom kind). -->
@@ -2412,14 +3939,14 @@
                 </div>
                 <div id="cfg-vlm-advanced" style="display:none;">
                     <div class="form-group">
-                        <label>Temperature</label>
+                        <label>Randomness <br class="label-break">(temperature)</label>
                         <input type="number" id="cfg-vlm-temperature" value="" placeholder="0.0" min="0" max="2" step="0.01">
-                        <div class="field-help">Controls randomness in model output. Lower values are more deterministic.</div>
+                        <div class="field-help">How much the answers vary, from 0 to 2. At 0 the same picture gets the same answer; higher adds variety, and more mistakes.</div>
                     </div>
                     <div class="form-group">
-                        <label>Max Tokens</label>
+                        <label>Longest answer <br class="label-break">(tokens)</label>
                         <input type="number" id="cfg-vlm-max-tokens" value="" placeholder="256" min="1" max="4096" step="1">
-                        <div class="field-help">Maximum number of tokens in the VLM response.</div>
+                        <div class="field-help">The most the model may write per answer, in tokens of about three quarters of a word each. An answer that reaches it is cut off, so raise it if answers end mid-sentence.</div>
                     </div>
                 </div>
 
@@ -2434,26 +3961,26 @@
         </div>
 
         <!-- Advanced Options Panel -->
-        <div class="form-wrapper has-header collapsed">
+        <div class="form-wrapper has-header collapsed" id="advanced-options-panel">
             <div class="form-panel-header collapsible-header collapsed" onclick="togglePanel(this)" title="Expand/collapse advanced options">
                 <span class="collapse-chevron">&#9660;</span>
                 Advanced Options
             </div>
             <div class="collapsible-body collapsed">
-                <div class="form-section-title">Service Connection</div>
+                <div class="form-section-title">Service connection</div>
                 <div class="section-help">
-                    Service connection overrides. Leave blank to inherit defaults.
+                    Where this stream’s video goes for analysis. Leave a box blank to use Stream Config Defaults.
                 </div>
 
                 <div class="form-group">
-                    <label>VIS URL</label>
+                    <label>Analysis service address</label>
                     <input type="text" id="cfg-vi-service-url" value="" placeholder="inherited from default config"
                            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-                    <div class="field-help">Override the Video Intelligence Service (VIS) WebSocket URL for this stream only. Supports <code>${ENV_VAR}</code> substitution.</div>
+                    <div class="field-help">Change this only to send this stream to a different analysis service. Blank uses the address in Stream Config Defaults. Enter the full address ending in a slash, like <code>ws://host:5001/ws/stream/</code>: Streaming Engine automatically adds the stream name after it. Variable names like <code>${VIS_HOST}</code> are filled in from Streaming Engine’s own environment settings.</div>
                 </div>
 
                 <div class="form-group">
-                    <label>VIS API Key</label>
+                    <label>Analysis service key</label>
                     <div class="secret-slot">
                         <select id="cfg-vi-service-api-key-source" class="secret-source" onchange="secretSourceChanged('cfg-vi-service-api-key')">
                             <option value="stored">Use a stored secret</option>
@@ -2463,7 +3990,7 @@
                             <input type="password" id="cfg-vi-service-api-key" value="" placeholder="inherited from default config"
                                    autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
                             <button type="button" id="cfg-vi-service-api-key-toggle" onclick="toggleVisServiceApiKeyVisibility()" title="Show/hide API key">Show</button>
-                            <button type="button" id="cfg-vi-service-api-key-clear" onclick="clearVisServiceApiKey()" title="Stop overriding the API key for this stream">Disable</button>
+                            <button type="button" id="cfg-vi-service-api-key-clear" onclick="clearVisServiceApiKey()" title="Stop using this stream’s own key">Use default key</button>
                             <button type="button" class="secret-save-as" disabled onclick="promptStoreSecret('cfg-vi-service-api-key')" title="Store the typed value in the secrets document and use it by name">Save as secret</button>
                         </div>
                         <div class="secret-store-row" id="cfg-vi-service-api-key-store-row" style="display:none">
@@ -2473,25 +4000,24 @@
                         </div>
                         <select id="cfg-vi-service-api-key-secret" style="display:none" onchange="markDirty()"></select>
                     </div>
-                    <div class="field-help">Override the <code>X-API-KEY</code> header sent to the Video Intelligence Service (VIS) for this stream only.
-                        A stored key is never shown, so this field is blank even when one is set &mdash; <strong>Disable</strong> is how you drop it and go back to the default config's key. Or pick a stored secret: the name is readable, and rotating it on the Secrets page applies on the next reconnect.</div>
+                    <div class="field-help">The key this stream sends to the analysis service, if it needs one. Blank uses the key from Stream Config Defaults. A saved key is never shown again, so the box stays blank even when one is set. Or pick a stored secret: its name shows, and changing it on the Secrets page applies the next time the stream connects.</div>
                 </div>
                 <hr>
-                <div class="form-section-title" style="margin-top:12px;">Debug Options</div>
+                <div class="form-section-title" style="margin-top:12px;">Troubleshooting</div>
                 <div class="section-help">
-                    Troubleshooting settings for this stream. Leave blank to inherit defaults.
+                    Leave a box blank to use Stream Config Defaults.
                 </div>
 
                 <div class="form-group">
-                    <label>Log Max Messages</label>
+                    <label>Messages to log</label>
                     <input type="number" id="cfg-log-max-messages" value="" placeholder="20" min="0" max="1000" step="1">
-                    <div class="field-help">Maximum VIF/WebSocket messages written to the WSE access log. Use 0 to disable.</div>
+                    <div class="field-help">How many messages to and from the analysis service the Engine writes to its log each time the stream connects, 20 by default. 0 logs none.</div>
                 </div>
 
                 <div class="form-group">
-                    <label>Log Timing</label>
+                    <label>Timing log every (seconds)</label>
                     <input type="number" id="cfg-log-timing" value="" placeholder="0" min="0" max="60" step="1">
-                    <div class="field-help">Delay in seconds between writing logging details/timing metrics to /tmp/vif/&lt;stream_name&gt;. 0 is disabled.</div>
+                    <div class="field-help">Writes a timing file this often to <code>/tmp/vif/&lt;stream name&gt;</code> on the Engine, a folder that’s emptied each time the stream starts. 0 turns it off.</div>
                 </div>
             </div>
         </div>
@@ -2506,7 +4032,7 @@
             </div>
             <div class="collapsible-body">
             <div class="section-help">
-                Event listeners are triggered by detections. Pick one from the Configured Listeners list to edit it, or Create New Listener to add another one. Listener type stays fixed after creation.
+                Event listeners are triggered by detections. Pick one from the list to edit it, or use Add a destination to add another.
             </div>
             <div id="evt-synthetic-overlay-warning" class="inline-warning" style="display:none;"></div>
             <div class="form-group" id="cfg-rollup-batch-interval-group">
@@ -2520,24 +4046,24 @@
                 <div class="listener-list-actions">
                     <button id="evt-cancel-listener-btn" type="button" class="btn-secondary" onclick="cancelListenerSelection()" style="display:none;">Cancel</button>
                     <button id="evt-remove-listener-btn" class="btn-danger" onclick="removeListener()" style="display:none;">Remove</button>
-                    <button id="evt-show-new-listener-btn" type="button" onclick="openNewListenerForm()">Create New Listener</button>
+                    <button id="evt-show-new-listener-btn" type="button" class="evt-add-destination" onclick="openNewListenerForm()">+ Add a destination</button>
                 </div>
             </div>
             <div id="evt-warning-message" class="inline-warning" style="display:none;"></div>
             <div id="evt-new-listener-name-group" class="listener-create-group" style="display:none;">
                 <hr>
-                <div class="form-section-title">Create New Listener</div>
+                <div class="form-section-title">New destination</div>
                 <div class="form-group">
                     <label>Listener Type</label>
                     <select id="evt-new-listener-template" class="listener-create-template">
                         <option value="">Select listener type...</option>
                     </select>
-                    <div class="field-help">The type stays fixed after creation.</div>
+                    <div class="field-help">You can change this until you save. After that, delete the listener and create a new one.</div>
                 </div>
                 <div class="form-group" id="evt-new-listener-name-row">
                     <label>Listener Name</label>
                     <input type="text" id="evt-new-listener-name" class="listener-create-name-field" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-                    <div class="field-help">Must be unqiue. Edit the suggested name before creating if you want a different one.</div>
+                    <div class="field-help">Must be unique. Edit the suggested name if you want a different one.</div>
                 </div>
                 <div class="listener-create-actions">
                     <button id="evt-add-listener-btn" onclick="addNewListener()">Create</button>
@@ -2552,7 +4078,7 @@
                         <option value="">Select...</option>
                     </select>
                     <div id="evt-class-name-readonly" class="listener-name-preview" style="display:none;"></div>
-                    <div id="evt-class-name-help" class="field-help">Choose the listener type for this new custom listener. After creation, the type stays fixed.</div>
+                    <div id="evt-class-name-help" class="field-help">You can change this until you save.</div>
                 </div>
                 <div class="form-group">
                     <label>Method</label>
@@ -2596,16 +4122,22 @@
 
 
     </div>
+    </div>
 
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-chain-editor.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-nav.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-field-registry.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-chain-editor.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-chain-presets.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-chain-steps.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-chain-builder.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-listeners.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-stream-config.js?v=1.2.1"></script>
 <script>
+    VIF.nav.mount(document.getElementById('vif-sidenav'), { active: 'stream-config' });
     VIF.streamConfig.init();
     VIF.core.initClickTips(document.querySelector('.content-wrapper.vif-plugin'));
 

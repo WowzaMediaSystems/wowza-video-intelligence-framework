@@ -1,6 +1,6 @@
-  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.2.0"></script>
+  <script src="wse-plugins/server/vif/vendor/hls.min.js?v=1.2.1"></script>
 
-  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
+  <link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.1">
   <style>
     @media (max-width: 767px) {
       .vif-plugin .hidden-xs { display: none !important; }
@@ -37,6 +37,9 @@
     }
 
     .vif-plugin .url-input-group label { font-weight: bold; }
+
+    /* The Manager's .container-full pads the sides only; match the other pages' top gap. */
+    .vif-plugin .vif-main.container-full { padding-top: 16px; }
 
     .vif-plugin .url-input-group input[type="text"] {
       display: block;
@@ -339,6 +342,14 @@
 
     .vif-plugin .log-display { white-space: pre-wrap; }
 
+    /* The Formatted View reads as text in white cards on a gray panel; the Raw JSON Log stays monospace. */
+    .vif-plugin .event-display {
+      background: #f4f5f7;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+    }
+
     .vif-plugin .log-entry {
       margin-bottom: 8px;
       padding-bottom: 8px;
@@ -362,18 +373,18 @@
     }
 
     .vif-plugin .event-item {
-      margin-bottom: 6px;
-      padding: 6px 8px;
+      margin-bottom: 10px;
+      padding: 8px 12px;
       background: #fff;
-      border: 1px solid #e3e6ea;
+      border: 1px solid #dde1e6;
       border-left: 3px solid #f08a00;
       border-radius: 3px;
     }
 
     .vif-plugin .event-time {
-      color: #555;
-      /*font-size: 12px;*/
-      font-weight: bold;
+      color: #6b7480;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
       margin-bottom: 3px;
     }
 
@@ -468,6 +479,102 @@
       color: #555;
     }
 
+    /* A chain clip: what it found in one line, then one row per step, label left, finds right.
+       Three sizes: 14px for the clip's line, 13px for what steps found, 12px for labels and links. */
+    .vif-plugin .chain-summary {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1b2430;
+      margin: 0 0 6px;
+    }
+    .vif-plugin .chain-unavailable {
+      font-size: 12px;
+      font-weight: 400;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(217,83,79,0.12);
+      color: #a94442;
+      white-space: nowrap;
+    }
+    .vif-plugin .event-item-chain { container-type: inline-size; }
+    .vif-plugin .chain-step {
+      display: grid;
+      grid-template-columns: 9.5em minmax(0, 1fr);
+      column-gap: 10px;
+      padding: 5px 0;
+      border-top: 1px solid #eef0f2;
+    }
+    /* A narrow card puts each step's label above its finds, so the finds keep the full width. */
+    @container (max-width: 460px) {
+      .vif-plugin .chain-step { grid-template-columns: minmax(0, 1fr); }
+      .vif-plugin .chain-step-head { padding: 0 0 2px; }
+    }
+    .vif-plugin .chain-step-head {
+      font-size: 12px;
+      color: #5d6771;
+      padding-top: 3px;
+    }
+    .vif-plugin .chain-step-name {
+      display: block;
+      font-weight: 400;
+      color: #8a939c;
+    }
+    .vif-plugin .chain-step-none {
+      color: #8a939c;
+    }
+    .vif-plugin .chain-group + .chain-group,
+    .vif-plugin .chain-answer + .chain-answer,
+    .vif-plugin .chain-call + .chain-call { margin-top: 3px; }
+    .vif-plugin .event-item-chain .detection-label {
+      margin-bottom: 0;
+      font-size: 13px;
+      font-weight: 400;
+      padding: 1px 6px;
+    }
+    .vif-plugin .detection-label.chain-chip-plain {
+      background: #f1f3f5;
+      color: #5d6771;
+      border: 1px solid #dfe3e7;
+    }
+    .vif-plugin .chain-group-detail,
+    .vif-plugin .chain-reason {
+      color: #5d6771;
+      margin-left: 4px;
+    }
+    .vif-plugin .chain-rest { margin-top: 3px; }
+    .vif-plugin .chain-rest > summary { font-size: 12px; cursor: pointer; color: #c87f0a; }
+    .vif-plugin .chain-rest[open] > summary { margin-bottom: 3px; }
+    .vif-plugin .chain-each { display: inline; margin-left: 6px; font-size: 12px; }
+    .vif-plugin .chain-each summary { display: inline; cursor: pointer; color: #c87f0a; }
+    .vif-plugin .chain-each ul { margin: 3px 0 0 1em; padding: 0; color: #5d6771; }
+    .vif-plugin .event-item-chain .chain-prose {
+      font-size: 13px;
+      font-style: normal;
+      color: #222;
+      line-height: 1.5;
+      margin: 0;
+    }
+    .vif-plugin .chain-prose.clamped {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .vif-plugin .chain-more {
+      border: 0;
+      background: none;
+      padding: 0;
+      font-size: 12px;
+      color: #c87f0a;
+      cursor: pointer;
+    }
+    .vif-plugin .chain-cut {
+      display: inline-block;
+      margin-top: 3px;
+      font-size: 12px;
+      color: #8a939c;
+    }
+
     .vif-plugin .hidden { display: none; }
 
     .vif-plugin .placeholder-text {
@@ -531,8 +638,8 @@
       /*.log-timestamp { font-size: 0.85rem; }*/
 
       .vif-plugin .event-item {
-        margin-bottom: 8px;
-        padding: 8px 10px;
+        margin-bottom: 12px;
+        padding: 10px 12px;
         border-left: 3px solid #f08a00;
         border-radius: 3px;
       }
@@ -540,53 +647,19 @@
       /*.event-time { font-size: 0.85rem; }*/
     }
 
-    /* Header button: the shared quiet white/outline family, sized in px like
-       vif.css's shared header rule (playback's other buttons are .btn/.btn-primary,
-       so this stays a dedicated class). */
-    .vif-plugin .back-to-dashboard {
-      padding: 8px 14px;
-      font-family: inherit;
-      font-size: 12px;
-      line-height: 1.5;
-      font-weight: 600;
-      cursor: pointer;
-      background: #fff;
-      border: 1px solid #cfd4da;
-      color: #1b2430;
-      border-radius: 3px;
-      margin-bottom: 0;
-    }
-    .vif-plugin .back-to-dashboard:hover { background: #f5f6f7; border-color: #b9c0c8; }
-
-    /* Sticky page header with the "VIF Playback" title (title style shared via
-       vif.css .vif-header-title). */
-    .vif-plugin .sticky-page-header {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      background: #fff;
-    }
-    .vif-plugin .streams-header {
-      align-items: center;
-      margin-bottom: 10px;
-      border-bottom-color: #e3e6ea;
-    }
   </style>
 
 
-  <div class="container-full vif-plugin">
-    <!-- Deliberately OFF the global tab row: playback is a per-stream tool you
-         reach from a dashboard row, not a destination. It names itself and
-         offers the one way back — which must tear the player session down
-         first, or the hls instance keeps streaming under the next page. -->
-    <div class="sticky-page-header">
-      <div class="streams-header">
-        <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Playback</h2>
-        <div class="item-right">
-          <button class="back-to-dashboard" onclick="window.__vifPlaybackDestroy && window.__vifPlaybackDestroy(); loadAjaxPluginContent('server','vif','shm.html','')">Back to Dashboard</button>
-        </div>
-      </div>
+  <div class="vif-plugin vif-shell">
+  <nav id="vif-sidenav" class="vif-sidenav" aria-label="VIF pages"></nav>
+  <div class="container-full vif-plugin vif-main">
+    <!-- A per-stream tool reached from a Live Streams row, so no menu entry is
+         lit. Leaving through the menu tears the player session down first, or
+         the hls instance keeps streaming under the next page. -->
+    <div class="vif-page-head">
+      <h2 class="vif-page-title">Playback</h2>
     </div>
+
     <div class="controls-section">
       <div class="url-input-group">
         <label>Stream URL:</label>
@@ -674,14 +747,25 @@
       </div>
     </div>
   </div>
+  </div>
 
-  <script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
-  <script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
-  <script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
-  <script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.0"></script>
-  <script src="wse-plugins/server/vif/js/vif-playback.js?v=1.2.0"></script>
+  <script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-nav.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.1"></script>
+  <!-- A chain's steps read in the builder's words: their kind labels and given names. -->
+  <script src="wse-plugins/server/vif/js/vif-chain-presets.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-chain-builder.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-chain-results.js?v=1.2.1"></script>
+  <script src="wse-plugins/server/vif/js/vif-playback.js?v=1.2.1"></script>
   <script>
+    VIF.nav.mount(document.getElementById('vif-sidenav'), {
+        active: null,
+        beforeLeave: function () { if (window.__vifPlaybackDestroy) window.__vifPlaybackDestroy(); }
+    });
     VIF.playback.init();
     // Same click-popover help tips as the dashboard (the Overlay "?").
     VIF.core.initClickTips(document.querySelector('.container-full.vif-plugin'));
+    VIF.core.armTabCounts();
   </script>

@@ -19,7 +19,7 @@
   --n100:#f5f6f7; --n200:#e8eaed; --n300:#d9dde1; --n400:#b3bac1; --n500:#8b95a1; --n900:#1b2430;
   /* score-strip class hues (Okabe-Ito, colorblind-safe); count must match STRIP_HUES in vod-report.js */
   --strip-c0:#0072b2; --strip-c1:#e69f00; --strip-c2:#009e73; --strip-c3:#cc79a7;
-  --strip-c4:#56b4e9; --strip-c5:#d55e00; --strip-other:#8a8a8a;
+  --strip-c4:#56b4e9; --strip-c5:#d55e00; --strip-other:radial-gradient(circle at center,#5d6771 0 1.2px,#dfe3e7 1.7px) 0 0/5px 5px;
   --ink-78:#3d4854; --ink-60:#5d6771; --ink-52:#6b7480; --ink-40:#6b7480;
   --mono:ui-monospace,Menlo,Consolas,"Cascadia Mono",monospace;
   font-size:13.5px;line-height:1.5;color:var(--ink);
@@ -148,6 +148,25 @@
 .vif-vod .frow:hover{background:var(--n100)}
 .vif-vod .frow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .vif-vod .frow .fdel{flex-shrink:0;padding:1px 7px;font-size:11px;line-height:1.4}
+.vif-vod .fplay{flex-shrink:0;padding:1px 7px;font-size:11px;line-height:1.4}
+.vif-vod .fplay:hover{color:var(--accent)}
+.vif-vod .pvstage{aspect-ratio:16/9;background:#000;border-radius:3px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.vif-vod .pvstage.off{display:none}
+.vif-vod .pvstage video{width:100%;height:100%;display:block}
+.vif-vod .pvnote{margin-top:10px;font-size:12.5px;color:var(--ink-52)}
+.vif-vod .pvstage.off+.pvnote{margin-top:0;color:inherit;line-height:1.5}
+.vif-vod .pv{display:flex;flex-wrap:wrap;align-items:center;column-gap:12px}
+.vif-vod .pv .pvstage{flex:0 0 100%}
+.vif-vod .pv .pvnote{flex:1 1 auto}
+.vif-vod .pv .pspeed{margin-top:10px}
+.vif-vod .pvstage.off~.pspeed{display:none}
+/* The row under a report's player: one 16px line box for every control (a speed button is 14px
+   and its borders). In a column too narrow for one line the hint keeps the first and the controls wrap under it. */
+.vif-vod .prow{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:6px;line-height:16px}
+.vif-vod .pspeed{display:inline-flex;align-items:center;gap:2px;font-size:11.5px;color:var(--ink-52)}
+.vif-vod .pspeed>span{margin-right:4px}
+.vif-vod .pspeed button{font:inherit;font-size:11px;line-height:14px;padding:0 6px;border:1px solid var(--divider-strong);border-radius:3px;background:var(--bg);color:var(--ink-52);cursor:pointer}
+.vif-vod .pspeed button.on{background:var(--accent-100);border-color:var(--accent-200);color:var(--accent-700);font-weight:600}
 .vif-vod .frow:last-child{border-bottom:none}
 .vif-vod .frow .fn{font-family:var(--mono);font-weight:600;flex:1;word-break:break-all}
 .vif-vod .frow .fs{font-family:var(--mono);color:var(--ink-52);width:74px;text-align:right;flex-shrink:0}
@@ -210,7 +229,7 @@
 .vif-vod .rpbar.syn i{background:var(--alert-color)}
 .vif-vod .stripblock{margin-bottom:4px}
 .vif-vod .rbody{display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:20px 0 26px}
-@media (max-width:980px){.vif-vod .rbody{grid-template-columns:1fr}}
+@media (max-width:980px){.vif-vod .rbody{grid-template-columns:minmax(0,1fr)}}
 .vif-vod .wlist{max-height:430px;overflow-y:auto;border:1px solid var(--divider);border-radius:3px}
 .vif-vod .wrow{display:flex;gap:12px;padding:7px 10px;border-bottom:1px solid var(--divider);font-size:12px;align-items:baseline;flex-wrap:wrap}
 .vif-vod .wrow:last-child{border-bottom:none}
@@ -222,6 +241,15 @@
 .vif-vod .wrow .wt{font-family:var(--mono);color:var(--ink-60);min-width:150px}
 .vif-vod .wrow .ws{font-family:var(--mono);font-weight:700;width:52px}
 .vif-vod .wrow.low{background:var(--n100)}
+.vif-vod .whead{display:flex;gap:12px;padding:0 10px 5px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-40)}
+.vif-vod .whead .wt{min-width:150px}
+.vif-vod .whead .ws{width:52px}
+.vif-vod .wrow .wfinds{display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1;min-width:0}
+.vif-vod .wrow .wfinds.why{flex-direction:column;align-items:flex-start;gap:4px}
+.vif-vod .wfind{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.vif-vod .wwhy{color:var(--ink-60);font-size:11.5px}
+/* A phone-width list drops its headings and lets the time column shrink, so rows wrap cleanly. */
+@media (max-width:560px){.vif-vod .whead{display:none}.vif-vod .wrow .wt{min-width:0}.vif-vod .wrow .ws{width:24px}}
 .vif-vod .wlist .wrow[role="button"],.vif-vod .wlist .wblock[role="button"]{cursor:pointer}
 .vif-vod .wlist .wrow[role="button"]:hover,.vif-vod .wlist .wblock[role="button"]:hover{outline:1px solid var(--accent);outline-offset:-1px}
 .vif-vod .wrow.low .ws,.vif-vod .wrow.low .wv{color:var(--ink-52)}
@@ -230,6 +258,10 @@
 .vif-vod .strip>i.low{background:var(--n300)}
 .vif-vod .strip>i.pend{background:var(--n200)}
 .vif-vod .strip.syn>i:not(.low){background:var(--alert-color)}
+.vif-vod .strip>i.moved,.vif-vod .legend .sw.moved{background:repeating-linear-gradient(135deg,var(--n400,#adb5bd) 0 2px,var(--n200) 2px 5px)}
+.vif-vod .strip>i.described,.vif-vod .legend .sw.described{background:var(--ink-60)}
+.vif-vod .strip>i.more{position:relative}
+.vif-vod .strip>i.more::after{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;background:var(--strip-other)}
 .vif-vod .axis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-40);margin-top:4px}
 .vif-vod .noframe{aspect-ratio:16/9;background:var(--n900);color:var(--n500);border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:20px;font-size:11.5px;line-height:1.5}
 .vif-vod .noframe .nf1{font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-size:10px;color:var(--n400)}
@@ -282,9 +314,12 @@
 .vif-vod .toast.err{background:var(--alert-color)}
 .vif-vod .toast.warn{background:var(--warn-color)}
 .vif-vod .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1050;padding:20px}
-.vif-vod .modal{background:var(--bg);border:1px solid var(--divider-strong);border-radius:6px;box-shadow:0 6px 30px rgba(0,0,0,.35);max-width:720px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+/* The Manager's Bootstrap pins any .modal to the viewport corner; the dialog sits inside the centring backdrop instead. */
+.vif-vod .modal{position:relative;inset:auto;z-index:auto;background:var(--bg);border:1px solid var(--divider-strong);border-radius:6px;box-shadow:0 6px 30px rgba(0,0,0,.35);max-width:720px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+.vif-vod .modal:focus-visible,.vif-vod #vod-view:focus-visible{outline:none}
+.vif-vod .mtrap{position:fixed;width:0;height:0}
 .vif-vod .modal .mh{display:flex;align-items:center;padding:13px 18px;border-bottom:1px solid var(--divider-strong)}
-.vif-vod .modal .mh h3{margin:0;font-weight:700;font-size:15px}
+.vif-vod .modal .mh h3{margin:0;font-weight:700;font-size:15px;min-width:0;overflow-wrap:anywhere}
 .vif-vod .modal .mb{padding:16px 18px;overflow-y:auto}
 .vif-vod .modal .mf{display:flex;gap:10px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--divider)}
 .vif-vod .modal pre{background:var(--n100);border:1px solid var(--divider);border-radius:3px;padding:12px;font-size:11.5px;overflow-x:auto;margin:0}
@@ -327,6 +362,8 @@
 .vif-vod .legend .lchip.static{cursor:default}
 .vif-vod .legend .lchip.static:hover{border-color:var(--divider-strong);color:var(--ink-60)}
 .vif-vod .legend .lchip .sw{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.vif-vod .legend .lchip.more::after{content:'▸';font-size:9px;color:var(--ink-40)}
+.vif-vod .legend .lchip.more.open::after{content:'▾'}
 .vif-vod .legend .lchip .lc{color:var(--ink-40);font-size:10px}
 .vif-vod .posterwrap{position:relative}
 .vif-vod .playbtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:52px;height:52px;border-radius:50%;border:0;cursor:pointer;background:rgba(0,0,0,.62);color:#fff;font-size:19px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0 0 0 4px}
@@ -425,6 +462,10 @@
 .vif-vod .chain-definition { padding: 4px 16px 12px; }
 .vif-vod .chain-stages { margin: 4px 0 12px; padding-left: 24px; }
 .vif-vod .chain-stages li { padding: 5px 0; }
+.vif-vod .chain-stages .chain-step-summary { color: var(--ink-60); }
+.vif-vod .chain-stages .chain-step-name { font-size: 11px; color: var(--ink-60); }
+.vif-vod .chain-stages .chain-cond { margin-top: 3px; font-size: 12px; color: var(--ink-60); }
+.vif-vod .chain-stages .chain-cond-when { font-weight: 600; color: #a35d00; }
 .vif-vod .chain-stages .tag { margin-left: 6px; }
 .vif-vod .chain-definition pre { max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .vif-vod .chain-window { display: block; padding: 10px 12px; }
@@ -434,12 +475,27 @@
 .vif-vod .chain-window[open] > summary::before { content: '▾'; }
 .vif-vod .chain-window > summary .tag { margin-left: 6px; }
 .vif-vod .chain-window > summary .wt { margin-right: 8px; }
-.vif-vod .chain-path { overflow-wrap: anywhere; }
+.vif-vod .chain-results .wlist { max-height: min(72vh, 760px); }
+.vif-vod .chain-search { margin-left: auto; width: 200px; padding: 4px 9px; font-size: 12px; font-family: inherit; }
+.vif-vod .chain-search + .wfollow { margin-left: 0; }
+.vif-vod .chain-close-all { margin-left: -4px; padding: 2px 7px; font-size: 14px; line-height: 1; }
+.vif-vod .chain-finding { overflow-wrap: anywhere; }
+.vif-vod .chain-finding.quiet { color: var(--ink-60); }
+.vif-vod .chain-quiet > .chain-window { margin-left: 14px; border-left: 2px solid var(--divider); }
 .vif-vod .chain-window-results { padding: 8px 4px; }
 .vif-vod .chain-executions { margin: 4px 0; padding-left: 24px; }
 .vif-vod .chain-executions > li { padding: 10px 4px; border-bottom: 1px solid var(--line); }
 .vif-vod .chain-stage-heading { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.vif-vod .chain-content { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; max-height: 280px; overflow: auto; }
+.vif-vod .chain-prose { margin: 8px 0; line-height: 1.5; white-space: pre-line; }
+.vif-vod .chain-answer { margin: 6px 0; line-height: 1.5; }
+.vif-vod .chain-reason { color: var(--ink-78); }
+.vif-vod .chain-fields { margin: 8px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.vif-vod .chain-field-key { font-weight: 600; }
+.vif-vod .chain-verdict-synthetic { background: var(--alert-color); color: #fff; }
+.vif-vod .chain-verdict-real { background: var(--good-color); color: #fff; }
+.vif-vod .chain-verdict-unknown { background: var(--n200); color: var(--ink-78); }
+.vif-vod .chain-finds > summary { cursor: pointer; margin-top: 2px; }
+.vif-vod .chain-finds ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
 .vif-vod .chain-detections { margin: 8px 0; padding-left: 18px; }
 .vif-vod .chain-detections > li { margin-bottom: 8px; overflow-wrap: anywhere; }
 .vif-vod .chain-skipped { padding: 6px 0; }

@@ -25,6 +25,8 @@
         // ── secret fields ─────────────────────────────────────────────────────
         var SECRET_FIELDS = [
             ['def-vi-service-api-key', 'def-api-key-toggle'],
+            ['def-synthetic-api-key', 'def-synthetic-api-key-toggle'],
+            ['def-synthetic-tls-client-key', null],
             ['def-verify-svd-api-key', 'def-verify-svd-api-key-toggle'],
             ['def-verify-review-api-key', 'def-verify-review-api-key-toggle']
         ];
@@ -45,12 +47,13 @@
         // would otherwise leave the button enabled over an empty field.
         function syncSecretToggleState(inputId, buttonId) {
             var input = document.getElementById(inputId);
-            var btn   = document.getElementById(buttonId);
-            if (!input || !btn) return;
+            var btn   = buttonId && document.getElementById(buttonId);
+            if (!input) return;
             var empty = (input.value || '').trim() === '';
             // "Save as secret" stores what was typed, so like Show it waits for a value.
             var saveAs = input.parentElement && input.parentElement.querySelector('.secret-save-as');
             if (saveAs) saveAs.disabled = empty;
+            if (!btn) return;
             btn.disabled = empty;
             if (empty) {
                 input.type      = 'password';
@@ -70,7 +73,8 @@
         // Same pattern as stream-config.html. `base` is the literal input's id; the mode
         // select is <base>-source, the name picker <base>-secret, the value row
         // <base>-value-row and the store row <base>-store-row.
-        var SLOT_BASES = ['def-vi-service-api-key', 'def-verify-svd-api-key', 'def-verify-review-api-key'];
+        var SLOT_BASES = ['def-vi-service-api-key', 'def-synthetic-api-key', 'def-synthetic-tls-client-key',
+            'def-verify-svd-api-key', 'def-verify-review-api-key'];
         var secretNamesLoaded = [];
 
         function secretSourceIsStored(base) {
@@ -284,24 +288,123 @@
         bindNumericInput('def-verify-strong-threshold', THRESHOLD_RULE,  'Must be 0–1');
         bindNumericInput('def-verify-review-timeout',   TIMEOUT_RULE,    'Must be ≥ 1');
 
+        // ── synthetic baseline ────────────────────────────────────────────────
+        function isNvcfAddress(address) {
+            return /(^|\.)nvcf\.nvidia\.com(:\d+)?$/i.test(address || '');
+        }
+
+        var NVCF_FUNCTION_ID_REQUIRED = "NVIDIA's hosted detector requires a Function ID.";
+
+        // As on a synthetic config: the hosted detector takes a key and a function id, a
+        // self-hosted one client certificates.
+        function syncSyntheticEndpointFields() {
+            var nvcf = isNvcfAddress(document.getElementById('def-synthetic-endpoint').value.trim());
+            document.getElementById('def-synthetic-nvcf-fields').style.display = nvcf ? '' : 'none';
+            document.getElementById('def-synthetic-tls-cert-fields').style.display = nvcf ? 'none' : '';
+        }
+        document.getElementById('def-synthetic-endpoint').addEventListener('input', syncSyntheticEndpointFields);
+
+        function showSvdTestResult(cls, text) {
+            var el = document.getElementById('def-synthetic-endpoint-test-result');
+            el.className = 'endpoint-test-result' + (cls ? ' ' + cls : '');
+            el.style.display = '';
+            el.textContent = text;
+        }
+
+        var svdTestSeq = 0;
+        function clearSvdTestResult() {
+            svdTestSeq++;
+            var el = document.getElementById('def-synthetic-endpoint-test-result');
+            el.style.display = 'none';
+            el.textContent = '';
+        }
+        document.getElementById('def-synthetic-section').addEventListener('input', clearSvdTestResult);
+        document.getElementById('def-synthetic-section').addEventListener('change', clearSvdTestResult);
+
+        // The form as stored is probed by reference, so the Engine dials the default with the
+        // credentials it holds. An edited form goes by value, which carries a typed key and no
+        // secret name: null when a stored secret would have to ride it.
+        function svdTestRequest() {
+            var value = function (id) { return document.getElementById(id).value.trim(); };
+            var nvcf = isNvcfAddress(value('def-synthetic-endpoint'));
+            var useTls = value('def-synthetic-use-tls');
+            var keyBase = nvcf ? 'def-synthetic-api-key' : 'def-synthetic-tls-client-key';
+            var loadedSecret = (nvcf ? loadedSynthetic.api_key_secret : loadedSynthetic.tls_client_key_secret) || '';
+            var typedKey = secretSourceIsStored(keyBase) ? '' : value(keyBase);
+            var pickedName = secretSourceIsStored(keyBase) ? pickedSecret(keyBase) : '';
+            var same = function (raw, loaded) { return raw === (loaded == null ? '' : String(loaded)); };
+            var asStored = same(value('def-synthetic-endpoint'), loadedSynthetic.endpoint)
+                && same(useTls, loadedSynthetic.use_tls) && typedKey === '' && pickedName === loadedSecret
+                && (nvcf ? same(value('def-synthetic-function-id'), loadedSynthetic.function_id)
+                    : same(value('def-synthetic-tls-ca-cert'), loadedSynthetic.tls_ca_cert)
+                        && same(value('def-synthetic-tls-client-cert'), loadedSynthetic.tls_client_cert));
+            if (asStored) return { streamGroupConfig: 'default', detectorType: 'synthetic' };
+            if (pickedName) return null;
+            return VIF.v2map.svdProbeRequestFromV1({
+                endpoint: value('def-synthetic-endpoint'),
+                use_tls: useTls === '' ? null : useTls === 'true',
+                tls_ca_cert: nvcf ? '' : value('def-synthetic-tls-ca-cert'),
+                tls_client_cert: nvcf ? '' : value('def-synthetic-tls-client-cert'),
+                tls_client_key: nvcf ? '' : typedKey,
+                api_key: nvcf ? typedKey : '',
+                function_id: nvcf ? value('def-synthetic-function-id') : ''
+            });
+        }
+
+        async function testDefaultSvdEndpoint() {
+            var btn = document.getElementById('def-synthetic-endpoint-test');
+            var address = document.getElementById('def-synthetic-endpoint').value.trim();
+            if (address === '') return showSvdTestResult('error', '✗ No detector server set');
+            if (/^https?:\/\//i.test(address)) {
+                return showSvdTestResult('error', '✗ The detector server must be a host:port, like svd.docker:8001, not a web address.');
+            }
+            if (isNvcfAddress(address) && document.getElementById('def-synthetic-function-id').value.trim() === '') {
+                return showSvdTestResult('error', '✗ ' + NVCF_FUNCTION_ID_REQUIRED);
+            }
+            var request = svdTestRequest();
+            if (!request) {
+                return showSvdTestResult('warn', '⚠ Save the changes, then Verify: the check uses the stored secret as saved with the default.');
+            }
+            var original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Verifying…';
+            showSvdTestResult('', 'Verifying…');
+            var seq = ++svdTestSeq;
+            try {
+                var result = await VIF.core.client().probes.svdEndpoint(request);
+                if (seq !== svdTestSeq) return;
+                if (result.reachable && result.accepted) {
+                    showSvdTestResult('ok', '✓ Reachable — an SVD service answered at ' + address + ' and accepted the credentials');
+                } else if (result.reachable) {
+                    showSvdTestResult('warn', '⚠ ' + (result.error || 'Reachable, but the endpoint did not accept the probe'));
+                } else {
+                    showSvdTestResult('error', '✗ ' + (result.error || 'Unreachable'));
+                }
+            } catch (error) {
+                if (seq === svdTestSeq) showSvdTestResult('error', '✗ ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = original;
+            }
+        }
+        window.testDefaultSvdEndpoint = testDefaultSvdEndpoint;
+
         // ── verify baseline ───────────────────────────────────────────────────
         var VERIFY_BUILTIN = { flag_threshold: 0.3, strong_threshold: 0.9 };
 
         (function offerReviewModels() {
             var list = document.getElementById('def-verify-review-models');
-            var options = (VIF.fieldRegistry && VIF.fieldRegistry.VLM_MODEL_OPTIONS) || [];
+            var names = (VIF.fieldRegistry && VIF.fieldRegistry.VLM_MODEL_NAMES) || [];
             if (!list) return;
-            options.filter(function (o) { return o.value.indexOf('nvidia/') === 0; }).forEach(function (o) {
+            names.filter(function (name) { return name.indexOf('nvidia/') === 0; }).forEach(function (name) {
                 var option = document.createElement('option');
-                option.value = o.value;
-                option.label = o.label;
+                option.value = name;
                 list.appendChild(option);
             });
         })();
 
         function verifyEndpointIsNvcf() {
-            var address = document.getElementById('def-verify-svd-address').value.trim();
-            return /(^|\.)nvcf\.nvidia\.com(:\d+)?$/i.test(address);
+            return isNvcfAddress(document.getElementById('def-verify-svd-address').value.trim());
         }
         function syncVerifyNvcfFields() {
             document.getElementById('def-verify-nvcf-fields').style.display = verifyEndpointIsNvcf() ? '' : 'none';
@@ -328,6 +431,7 @@
         // What the stored verify baseline held at load: a field blanked against a stored
         // value is a clear, a field blank over nothing stored is left out of the write.
         var loadedVerify = {};
+        var loadedSynthetic = {};
 
         function populateForm(config) {
             document.getElementById('def-vi-service-url').value = config.vi_service_url || '';
@@ -340,6 +444,27 @@
             var ce = config.concurrent_executions || {};
             setNumeric('def-concurrent-object', ce.object_detection && ce.object_detection.default != null ? ce.object_detection.default : null);
             setNumeric('def-concurrent-scene',  ce.scene_detection  && ce.scene_detection.default  != null ? ce.scene_detection.default  : null);
+
+            var sy = config.synthetic_analysis || {};
+            loadedSynthetic = {
+                endpoint: sy.endpoint,
+                use_tls: sy.use_tls,
+                tls_ca_cert: sy.tls_ca_cert,
+                tls_client_cert: sy.tls_client_cert,
+                tls_client_key_secret: sy.tls_client_key_secret,
+                api_key_secret: sy.api_key_secret,
+                function_id: sy.function_id
+            };
+            setText('def-synthetic-endpoint',        sy.endpoint);
+            setText('def-synthetic-use-tls',         typeof sy.use_tls === 'boolean' ? sy.use_tls : '');
+            setText('def-synthetic-tls-ca-cert',     sy.tls_ca_cert);
+            setText('def-synthetic-tls-client-cert', sy.tls_client_cert);
+            setText('def-synthetic-function-id',     sy.function_id);
+            document.getElementById('def-synthetic-api-key').value = '';
+            document.getElementById('def-synthetic-tls-client-key').value = '';
+            setSecretSlot('def-synthetic-api-key', sy.api_key_secret || null);
+            setSecretSlot('def-synthetic-tls-client-key', sy.tls_client_key_secret || null);
+            syncSyntheticEndpointFields();
 
             var vf  = config.verify_analysis || {};
             var svd = vf.svd || {};
@@ -393,7 +518,10 @@
         }
 
         function verifyMember(id, loaded, parse) {
-            var raw = fieldValue(id);
+            return storedMember(fieldValue(id), loaded, parse);
+        }
+
+        function storedMember(raw, loaded, parse) {
             if (raw === '') return loaded != null ? null : undefined;
             var value = parse ? parse(raw) : raw;
             return loaded != null && String(value) === String(loaded) ? undefined : value;
@@ -408,6 +536,40 @@
         function rejectField(message, id) {
             showStatus(message, true);
             document.getElementById(id).focus();
+        }
+
+        // The synthetic baseline's members, each as storedMember states it. Only the set the
+        // address uses is read from the form, as a synthetic config saves it. The other set is
+        // left as stored until the address moves across, and cleared then. A blank address, stored
+        // or typed, is of neither kind and moves nothing.
+        function syntheticBody(secrets) {
+            var address = fieldValue('def-synthetic-endpoint');
+            var nvcf = isNvcfAddress(address);
+            var movedAcross = address !== '' && !!loadedSynthetic.endpoint && nvcf !== isNvcfAddress(loadedSynthetic.endpoint);
+            var member = function (raw, applies, loaded) {
+                if (!applies && !movedAcross) return undefined;
+                return storedMember(applies ? raw : '', loaded);
+            };
+            var reference = function (base) {
+                return secretSourceIsStored(base) ? pickedSecret(base) : '';
+            };
+            function key(base, flatPath, applies) {
+                if (applies && !secretSourceIsStored(base) && fieldValue(base) !== '') secrets[flatPath] = fieldValue(base);
+                else if (!applies && movedAcross) secrets[flatPath] = '';
+            }
+            key('def-synthetic-api-key', 'synthetic_analysis.api_key', nvcf);
+            key('def-synthetic-tls-client-key', 'synthetic_analysis.tls_client_key', !nvcf);
+            return {
+                endpoint: storedMember(fieldValue('def-synthetic-endpoint'), loadedSynthetic.endpoint),
+                use_tls: storedMember(fieldValue('def-synthetic-use-tls'), loadedSynthetic.use_tls,
+                    function (raw) { return raw === 'true'; }),
+                tls_ca_cert: member(fieldValue('def-synthetic-tls-ca-cert'), !nvcf, loadedSynthetic.tls_ca_cert),
+                tls_client_cert: member(fieldValue('def-synthetic-tls-client-cert'), !nvcf, loadedSynthetic.tls_client_cert),
+                tls_client_key_secret: member(reference('def-synthetic-tls-client-key'), !nvcf,
+                    loadedSynthetic.tls_client_key_secret),
+                api_key_secret: member(reference('def-synthetic-api-key'), nvcf, loadedSynthetic.api_key_secret),
+                function_id: member(fieldValue('def-synthetic-function-id'), nvcf, loadedSynthetic.function_id)
+            };
         }
 
         window.saveDefaultConfig = async function () {
@@ -451,6 +613,16 @@
             if (timeoutVal !== '' && !validateNumericValue(timeoutVal, TIMEOUT_RULE)) {
                 return rejectField('Request Timeout must be at least 1 second.', 'def-verify-review-timeout');
             }
+            if (/^https?:\/\//i.test(fieldValue('def-synthetic-endpoint'))) {
+                return rejectField('The detector server must be a host:port, like svd.docker:8001, not a web address.', 'def-synthetic-endpoint');
+            }
+            // Nothing below the defaults can supply a function ID the hosted detector needs.
+            if (isNvcfAddress(fieldValue('def-synthetic-endpoint')) && fieldValue('def-synthetic-function-id') === '') {
+                return rejectField(NVCF_FUNCTION_ID_REQUIRED, 'def-synthetic-function-id');
+            }
+            if (verifyEndpointIsNvcf() && fieldValue('def-verify-svd-function-id') === '') {
+                return rejectField(NVCF_FUNCTION_ID_REQUIRED, 'def-verify-svd-function-id');
+            }
 
             // The API keys are secrets the wire never echoes back, so each input's own
             // value is the whole signal: a typed key sets it, a blank field keeps the
@@ -487,8 +659,9 @@
                     request_timeout_seconds: verifyMember('def-verify-review-timeout', loadedVerify.request_timeout_seconds, parseFloat)
                 }
             };
-            // Each Verify key slot sends its picked name, or its typed value; neither keeps it.
             var secrets = {};
+            body.synthetic_analysis = syntheticBody(secrets);
+            // Each Verify key slot sends its picked name, or its typed value; neither keeps it.
             if (secretSourceIsStored('def-verify-svd-api-key')) {
                 if (pickedSecret('def-verify-svd-api-key')) body.verify_analysis.svd.api_key_secret = pickedSecret('def-verify-svd-api-key');
             } else if (fieldValue('def-verify-svd-api-key') !== '') {
@@ -511,7 +684,8 @@
                 });
                 // Refresh form with the merged values the server echoes back
                 var merged = VIF.v2map.flatDefaultFromV2(result);
-                if (merged.vi_service_url !== undefined || merged.inference_fps !== undefined || merged.verify_analysis !== undefined) {
+                if (merged.vi_service_url !== undefined || merged.inference_fps !== undefined
+                    || merged.synthetic_analysis !== undefined || merged.verify_analysis !== undefined) {
                     populateForm(merged);
                 }
                 // Success rides the shared toast; wipe any error text still
@@ -528,6 +702,7 @@
 
         // ── init ──────────────────────────────────────────────────────────────
         syncSecretToggles();
+        syncSyntheticEndpointFields();
         syncVerifyNvcfFields();
         SLOT_BASES.forEach(applySecretSourceVisibility);
         loadSecretNames();

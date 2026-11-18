@@ -102,7 +102,9 @@
                     // One VLM request carries Duration × Inference FPS images and the
                     // endpoint accepts at most VLM_TYPICAL_ENDPOINT_IMAGE_CAP (8); FPS
                     // is at least 1, so a window past 8s can never fit the cap.
-                    vlm: { max: 8 }
+                    vlm: { max: 8 },
+                    // An AI model step past its image limit is a warning on the step, not a cap here.
+                    chain: { max: 30 }
                 }
             },
             help: { prefix: 'duration-help', detectors: ['scene', 'vlm', 'synthetic', 'verify', 'chain'] },
@@ -374,15 +376,16 @@
 
     var VLM_TYPICAL_ENDPOINT_IMAGE_CAP = 8;
 
-    // Models offered as explicit options wherever a VLM model name is picked (the live
-    // stream-config editor and the VOD inline editor); a stored model_name outside this
-    // set is shown through each editor's "Other" affordance.
-    var VLM_MODEL_OPTIONS = [
-        { value: 'Qwen/Qwen3-VL-4B-Instruct-FP8', label: 'Qwen3-VL-4B (Qwen)' },
-        { value: 'nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8', label: 'Nemotron Nano 12B VL (NVIDIA)' },
-        { value: 'google/gemma-3-4b-it', label: 'Gemma 3 4B (Google)' },
-        { value: 'nvidia/Cosmos3-Edge', label: 'Cosmos3 Edge (NVIDIA)' },
-        { value: 'nvidia/Cosmos3-Nano', label: 'Cosmos3 Nano (NVIDIA)' }
+    // Models offered wherever a VLM model name is picked (the live stream-config editor, the
+    // VOD inline editor and the Verify review model), shown by their exact names: an AI server
+    // answers only to the name it serves. A stored model_name outside this set is shown
+    // through each editor's "Other" affordance.
+    var VLM_MODEL_NAMES = [
+        'Qwen/Qwen3-VL-4B-Instruct-FP8',
+        'nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-FP8',
+        'google/gemma-3-4b-it',
+        'nvidia/Cosmos3-Edge',
+        'nvidia/Cosmos3-Nano'
     ];
 
     // What the review stage runs when neither the config nor the baseline names a model.
@@ -394,7 +397,7 @@
         sections: SECTIONS,
         fields: FIELDS,
         VLM_TYPICAL_ENDPOINT_IMAGE_CAP: VLM_TYPICAL_ENDPOINT_IMAGE_CAP,
-        VLM_MODEL_OPTIONS: VLM_MODEL_OPTIONS,
+        VLM_MODEL_NAMES: VLM_MODEL_NAMES,
         getField: getField,
         getFieldByPath: getFieldByPath,
         runsLive: runsLive,

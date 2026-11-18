@@ -272,8 +272,9 @@
         carry(oa, 'class_names', detector.classes);
         // v1 stores "custom" as the model name beside the checkpoint path; v2 drops
         // the placeholder and keeps the path alone.
-        if (isSet(detector.model)) oa.model_name = detector.model;
-        else if (isSet(detector.checkpointPath)) oa.model_name = 'custom';
+        // A checkpoint overrides a model stored beside it.
+        if (isSet(detector.checkpointPath)) oa.model_name = 'custom';
+        else if (isSet(detector.model)) oa.model_name = detector.model;
         carry(oa, 'checkpoint_path', detector.checkpointPath);
         carry(oa, 'confidence_threshold', detector.minConfidence);
         var tracking = detector.tracking;
@@ -543,6 +544,11 @@
         if (config.detector) {
             carry(row, 'detector_type', config.detector.type);
             carry(row, 'model_name', modelNameOf(config.detector));
+            if (config.detector.type === 'chain') {
+                row.stage_types = (config.detector.stages || []).map(function (stage) {
+                    return stage && stage.detector ? stage.detector.type : undefined;
+                });
+            }
         }
         var processing = config.processing || {};
         carry(row, 'duration', processing.windowSeconds);
@@ -561,6 +567,7 @@
         var state = stream.state || {};
         carry(row, 'status', state.connection);
         carry(row, 'endpoint_degraded', state.endpointDegraded);
+        carry(row, 'awaiting_response_seconds', state.awaitingResponseSeconds);
         // The v1 field was an empty string, never null - the renderer prints it.
         row.reason = isSet(state.reason) ? state.reason : '';
         carry(row, 'vi_service_version', state.serviceVersion);
@@ -759,6 +766,7 @@
         // A reference is an ordinary member: written when set, null when not — the null is
         // what lets a save that switched the slot back to a literal clear the stored name.
         detector.endpoint.apiKeySecret = orNull(va.api_key_secret);
+        carry(detector.endpoint, 'maxConcurrentRequests', va.max_concurrent_requests);
         putSecret(detector.endpoint, 'apiKey', secrets, 'vlm_analysis.api_key', va.api_key);
         if (mode === 'detect') {
             detector.detect = {
@@ -781,6 +789,12 @@
         return detector;
     }
 
+    // No form holds these two, so a flat without them leaves the stored values alone.
+    function carrySvdLimits(endpoint, sy) {
+        carry(endpoint, 'timeoutSeconds', sy.request_timeout_seconds);
+        carry(endpoint, 'maxConcurrentRequests', sy.max_concurrent_requests);
+    }
+
     function writeSyntheticDetector(flat, secrets) {
         var sy = flat.synthetic_analysis || {};
         var detector = {
@@ -799,6 +813,7 @@
             },
             classificationThreshold: orNull(sy.classification_threshold)
         };
+        carrySvdLimits(detector.endpoint, sy);
         putSecret(detector.endpoint, 'apiKey', secrets, 'synthetic_analysis.api_key', sy.api_key);
         putSecret(detector.endpoint.tls, 'clientKey', secrets, 'synthetic_analysis.tls_client_key', sy.tls_client_key);
         return detector;
@@ -846,6 +861,8 @@
                 timeoutSeconds: orNull(va.request_timeout_seconds)
             }
         };
+        carrySvdLimits(detector.endpoint, sy);
+        carry(detector.review, 'maxConcurrentRequests', va.max_concurrent_requests);
         putSecret(detector.endpoint, 'apiKey', secrets, 'synthetic_analysis.api_key', sy.api_key);
         putSecret(detector.endpoint.tls, 'clientKey', secrets, 'synthetic_analysis.tls_client_key', sy.tls_client_key);
         putSecret(detector.review, 'apiKey', secrets, 'vlm_analysis.api_key', va.api_key);
@@ -1078,7 +1095,237 @@
             application: flat.app_name,
             streamPattern: flat.stream_name
         };
+        // The form has no priority field; a copy opened from a stored config carries its own.
+        if (isSet(flat.priority_id)) body.match.priority = flat.priority_id;
         return body;
+    }
+
+    // A list of objects (a chain's stages, a stage's rules) is walked entry by entry, the
+    // entry's position a part of the path; a list of plain values is one setting.
+    function leafPaths(value, prefix, out) {
+        if (isObject(value)) {
+            Object.keys(value).forEach(function (key) { leafPaths(value[key], prefix.concat(key), out); });
+        } else if (Array.isArray(value) && value.some(isObject)) {
+            value.forEach(function (entry, i) { leafPaths(entry, prefix.concat(i), out); });
+        } else if (isSet(value) && !(Array.isArray(value) && value.length === 0)) {
+            out.push(prefix);
+        }
+        return out;
+    }
+
+    function valueAt(object, path) {
+        var at = object;
+        for (var i = 0; i < path.length; i++) {
+            if (at === null || typeof at !== 'object') return undefined;
+            at = at[path[i]];
+        }
+        return at;
+    }
+
+    function holdsPath(object, path) {
+        return isSet(valueAt(object, path));
+    }
+
+    function sameSetting(a, b) {
+        if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-9;
+        if (Array.isArray(a)) {
+            // A list of plain values (classes, GPU ids) is a set: its order says nothing.
+            var sorted = function (list) { return list.map(String).sort().join('\u0000'); };
+            return Array.isArray(b) && a.length === b.length && sorted(a) === sorted(b);
+        }
+        return a === b;
+    }
+
+    // Maps keyed by the user's own words (class names, a listener's properties), never by settings.
+    var FREE_FORM_MAPS = ['properties', 'classHints', 'classSensitivity', 'responseSchema'];
+    // The settings that hold a stored secret's name.
+    var SECRET_REFERENCES = ['apiKeySecret', 'clientKeySecret', 'credentialSecret'];
+
+    /**
+     * The one stream config a parsed file holds, as { match, config }: a stream group config
+     * document, a per-stream override, or a bare config. Null for anything else.
+     */
+    function streamConfigDocument(document) {
+        if (!isObject(document)) return null;
+        if (isObject(document.config)) {
+            return {
+                match: isSet(document.match) ? document.match
+                    : { application: document.application, streamPattern: document.stream },
+                config: document.config
+            };
+        }
+        var isConfig = ['detector', 'processing', 'listeners', 'service', 'diagnostics']
+            .some(function (member) { return isObject(document[member]); });
+        return isConfig ? { match: {}, config: document } : null;
+    }
+
+    /** The stored secrets a config names, each once, in the order met. */
+    function secretReferences(config) {
+        var names = [];
+        (function collect(value, namesListeners) {
+            if (!value || typeof value !== 'object') return;
+            Object.keys(value).forEach(function (key) {
+                var member = value[key];
+                // A listener's name is the user's word too, whatever it happens to spell.
+                if (namesListeners) return collect(member, false);
+                if (FREE_FORM_MAPS.indexOf(key) !== -1) return;
+                if (SECRET_REFERENCES.indexOf(key) === -1) collect(member, key === 'listeners');
+                else if (typeof member === 'string' && member && names.indexOf(member) === -1) names.push(member);
+            });
+        })(config, false);
+        return names;
+    }
+
+    /**
+     * A setting's path as a config file spells it: dotted and snake_case, with a listener's
+     * name and the keys of a free-form map left as the user wrote them. A position in a list
+     * reads as `[2]`, or as `[name]` when `config` is given and the entry there has a name.
+     */
+    function settingPathInFile(path, config) {
+        var usersWords = false;
+        return path.map(function (part, i) {
+            if (typeof part === 'number') {
+                var entry = valueAt(config, path.slice(0, i + 1));
+                return '[' + (isObject(entry) && typeof entry.name === 'string' && entry.name ? entry.name : part) + ']';
+            }
+            if (usersWords || path[i - 1] === 'listeners') return part;
+            if (FREE_FORM_MAPS.indexOf(part) !== -1) usersWords = true;
+            return part.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+        }).join('.').replace(/\.\[/g, '[');
+    }
+
+    /**
+     * The settings of a config document, each as its path's parts, that `written` carries
+     * with another value than the document's.
+     */
+    function settingsChanged(config, written) {
+        return leafPaths(config, [], []).filter(function (path) {
+            var kept = valueAt(written, path);
+            return isSet(kept) && !sameSetting(valueAt(config, path), kept);
+        });
+    }
+
+    // What the members of a stream config hold, by name, wherever the form reads them.
+    var MEMBER_SHAPES = {
+        object: ['detector', 'processing', 'service', 'diagnostics', 'listeners', 'endpoint', 'review', 'tls',
+            'tracking', 'tiling', 'minGrid', 'maxGrid', 'detect', 'custom', 'prompt', 'generation', 'baseline',
+            'routing', 'crop', 'frameSelection', 'catchUp', 'decisionListener', 'onMatch', 'onNoMatch', 'onDone',
+            'properties', 'classHints', 'classSensitivity', 'responseSchema'],
+        objects: ['stages', 'rules'],
+        strings: ['classes', 'customClasses'],
+        values: ['gpuIds'],
+        string: ['application', 'streamPattern', 'type', 'name', 'mode'],
+        // Carried past the form's own checks, so held to the number they must be.
+        number: ['priority', 'timeoutSeconds', 'maxConcurrentRequests'],
+        plain: ['active', 'enabled', 'url', 'address', 'model', 'checkpointPath', 'apiKey', 'apiKeySecret', 'functionId',
+            'caCert', 'clientCert', 'clientKey', 'clientKeySecret', 'credentialSecret', 'credentialHeader', 'className',
+            'fileName', 'filePath', 'debugString', 'system', 'user', 'set', 'method', 'trigger', 'frameSource',
+            'reasoningLevel', 'resultMode', 'stage', 'end', 'grayscale', 'autoThrottle', 'saveImages', 'suppressEmpty',
+            'suppressGlobalChanges', 'ignoreUntracked', 'fullFramePass', 'replaceVideo', 'showStats',
+            'dispatchIntermediateRings', 'inferenceFps', 'windowSeconds', 'videoHeight', 'grabIntervalSeconds',
+            'bufferFrames', 'rollupIntervalSeconds', 'maxBehindSeconds', 'modelIdleTimeoutSeconds', 'timingLogSeconds',
+            'maxLoggedMessages', 'minConfidence', 'sensitivity', 'minDisplacement', 'mergeDistance',
+            'classificationThreshold', 'flagThreshold', 'strongThreshold', 'maxTokens', 'temperature', 'maxRings',
+            'decisionTimeoutSeconds', 'minCount', 'padding', 'maxCrops', 'stride', 'rows', 'cols', 'tileCoverageCutoff',
+            'clusterSuppressionMinChildren', 'minConfidenceToCreate', 'minConsecutiveFrames', 'minOverlap',
+            'maxLostFrames', 'overlayDelay', 'fadeStep', 'jitter']
+    };
+    // The detector types a chain stage can run.
+    var STAGE_DETECTOR_TYPES = ['scene', 'object', 'vlm', 'motion', 'synthetic'];
+    var FITS_SHAPE = {
+        object: isObject,
+        objects: function (value) { return Array.isArray(value) && value.every(isObject); },
+        strings: function (value) {
+            return Array.isArray(value) && value.every(function (item) { return typeof item === 'string'; });
+        },
+        values: function (value) {
+            return Array.isArray(value) && value.every(function (item) { return item === null || typeof item !== 'object'; });
+        },
+        string: function (value) { return typeof value === 'string'; },
+        number: function (value) { return typeof value === 'number' && isFinite(value); },
+        plain: function (value) { return typeof value !== 'object'; }
+    };
+
+    /**
+     * The first member of a { match, config } from streamConfigDocument() that holds something
+     * the form cannot read (a list where a map goes, a stage with no detector or one a chain
+     * cannot run), as its path's parts from the config, or from `match`. With the `document`
+     * the file held, a per-stream override's rule is named as that file names it:
+     * `application` and `stream`. Null when every member can be read.
+     */
+    function misshapenSetting(held, document) {
+        function firstMisfit(value, path, parent) {
+            if (Array.isArray(value)) {
+                for (var i = 0; i < value.length; i++) {
+                    var inEntry = firstMisfit(value[i], path.concat(i), parent);
+                    if (inEntry) return inEntry;
+                }
+                return null;
+            }
+            if (!isObject(value)) return null;
+            if (parent === 'stages') {
+                if (!isObject(value.detector) || typeof value.detector.type !== 'string') return path.concat('detector');
+                if (STAGE_DETECTOR_TYPES.indexOf(value.detector.type) === -1) return path.concat('detector', 'type');
+            }
+            var keys = Object.keys(value);
+            for (var k = 0; k < keys.length; k++) {
+                var key = keys[k];
+                var member = value[key];
+                var named = parent === 'listeners';
+                if (named) {
+                    if (!isObject(member)) return path.concat(key);
+                } else if (isSet(member)) {
+                    var shape = Object.keys(MEMBER_SHAPES).filter(function (kind) {
+                        return MEMBER_SHAPES[kind].indexOf(key) !== -1;
+                    })[0];
+                    if (shape && !FITS_SHAPE[shape](member)) return path.concat(key);
+                    if (FREE_FORM_MAPS.indexOf(key) !== -1) continue;
+                }
+                var inside = firstMisfit(member, path.concat(key), named ? null : key);
+                if (inside) return inside;
+            }
+            return null;
+        }
+        var inConfig = firstMisfit(held.config, [], 'config');
+        if (inConfig) return inConfig;
+        if (!isObject(held.match)) return ['match'];
+        var inMatch = firstMisfit(held.match, ['match'], 'match');
+        if (!inMatch || !document || isSet(document.match)) return inMatch;
+        return [inMatch[1] === 'streamPattern' ? 'stream' : inMatch[1]].concat(inMatch.slice(2));
+    }
+
+    /** Whether a parsed file nests maps and lists more than `limit` deep; walks without recursing. */
+    function nestsDeeperThan(value, limit) {
+        var level = [value];
+        for (var depth = 0; level.length > 0; depth++) {
+            if (depth > limit) return true;
+            var next = [];
+            level.forEach(function (item) {
+                if (!item || typeof item !== 'object') return;
+                Object.keys(item).forEach(function (key) { next.push(item[key]); });
+            });
+            level = next;
+        }
+        return false;
+    }
+
+    /**
+     * The settings of a config document, each as its path's parts, that `written` (the config
+     * the form would create after opening that document) does not carry.
+     */
+    function settingsNotKept(config, written) {
+        return leafPaths(config, [], []).filter(function (path) {
+            return !holdsPath(written, path) && !saysNothing(config, path);
+        });
+    }
+
+    // The settings a write may leave unsaid without losing anything: a detect VLM's `high`
+    // reasoning level, which is the default, and a model beside the checkpoint that overrides it.
+    function saysNothing(config, path) {
+        var member = path[path.length - 1];
+        var owner = valueAt(config, path.slice(0, -1));
+        if (member === 'reasoningLevel') return path[path.length - 2] === 'detect' && owner.reasoningLevel === 'high';
+        return member === 'model' && isSet(owner.checkpointPath);
     }
 
     function pruneNulls(value) {
@@ -1123,6 +1370,10 @@
                 patch.concurrentExecutions[kind] = { _default: flat.concurrent_executions[kind]['default'] };
             });
         }
+        if (flat.synthetic_analysis && typeof flat.synthetic_analysis === 'object') {
+            var endpoint = svdEndpointPatch(flat.synthetic_analysis, options.secrets, 'synthetic_analysis.');
+            if (endpoint) put(patch, ['detectors', 'synthetic'], { type: 'synthetic', endpoint: endpoint });
+        }
         if (flat.verify_analysis && typeof flat.verify_analysis === 'object') {
             var verify = verifyBaselinePatch(flat.verify_analysis, options.secrets);
             if (verify) put(patch, ['detectors', 'verify'], verify);
@@ -1135,27 +1386,42 @@
     }
 
     /**
+     * A baseline's SVD endpoint as a merge patch, by the rule verifyBaselinePatch states.
+     * The literal credentials come from `secrets` under `secretPrefix`. Null when nothing is stated.
+     */
+    function svdEndpointPatch(sy, secrets, secretPrefix) {
+        var endpoint = {};
+        carryPatch(endpoint, 'address', sy.endpoint);
+        carryPatch(endpoint, 'functionId', sy.function_id);
+        putSecret(endpoint, 'apiKey', secrets, secretPrefix + 'api_key', sy.api_key);
+        carryPatch(endpoint, 'apiKeySecret', sy.api_key_secret);
+        var tls = {};
+        carryPatch(tls, 'enabled', sy.use_tls);
+        carryPatch(tls, 'caCert', sy.tls_ca_cert);
+        carryPatch(tls, 'clientCert', sy.tls_client_cert);
+        putSecret(tls, 'clientKey', secrets, secretPrefix + 'tls_client_key', sy.tls_client_key);
+        carryPatch(tls, 'clientKeySecret', sy.tls_client_key_secret);
+        if (Object.keys(tls).length) endpoint.tls = tls;
+        return Object.keys(endpoint).length ? endpoint : null;
+    }
+
+    /**
      * The default config's verify baseline as a merge patch: a member with a value writes
      * it, null clears the stored one, absent leaves it alone. Null when nothing is stated.
      */
     function verifyBaselinePatch(vf, secrets) {
-        var sy = vf.svd || {};
         var va = vf.vlm || {};
         var detector = { type: 'verify' };
         carryPatch(detector, 'flagThreshold', vf.flag_threshold);
         carryPatch(detector, 'strongThreshold', vf.strong_threshold);
-        var endpoint = {};
-        carryPatch(endpoint, 'address', sy.endpoint);
-        carryPatch(endpoint, 'functionId', sy.function_id);
-        putSecret(endpoint, 'apiKey', secrets, 'verify_analysis.svd.api_key', sy.api_key);
-        carryPatch(endpoint, 'apiKeySecret', sy.api_key_secret);
+        var endpoint = svdEndpointPatch(vf.svd || {}, secrets, 'verify_analysis.svd.');
         var review = {};
         carryPatch(review, 'url', va.endpoint_url);
         carryPatch(review, 'model', va.model_name);
         carryPatch(review, 'timeoutSeconds', va.request_timeout_seconds);
         putSecret(review, 'apiKey', secrets, 'verify_analysis.vlm.api_key', va.api_key);
         carryPatch(review, 'apiKeySecret', va.api_key_secret);
-        if (Object.keys(endpoint).length) detector.endpoint = endpoint;
+        if (endpoint) detector.endpoint = endpoint;
         if (Object.keys(review).length) detector.review = review;
         return Object.keys(detector).length > 1 ? detector : null;
     }
@@ -1312,6 +1578,13 @@
         listenersToV1: listenersToV1,
         // write direction
         groupFromFlat: groupFromFlat,
+        settingsNotKept: settingsNotKept,
+        settingPathInFile: settingPathInFile,
+        settingsChanged: settingsChanged,
+        misshapenSetting: misshapenSetting,
+        nestsDeeperThan: nestsDeeperThan,
+        streamConfigDocument: streamConfigDocument,
+        secretReferences: secretReferences,
         groupPatchFromV1: groupPatchFromV1,
         defaultPatchFromV1: defaultPatchFromV1,
         listenerFromV1: listenerFromV1,

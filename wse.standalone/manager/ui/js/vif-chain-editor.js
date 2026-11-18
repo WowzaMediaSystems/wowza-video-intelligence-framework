@@ -183,21 +183,139 @@
         return errors;
     }
 
+    /**
+     * The index of the first scene, vlm or synthetic stage, which makes the whole chain
+     * capture clip windows; -1 when only object and motion stages leave it checking one
+     * frame at a time.
+     */
+    function windowStageIndex(state) {
+        var stages = state.stages || [];
+        for (var i = 0; i < stages.length; i++) {
+            var type = (stages[i].detector || {}).type;
+            if (type === 'scene' || type === 'vlm' || type === 'synthetic') return i;
+        }
+        return -1;
+    }
+
+    /**
+     * How many of `captured` frames a stage's frame selection keeps: every one, one
+     * representative, or for every_nth the first, every nth and always the last.
+     */
+    function selectedFrameCount(captured, selection) {
+        if (!(captured > 0)) return 0;
+        var mode = selection && selection.mode;
+        if (!mode || mode === 'all') return captured;
+        if (mode === 'every_nth') {
+            var n = Number(selection.stride);
+            if (!(n >= 2)) return captured;
+            var last = captured - 1;
+            return Math.floor(last / n) + 1 + (last % n === 0 ? 0 : 1);
+        }
+        return 1;
+    }
+
+    function frameCadenceErrors(stage, windowStage, path) {
+        var selection = stage.frameSelection;
+        if (windowStage !== -1 || !isSet(selection) || !isSet(selection.mode) || selection.mode === 'all') return [];
+        return [path + '.frame_selection: only a chain with a scene, vlm or synthetic stage checks clips;'
+            + ' with only object and motion stages each check carries a single frame.'];
+    }
+
     function cropsBehind(predecessor) {
         var type = (predecessor.detector || {}).type;
         return type === 'object' || type === 'motion';
     }
 
     /**
+     * The stages that can run right before stage `index`, whose detections a crop would use:
+     * in linear mode the one above it; in conditional mode every stage whose routing targets
+     * it, plus the one above it when that one has no routing and falls through. Null in
+     * dynamic mode, where the code decides at runtime.
+     */
+    function cropSourcesIn(stages, mode, index) {
+        if (index <= 0 || index >= stages.length) return [];
+        if (mode === 'dynamic') return null;
+        if (mode !== 'conditional') return [stages[index - 1]];
+        var name = trimmedName(stages[index].name);
+        var sources = [];
+        stages.forEach(function (stage, at) {
+            if (at === index) return;
+            var routing = stage.routing;
+            if (!routing) {
+                if (at === index - 1) sources.push(stage);
+                return;
+            }
+            var leadsHere = [routing.onMatch, routing.onNoMatch, routing.onDone].some(function (target) {
+                return target && name !== '' && trimmedName(target.stage) === name;
+            });
+            if (leadsHere) sources.push(stage);
+        });
+        return sources;
+    }
+
+    function cropSources(state, index) {
+        return cropSourcesIn(state.stages || [], chainMode(state), index);
+    }
+
+    /**
      * Whether stage `index` may add a crop: never the entry, a synthetic or a motion stage,
-     * and in linear mode only directly behind an object or motion stage.
+     * and only when a stage that can run right before it draws boxes (object or motion),
+     * which dynamic mode can't know ahead of time.
      */
     function offersCrop(state, index) {
         var stages = state.stages || [];
         if (index <= 0 || index >= stages.length) return false;
         var type = (stages[index].detector || {}).type;
         if (type === 'synthetic' || type === 'motion') return false;
-        return chainMode(state) !== 'linear' || cropsBehind(stages[index - 1]);
+        var sources = cropSources(state, index);
+        return sources === null || sources.some(cropsBehind);
+    }
+
+    // The frames a stage looks at, as a frame selection mode. Movement always looks at every one.
+    function frameModeOf(stage) {
+        if ((stage.detector || {}).type === 'motion') return 'all';
+        var selection = stage.frameSelection;
+        return selection && selection.mode ? selection.mode : 'all';
+    }
+
+    var SINGLE_FRAME_MODES = ['first', 'middle', 'last'];
+
+    // The frame choices that always share a frame with one of each mode. One in every few always
+    // keeps the first and last frames; a pairing that depends on the clip's length is left out.
+    var SHARED_FRAME_CHOICES = {
+        all: FRAME_SELECTION_MODES,
+        first: ['all', 'first', 'every_nth'],
+        middle: ['all', 'middle'],
+        last: ['all', 'last', 'every_nth'],
+        every_nth: ['all', 'first', 'last', 'every_nth']
+    };
+
+    /**
+     * The frame choices stage `index` can make while it looks inside boxes and still get boxes
+     * from every stage that draws them before it: a crop comes only from frames both looked at.
+     */
+    function cropFrameChoices(state, index) {
+        var choices = FRAME_SELECTION_MODES.slice();
+        (cropSources(state, index) || []).filter(cropsBehind).forEach(function (source) {
+            var shared = SHARED_FRAME_CHOICES[frameModeOf(source)] || FRAME_SELECTION_MODES;
+            choices = choices.filter(function (mode) { return shared.indexOf(mode) !== -1; });
+        });
+        return choices;
+    }
+
+    // A crop stage on one frame whose every box-drawing source looks only at a different one
+    // never gets a box. Returns that source's index, or -1.
+    function deadCropSource(stages, mode, index) {
+        var stage = stages[index];
+        var own = frameModeOf(stage);
+        if (!isSet(stage.crop) || SINGLE_FRAME_MODES.indexOf(own) === -1) return -1;
+        var drawing = (cropSourcesIn(stages, mode, index) || []).filter(cropsBehind);
+        if (!drawing.length) return -1;
+        var dead = drawing.every(function (source) {
+            var theirs = frameModeOf(source);
+            return SINGLE_FRAME_MODES.indexOf(theirs) !== -1 && theirs !== own;
+        });
+        return dead ? stages.indexOf(drawing[0]) : -1;
     }
 
     function cropErrors(stages, index, mode, path) {
@@ -208,8 +326,11 @@
         if (detector.type === 'synthetic') return [path + ".crop: a synthetic stage analyzes the whole clip and cannot crop."];
         if (detector.type === 'motion') return [path + '.crop: a motion stage compares whole consecutive frames and cannot crop.'];
         var errors = [];
+        var sources = cropSourcesIn(stages, mode, index);
         if (mode === 'linear' && !cropsBehind(stages[index - 1])) {
             errors.push(path + '.crop: needs an object or motion stage immediately before it in linear mode.');
+        } else if (sources !== null && !sources.some(cropsBehind)) {
+            errors.push(path + '.crop: none of the stages that lead to it is an object or motion stage, so there are no boxes to crop.');
         }
         if (detector.type === 'object') {
             if (detector.tracking && detector.tracking.method === 'byte-track') {
@@ -297,9 +418,9 @@
         if (mode !== 'dynamic') return errors;
         var className = trimmedName((state.decisionListener || {}).className);
         if (className === '') {
-            errors.push('decision_listener.class_name: a dynamic chain needs a decision listener class.');
+            errors.push('decision_listener.class_name: add its class name.');
         } else if (!JAVA_CLASS_NAME.test(className)) {
-            errors.push('decision_listener.class_name: must name a Java class, like com.example.Decider.');
+            errors.push('decision_listener.class_name: must be a Java class name, like com.example.Decider.');
         }
         var timeout = state.decisionTimeoutSeconds;
         if (isSet(timeout) && (typeof timeout !== 'number' || !isFinite(timeout) || timeout <= 0)) {
@@ -452,6 +573,51 @@
         return warnings;
     }
 
+    // The stages a stage can hand the window to: the next one when it has no route, otherwise
+    // each stage its route names.
+    function nextStageIndexes(stages, names, index) {
+        var routing = stages[index].routing;
+        if (!isSet(routing)) return index + 1 < stages.length ? [index + 1] : [];
+        return ['onMatch', 'onNoMatch', 'onDone'].map(function (key) {
+            var target = routing[key];
+            return isSet(target) && typeof target.stage === 'string' ? names.indexOf(target.stage.trim()) : -1;
+        }).filter(function (at) { return at !== -1; });
+    }
+
+    function leadsBackTo(stages, names, from, to) {
+        var seen = {};
+        var queue = [from];
+        while (queue.length) {
+            var at = queue.shift();
+            if (at === to) return true;
+            if (seen[at]) continue;
+            seen[at] = true;
+            queue.push.apply(queue, nextStageIndexes(stages, names, at));
+        }
+        return false;
+    }
+
+    // A route to an earlier stage, or its own, that can lead back to this stage repeats stages
+    // until max_rings ends the window. A route back to a motion entry is an error already.
+    function backRouteWarnings(stages, index) {
+        var routing = stages[index].routing;
+        if (!isSet(routing)) return [];
+        var names = stages.map(function (stage) { return trimmedName(stage.name); });
+        var wire = { onMatch: 'on_match', onNoMatch: 'on_no_match', onDone: 'on_done' };
+        var warnings = [];
+        Object.keys(wire).forEach(function (key) {
+            var target = routing[key];
+            if (!isSet(target) || typeof target.stage !== 'string') return;
+            var at = names.indexOf(target.stage.trim());
+            if (at === -1 || at > index) return;
+            if (at === 0 && (stages[0].detector || {}).type === 'motion') return;
+            if (!leadsBackTo(stages, names, at, index)) return;
+            warnings.push('stages[' + index + '].routing.' + wire[key] + ': goes back to stages[' + at
+                + '], which leads back here, so a window can run the same stages again until max_rings ends it.');
+        });
+        return warnings;
+    }
+
     function routingWarnings(stage, path) {
         var routing = stage.routing;
         if (!isSet(routing) || isSet(routing.onDone) || isFreeFormVlm(stage.detector)) return [];
@@ -470,9 +636,22 @@
         if (hasSyntheticStage(state)) {
             warnings.push('stages: a synthetic stage runs on-demand only — live streams matching this config will refuse to start.');
         }
+        stages.forEach(function (stage, index) {
+            var selection = stage.frameSelection;
+            if ((stage.detector || {}).type !== 'motion' || !selection || !selection.mode || selection.mode === 'all') return;
+            warnings.push('stages[' + index + '].frame_selection: a motion stage compares each frame with the one before it;'
+                + ' looking at fewer frames keeps it from seeing movement. Set it back to every frame.');
+        });
+        stages.forEach(function (stage, index) {
+            var source = deadCropSource(stages, mode, index);
+            if (source === -1) return;
+            warnings.push('stages[' + index + '].frame_selection: looks at different frames than stages[' + source
+                + '], so it never gets a box to look inside.');
+        });
         if (mode !== 'conditional') return warnings;
         stages.forEach(function (stage, index) {
             warnings.push.apply(warnings, routingWarnings(stage, 'stages[' + index + ']'));
+            warnings.push.apply(warnings, backRouteWarnings(stages, index));
         });
         return warnings;
     }
@@ -482,14 +661,37 @@
      * a save still allows, as `warnings`. Pure; each message starts with the member's wire
      * path (`stages[1].crop: ...`).
      */
+    /**
+     * The steps still waiting for what they look for, as errors in validateChain's form. The
+     * Manager asks for picks even where the service would take none: an object step's empty
+     * list means everything there, which should be chosen on purpose with Select all.
+     */
+    function missingPicks(state) {
+        var named = function (list) {
+            return Array.isArray(list) && list.some(function (name) { return typeof name === 'string' && name.trim() !== ''; });
+        };
+        var errors = [];
+        (state.stages || []).forEach(function (stage, index) {
+            var detector = stage.detector || {};
+            var path = 'stages[' + index + ']';
+            if ((detector.type === 'object' || detector.type === 'scene') && !named(detector.classes)) {
+                errors.push(path + '.detector.classes: pick at least one thing to look for.');
+            } else if (detector.type === 'vlm' && detector.mode === 'detect' && !named((detector.detect || {}).classes)) {
+                errors.push(path + '.detector.detect.classes: add at least one thing to check for.');
+            }
+        });
+        return errors;
+    }
+
     function validateChain(state) {
         var stages = state.stages || [];
         var mode = chainMode(state);
         var errors = chainLevelErrors(state, mode);
-        if (stages.length === 0) errors.push('stages: add at least one stage.');
+        if (stages.length === 0) errors.push('stages: add at least one step.');
         var names = stages.map(function (stage) { return trimmedName(stage.name); });
         var entryIsMotion = stages.length > 0 && (stages[0].detector || {}).type === 'motion';
         var motionEntry = entryIsMotion ? trimmedName(stages[0].name) : '';
+        var windowStage = windowStageIndex(state);
         var seen = {};
         stages.forEach(function (stage, index) {
             var path = 'stages[' + index + ']';
@@ -505,6 +707,7 @@
                 errors.push(path + '.detector.type: motion runs only as the entry stage; a later motion stage would compare frames across routed gaps.');
             }
             errors.push.apply(errors, frameSelectionErrors(stage, type, path));
+            errors.push.apply(errors, frameCadenceErrors(stage, windowStage, path));
             errors.push.apply(errors, cropErrors(stages, index, mode, path));
             errors.push.apply(errors, trackingErrors(stage, trackingBlocker(state, index), path));
             errors.push.apply(errors, routingErrors(stage, mode, names, motionEntry, path));
@@ -582,14 +785,21 @@
         return next;
     }
 
-    /** Renames stage `index` and points every route that named its old trimmed name at the new one. */
+    /**
+     * Renames stage `index` and points every route that named its old trimmed name at the new one.
+     * Routes stay put when either name is shared with another stage, since they can't tell which
+     * stage they meant.
+     */
     function renameStage(state, index, name) {
         checkIndex(index, state.stages.length);
         var next = copy(state);
         var from = trimmedName(next.stages[index].name);
         var to = trimmedName(name);
+        var shared = next.stages.some(function (stage, i) {
+            return i !== index && (trimmedName(stage.name) === from || trimmedName(stage.name) === to);
+        });
         next.stages[index].name = name;
-        if (from === '' || to === '') return next;
+        if (from === '' || to === '' || shared) return next;
         next.stages.forEach(function (stage) {
             if (!stage.routing) return;
             ['onMatch', 'onNoMatch', 'onDone'].forEach(function (key) {
@@ -610,11 +820,16 @@
         newChain: newChain,
         collectChainDetector: collectChainDetector,
         validateChain: validateChain,
+        missingPicks: missingPicks,
         hasSyntheticStage: hasSyntheticStage,
         trackingBlocker: trackingBlocker,
+        windowStageIndex: windowStageIndex,
+        selectedFrameCount: selectedFrameCount,
         isFreeFormVlm: isFreeFormVlm,
         withFreeFormRoutesAsOnDone: withFreeFormRoutesAsOnDone,
         offersCrop: offersCrop,
+        cropSources: cropSources,
+        cropFrameChoices: cropFrameChoices,
         lockedMotionRule: lockedMotionRule,
         setStageType: setStageType,
         switchMode: switchMode,
