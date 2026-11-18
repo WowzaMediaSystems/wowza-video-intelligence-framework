@@ -7,7 +7,7 @@
     // automatically by the CI version-bump workflow (see
     // .github/workflows/reusable-update-version-file.yml) in the same
     // commit that bumps VERSION.
-    var UI_VERSION = '1.2.0';
+    var UI_VERSION = '1.2.1';
 
     // ── credential / serverUrl resolution ───────────────────────────────────
     // Consolidates the near-identical boilerplate previously duplicated at
@@ -237,15 +237,14 @@
     // Configs, Stream Config Defaults, On-Demand Configs (vod.html's settings
     // view in Configs chrome), or Secrets. The stored value is whitelisted
     // here, never loaded raw; no memory lands on Stream Configs.
-    // ── header tab counts ───────────────────────────────────────────────────
-    // The Live Streams and On-Demand counts every VIF page's tab rows carry: the
-    // On-Demand total from the VOD jobs API, the active live streams from the status
-    // wire, refreshed every 15 s. A page may carry a second tab row whose counts use
-    // the same ids with a "-cfg" suffix. Failures leave the placeholders. The
+    // ── menu counts ─────────────────────────────────────────────────────────
+    // The Live Streams and On-Demand counts on every VIF page's menu (vif-nav.js):
+    // the On-Demand total from the VOD jobs API, the active live streams from the
+    // status wire, refreshed every 15 s. Failures leave the placeholders. The
     // fragments have no unload hook, so arming clears the previous page's pollers.
     VIF.core.armTabCounts = function () {
         function counters(id) {
-            return [id, id + '-cfg'].map(function (x) { return document.getElementById(x); }).filter(Boolean);
+            return [document.getElementById(id)].filter(Boolean);
         }
         var ondemand = counters('vif-tab-ondemand-count');
         var live = counters('vif-tab-live-count');
@@ -275,18 +274,6 @@
         if (window.__vifVodTabTimers) { window.__vifVodTabTimers.forEach(clearInterval); window.__vifVodTabTimers = null; }
         if (window.__vifTabCountTimers) window.__vifTabCountTimers.forEach(clearInterval);
         window.__vifTabCountTimers = [setInterval(refreshOnDemand, 15000), setInterval(refreshLive, 15000)];
-    };
-
-    VIF.core.gotoConfigs = function () {
-        var page = null;
-        try { page = sessionStorage.getItem('vifConfigsPage'); } catch (e) { /* non-sticky */ }
-        if (page === 'settings') {
-            try { sessionStorage.setItem('vifVodView', 'settings'); } catch (e) { /* best effort */ }
-            loadAjaxPluginContent('server', 'vif', 'vod.html', '');
-            return;
-        }
-        var remembered = page === 'default.html' || page === 'secrets.html';
-        loadAjaxPluginContent('server', 'vif', remembered ? page : 'stream-config.html', '');
     };
 
     // ── toasts ───────────────────────────────────────────────────────────────

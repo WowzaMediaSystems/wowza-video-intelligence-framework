@@ -218,18 +218,7 @@ VIF.vod = VIF.vod || {};
 
 		playbackUrl() {
 			const s = this.state;
-			if (!s.job || !s.job.file) return null;
-			const props = (typeof pluginProperties !== 'undefined' && pluginProperties) || {};
-			const conn = (window.VIF && VIF.core && VIF.core.resolveServer) ? VIF.core.resolveServer() : null;
-			if (!conn) return null;
-			let engineHost;
-			try { engineHost = new URL(conn.serverUrl).hostname; } catch (e) { return null; }
-			const host = props.playback_host || engineHost;
-			const port = props.playback_port ? ':' + props.playback_port : ':1935';
-			// _definst_ is mandatory; per-segment encoding so '#' or '?' in a legal
-			// file name never truncates the path.
-			const file = s.job.file.split('/').map(encodeURIComponent).join('/');
-			return conn.protocol + '//' + host + port + '/vod/_definst_/mp4:' + file + '/playlist.m3u8';
+			return s.job ? V.filePlaybackUrl(s.job.file) : null;
 		},
 
 		async startPlayer(seekMs) {
@@ -238,10 +227,8 @@ VIF.vod = VIF.vod || {};
 			const url = this.playbackUrl();
 			if (!url) return;
 			const gen = this.gen;
-			// Probe before mounting: a compose Engine without the vod application answers
-			// 404 (possibly as a CORS throw) — keep the thumbnail and say why.
-			let ok = false;
-			try { ok = (await fetch(url, { cache: 'no-store' })).ok; } catch (e) { /* no app or unreachable */ }
+			// Probe before mounting: with no playlist, keep the thumbnail and say why.
+			const ok = await V.playlistAnswers(url);
 			if (gen !== V.gen) return;
 			if (s.playerOn) { if (seekMs !== undefined) this.seekTo(seekMs); return; }
 			if (!ok) {
@@ -274,7 +261,7 @@ VIF.vod = VIF.vod || {};
 
 		mountPlayer(url) {
 			const s = this.state;
-			const video = h('video', { controls: '', playsinline: '', preload: 'metadata' });
+			const video = V.playerVideo();
 			if (window.Hls && Hls.isSupported()) {
 				const hls = new Hls({ enableWorker: true });
 				this.hls = hls;
@@ -306,6 +293,7 @@ VIF.vod = VIF.vod || {};
 			video.addEventListener('timeupdate', () => this.movePlayhead());
 			video.addEventListener('seeked', () => { this.seekInFlight = false; this.movePlayhead(); });
 			video.loop = V.playerLoopOn();
+			video.muted = V.playerMutedOn();
 			this.videoEl = video;
 			s.playerOn = true;
 			s.playError = null;
@@ -735,17 +723,10 @@ VIF.vod = VIF.vod || {};
 			}
 			return h('div', null,
 				inner,
-				// Every element in this row gets the same 16px line box (the button
-				// explicitly - a button does not inherit line-height). The label
-				// zeroes its margins and weight: the Manager's Bootstrap styles
-				// label with a 5px bottom margin (which flex centers into a 2.5px
-				// droop) and bold text.
-				s.playerOn ? h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:6px;line-height:16px' },
+				// A button does not inherit line-height, so Stop player is given the row's.
+				s.playerOn ? h('div', { class: 'prow' },
 					h('span', { class: 'hint' }, 'Click a window on the strip or the timeline to jump there.'),
-					h('label', { class: 'hint', style: 'margin:0 0 0 auto;font-weight:400;display:inline-flex;align-items:center;gap:5px;cursor:pointer' },
-						h('input', { type: 'checkbox', style: 'margin:0;width:12px;height:12px', checked: V.playerLoopOn() ? 'checked' : null,
-							onchange: (e) => { V.setPlayerLoop(e.target.checked); if (this.videoEl) this.videoEl.loop = e.target.checked; } }),
-						'Loop'),
+					V.playerToggles(() => this.videoEl),
 					h('button', { class: 'btn btn-sm btn-ghost', style: 'line-height:16px',
 						onclick: () => { this.stopPlayer(); this.render(); } }, 'Stop player')) : null,
 				s.playError ? h('div', { class: 'hint', style: 'margin-top:6px;color:var(--alert-color)' }, s.playError) : null);
@@ -1110,7 +1091,7 @@ VIF.vod = VIF.vod || {};
 					h('span', null, name + (l && l.type ? ' · ' + l.type : ''))));
 			}
 			delivered.push(h('div', { class: 'vdel' }, h('span', { class: 'sq adv' }),
-				h('span', null, 'Verdict on the job document', h('span', { class: 'muted' }, ' — and its lifecycle webhook'))));
+				h('span', null, 'Verdict on the job document', h('span', { class: 'muted' }, ' — and its job status webhook'))));
 
 			return h('div', { class: 'vrail' },
 				h('div', { class: 'vsl vrailhead' }, 'Pipeline — Verify'),

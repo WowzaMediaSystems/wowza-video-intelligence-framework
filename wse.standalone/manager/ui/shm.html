@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.0">
+<link rel="stylesheet" href="wse-plugins/server/vif/css/vif.css?v=1.2.1">
 <style>
 
     .vif-dashboard .plugin-scroll {
@@ -15,34 +15,18 @@
         box-sizing: border-box;
     }
 
-    .vif-dashboard .sticky-page-header {
-        position: sticky;
-        top: 0;
-        z-index: 20;
-        background: #fff;
-    }
-    /* Page title styling lives in vif.css (.vif-header-title — shared with
-       vod.html), as does the tabs row. */
+    /* The "Active Streams" section row. */
     .vif-dashboard .streams-header {
         align-items: center;
         margin-bottom: 10px;
         min-width: 0;
         border-bottom-color: #e3e6ea;
     }
-    /* The title header butts against the tabs row below it (which carries its
-       own vertical padding); only the sticky page header loses the gap. */
-    .vif-dashboard .sticky-page-header .streams-header {
-        margin-bottom: 0;
-    }
-    /* The second .streams-header (the "Active Streams" section row) keeps a
-       smaller section-heading scale. */
     .vif-dashboard .streams-header-title h2 {
         font-size: 15px;
         font-weight: 700;
         color: #1b2430;
     }
-
-    /* Tabs row styles are shared with vod.html — see vif.css. */
 
     .vif-dashboard .streams-header-title {
         display: flex;
@@ -575,27 +559,16 @@
     }
 </style>
 
-<div class="vif-dashboard vif-plugin">
-<div class="plugin-scroll">
+<div class="vif-dashboard vif-plugin vif-shell">
+<nav id="vif-sidenav" class="vif-sidenav" aria-label="VIF pages"></nav>
+<div class="plugin-scroll vif-main">
     <div class="content-wrapper">
 
-        <!-- Page header: same sticky-page-header / streams-header structure as
-             stream-config.html / default.html / playback.html (title left, buttons right,
-             divider below). The config buttons stand in for the other pages' Back button. -->
-        <div class="sticky-page-header">
-        <div class="streams-header">
-            <h2 class="vif-header-title" title="Video Intelligence Framework">VIF Dashboard</h2>
-        </div>
-        <!-- Global VIF nav: the same four tabs on every VIF page — the row IS the
-             navigation, so there are no per-page config/back buttons. This page is
-             the Live Streams tab (inert active pill). Counts are kept current by
-             the tab script at the bottom of this fragment. -->
-        <div class="vif-tabs-row">
-            <span class="vif-tab is-active">Live Streams <span class="vif-tab-count" id="vif-tab-live-count">0</span></span>
-            <button class="vif-tab" id="vif-tab-ondemand" onclick="loadAjaxPluginContent('server','vif','vod.html','')">On-Demand <span class="vif-tab-count" id="vif-tab-ondemand-count">&ndash;</span></button>
-            <button class="vif-tab" onclick="VIF.core.gotoConfigs()">Configs</button>
-            <span class="vif-tabs-meta item-right">Auto-refresh 1s</span>
-        </div>
+        <!-- The left menu (VIF.nav, mounted by the script at the bottom) is the
+             navigation on every VIF page; this page is its Live Streams entry. -->
+        <div class="vif-page-head">
+            <h2 class="vif-page-title">Live Streams</h2>
+            <span class="vif-page-meta">Auto-refresh 1s</span>
         </div>
 
         <div id="dashboard-banner" class="dashboard-banner" style="display:none;"></div>
@@ -684,8 +657,7 @@
                     return;
                 }
                 if (last === 'configs') {
-                    // Same whitelist as VIF.core.gotoConfigs (this script runs
-                    // before the core script loads, so it cannot call it).
+                    // Whitelisted here: this script runs before any helper loads.
                     var page = sessionStorage.getItem('vifConfigsPage');
                     if (page === 'settings') {
                         sessionStorage.setItem('vifVodView', 'settings');
@@ -701,25 +673,26 @@
         } catch (e) { /* storage unavailable — stay on Live */ }
     })();
 </script>
-<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.0"></script>
-<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vif-core.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-nav.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-api.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-sdk.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-v2-map.js?v=1.2.1"></script>
+<script src="wse-plugins/server/vif/js/vif-dashboard.js?v=1.2.1"></script>
 <!-- vod-main.js only for its VIF.vod.api facade (the On-Demand tab count);
      V.init is not called here. Needs vif-api/vif-sdk, loaded above. -->
-<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.2.0"></script>
+<script src="wse-plugins/server/vif/js/vod/vod-main.js?v=1.2.1"></script>
 <script>
+    VIF.nav.mount(document.getElementById('vif-sidenav'), { active: 'live' });
     VIF.dashboard.init();
     // Click-popover tips: upgrades every "?" help-tip (native title -> a modern
     // card that opens on click, closes on the next click / Escape / scroll) and
     // serves the rows' notice chips via the same data-vif-tip contract.
     VIF.core.initClickTips(document.querySelector('.vif-dashboard'));
 
-    // Header tabs: mirror the live-stream count the dashboard already maintains
-    // into the Live Streams tab, and poll the VOD jobs API for the On-Demand
-    // count + state summary. Purely additive — any failure leaves the tabs
-    // rendered with their placeholder values.
+    // Menu counts: mirror the live-stream count the dashboard already maintains
+    // into the Live Streams entry, and poll the VOD jobs API for the On-Demand
+    // count. Purely additive — any failure leaves the placeholders.
     (function () {
         var live = document.getElementById('active-streams');
         var tabLive = document.getElementById('vif-tab-live-count');

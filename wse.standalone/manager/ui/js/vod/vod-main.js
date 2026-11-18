@@ -130,24 +130,15 @@ VIF.vod = VIF.vod || {};
 		const root = document.getElementById('vod-root');
 		let current = null;
 
-		// Page-level navigation is the global tab row (part of this fragment's
-		// header); each sub-view carries its own up-one-level button. The settings
-		// view presents as the Configs area's On-Demand Configs surface — its
-		// chrome lights the Configs pill and shows the config sub-tabs, so a
-		// Configs sub-tab click never appears to change the primary tab.
+		// Page-level navigation is the left menu; each sub-view carries its own
+		// up-one-level button. The settings view is the menu's On-Demand Configs
+		// entry (under Configs), every other view its On-Demand entry.
 		function setChrome(name) {
 			const configs = name === 'settings';
-			const show = (id, on) => {
-				const el = document.getElementById(id);
-				if (el) el.style.display = on ? '' : 'none';
-			};
-			show('vod-tabs-ondemand', !configs);
-			show('vod-tabs-configs', configs);
-			show('vod-subtabs-configs', configs);
-			// The chrome decides the stickiness too: living on the settings view
-			// counts as the Configs area (that's the pill that is lit), every
-			// other view as On-Demand — so re-entering VIF and the Configs tab
-			// itself both return to the surface last in use.
+			if (window.VIF.nav) window.VIF.nav.setActive(configs ? 'ondemand-settings' : 'ondemand');
+			// The lit entry decides the stickiness too: living on the settings
+			// view counts as the Configs area, every other view as On-Demand — so
+			// re-entering VIF returns to the surface last in use.
 			try {
 				sessionStorage.setItem('vifLastTab', configs ? 'configs' : 'ondemand');
 				if (configs) sessionStorage.setItem('vifConfigsPage', 'settings');

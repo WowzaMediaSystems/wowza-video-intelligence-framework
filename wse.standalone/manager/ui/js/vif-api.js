@@ -2774,6 +2774,7 @@
     return {
       "connection": json["connection"],
       "endpointDegraded": json["endpoint_degraded"] == null ? void 0 : json["endpoint_degraded"],
+      "awaitingResponseSeconds": json["awaiting_response_seconds"] == null ? void 0 : json["awaiting_response_seconds"],
       "reason": json["reason"] == null ? void 0 : json["reason"],
       "serviceVersion": json["service_version"] == null ? void 0 : json["service_version"],
       "performance": json["performance"] == null ? void 0 : PerformanceFromJSON(json["performance"])
@@ -2789,6 +2790,7 @@
     return {
       "connection": value["connection"],
       "endpoint_degraded": value["endpointDegraded"],
+      "awaiting_response_seconds": value["awaitingResponseSeconds"],
       "reason": value["reason"],
       "service_version": value["serviceVersion"],
       "performance": PerformanceToJSON(value["performance"])
@@ -3096,7 +3098,8 @@
       "reachable": json["reachable"],
       "accepted": json["accepted"],
       "code": json["code"] == null ? void 0 : json["code"],
-      "error": json["error"] == null ? void 0 : json["error"]
+      "error": json["error"] == null ? void 0 : json["error"],
+      "message": json["message"] == null ? void 0 : json["message"]
     };
   }
   function SvdEndpointProbeResultToJSON(json) {
@@ -3110,7 +3113,8 @@
       "reachable": value["reachable"],
       "accepted": value["accepted"],
       "code": value["code"],
-      "error": value["error"]
+      "error": value["error"],
+      "message": value["message"]
     };
   }
 
@@ -5750,7 +5754,7 @@
       return await response.value();
     }
     /**
-     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  An inline config may hold its credentials either way: a literal value is redacted out of the job\'s record (never written to disk, so a resume must re-supply it), while a `*_secret` reference is kept by name — the value resolves when the job runs, and the job stays resumable with no body.  `400` for anything wrong with the body: a missing or unsupported `file`, a `file` whose video is in a codec no job decodes (`detail` names the codec), an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` or config `*_secret` naming no configured secret, a config slot carrying both a literal credential and its `*_secret`. `503` when VOD is unavailable on this Engine. 
+     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  An inline config may hold its credentials either way: a literal value is redacted out of the job\'s record (never written to disk, so a resume must re-supply it), while a `*_secret` reference is kept by name — the value resolves when the job runs, and the job stays resumable with no body.  `400` for anything wrong with the body: a missing or unsupported `file`, a `file` whose video is in a codec no job decodes (`detail` names the codec), an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, a synthetic or Verify detector or a chain\'s synthetic stage left with no `endpoint.address` once the default config has filled what it inherits, one whose `endpoint.address` is NVIDIA\'s hosted detector (`nvcf.nvidia.com`) with no `endpoint.function_id` once the default config has filled what it inherits, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` or config `*_secret` naming no configured secret, a config slot carrying both a literal credential and its `*_secret`. `503` when VOD is unavailable on this Engine. 
      * Submit a file for analysis
      */
     async createVodJobRaw(requestParameters, initOverrides) {
@@ -5776,7 +5780,7 @@
       return new JSONApiResponse(response, (jsonValue) => VodJobFromJSON(jsonValue));
     }
     /**
-     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  An inline config may hold its credentials either way: a literal value is redacted out of the job\'s record (never written to disk, so a resume must re-supply it), while a `*_secret` reference is kept by name — the value resolves when the job runs, and the job stays resumable with no body.  `400` for anything wrong with the body: a missing or unsupported `file`, a `file` whose video is in a codec no job decodes (`detail` names the codec), an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` or config `*_secret` naming no configured secret, a config slot carrying both a literal credential and its `*_secret`. `503` when VOD is unavailable on this Engine. 
+     * Queues an offline analysis of `file`, a path under the content directory as `GET /vod/files` lists it, and answers as soon as the job is queued; progress is polled from the job. The job\'s configuration is resolved when it is submitted, in the same layers a stream\'s is: `default config < stream_group_config < config`. `stream_group_config` names a stream group config (its match rule plays no part — the job uses its config); `config` is an inline config layered over it, or over the default config alone. At least one of the two is required; both are allowed. The layering rules are the contract\'s: a `detector` declared at a layer replaces the whole detector below it, `listeners` layer per entry, everything else field by field. What the job resolved to is recorded on it (`effective_config` on the single-job view) and a later edit of the group never touches a job already submitted.  An inline config may hold its credentials either way: a literal value is redacted out of the job\'s record (never written to disk, so a resume must re-supply it), while a `*_secret` reference is kept by name — the value resolves when the job runs, and the job stays resumable with no body.  `400` for anything wrong with the body: a missing or unsupported `file`, a `file` whose video is in a codec no job decodes (`detail` names the codec), an unknown `stream_group_config`, neither configuration member, a configuration that selects no detector or is inactive, a synthetic or Verify detector or a chain\'s synthetic stage left with no `endpoint.address` once the default config has filled what it inherits, one whose `endpoint.address` is NVIDIA\'s hosted detector (`nvcf.nvidia.com`) with no `endpoint.function_id` once the default config has filled what it inherits, no runnable listener together with `store_results: false`, an unusable `lifecycle_webhook` URL, a `lifecycle_webhook_secret` or config `*_secret` naming no configured secret, a config slot carrying both a literal credential and its `*_secret`. `503` when VOD is unavailable on this Engine. 
      * Submit a file for analysis
      */
     async createVodJob(vodJobRequest, initOverrides) {

@@ -11,6 +11,33 @@
 
     var DASHBOARD_COMPACT_METRICS = true;
 
+    /**
+     * The row's line about the remote server a stream's analysis depends on: null when the
+     * stream has none, '' while it answers, else what is wrong. A chain hears of it only once
+     * a step that uses one has run.
+     */
+    VIF.dashboard.endpointHealthText = function (stream) {
+        var type = stream.detector_type;
+        if (type !== 'vlm' && type !== 'synthetic' && type !== 'chain') return null;
+        if (stream.endpoint_degraded !== true && stream.vlm_degraded !== true) return '';
+        if (type === 'chain') return 'AI offline — a step’s AI server can’t be reached';
+        return type === 'synthetic' ? 'AI offline — SVD endpoint unreachable' : 'AI offline — VLM endpoint unreachable';
+    };
+
+    /** Seconds a stream may wait on one window before its row says so: longer when a remote server answers it. */
+    VIF.dashboard.RESPONSE_OVERDUE_SECONDS = { remote: 60, local: 15 };
+
+    /** The row's line about a window the service has not answered: '' while the wait is within what the stream's analysis allows. */
+    VIF.dashboard.responseOverdueText = function (stream) {
+        var types = stream.detector_type === 'chain' ? (stream.stage_types || []) : [stream.detector_type];
+        // A chain whose steps are unknown gets the longer allowance rather than a false alarm.
+        var remote = !types.length || types.some(function (type) { return type === 'vlm' || type === 'synthetic'; });
+        var waited = Number(stream.awaiting_response_seconds);
+        var limits = VIF.dashboard.RESPONSE_OVERDUE_SECONDS;
+        var limit = remote ? limits.remote : limits.local;
+        return isFinite(waited) && waited >= limit ? 'No response for ' + waited + ' s — analysis is slow or stalled' : '';
+    };
+
     VIF.dashboard.init = function () {
 
         if (typeof window.__vifPlaybackDestroy === 'function') {
@@ -558,31 +585,14 @@
                     sts.textContent = `${stream.status}`;
                     sts.className = stream.status.toLowerCase() == 'connected' ? 'text-good' : stream.status.toLowerCase() == 'disabled' || stream.status.toLowerCase() == 'error' ? 'text-alert' : 'text-warn';
 
-                    // Upstream-endpoint health (endpoint_degraded; legacy spelling
-                    // vlm_degraded) for the detectors served by a remote endpoint:
-                    // the VLM server and the synthetic detector's SVD NIM.
                     vlmHealth = document.getElementById(id+"-vlm-health");
-                    if (stream.detector_type === 'vlm' || stream.detector_type === 'synthetic') {
-                        vlmHealth.style.display = '';
-                        if (stream.endpoint_degraded === true || stream.vlm_degraded === true) {
-                            vlmHealth.textContent = stream.detector_type === 'synthetic'
-                                ? "AI offline — SVD endpoint unreachable"
-                                : "AI offline — VLM endpoint unreachable";
-                            // Full message on hover (it truncates to one reserved
-                            // line); keep the row-status-line slot class.
-                            vlmHealth.title = vlmHealth.textContent;
-                            vlmHealth.className = "row-status-line text-alert";
-                        } else {
-                            vlmHealth.textContent = "";
-                            vlmHealth.title = "";
-                            vlmHealth.className = "row-status-line";
-                        }
-                    } else {
-                        vlmHealth.style.display = 'none';
-                        vlmHealth.textContent = "";
-                        vlmHealth.title = "";
-                        vlmHealth.className = "row-status-line";
-                    }
+                    const offline = VIF.dashboard.endpointHealthText(stream);
+                    const overdue = offline ? '' : VIF.dashboard.responseOverdueText(stream);
+                    vlmHealth.style.display = offline !== null || overdue ? '' : 'none';
+                    vlmHealth.textContent = offline || overdue;
+                    // Full message on hover: it truncates to one reserved line.
+                    vlmHealth.title = vlmHealth.textContent;
+                    vlmHealth.className = "row-status-line" + (offline ? " text-alert" : overdue ? " text-warn" : "");
 
                     // vi_service_url is user-entered config relayed verbatim by
                     // /status; it may not parse (no scheme) or parse hostless.

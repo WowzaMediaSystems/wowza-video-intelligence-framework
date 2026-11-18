@@ -27,6 +27,9 @@ Changes to the top-level defaults in [Default.json](/docker/conf.modules/vif/Def
 - `object_analysis.tiling_properties.*`
 - `scene_analysis.confidence_threshold`
 - `scene_analysis.sensitivity`
+- `synthetic_analysis.endpoint`, `use_tls`, `tls_ca_cert`, `tls_client_cert`, `function_id`
+
+The synthetic detector server is edited on the Stream Config Defaults page ([default.html](/docker/manager/ui/default.html)), credentials included (`api_key` / `api_key_secret`, `tls_client_key` / `tls_client_key_secret`). A synthetic config or chain step that leaves one of these blank inherits it at run time, and the form shows the inherited value as the field's placeholder (the blank choice of the secure-connection select reads `Default (Always)` / `Default (Never)`). A config whose own server is of the other kind than the default's (NVIDIA's hosted detector against a self-hosted one) inherits nothing from it, and its hints are blank. It is separate from the Verify baseline (`detectors.verify`), which a Verify config inherits instead.
 
 The relevant UI logic lives in:
 
@@ -56,7 +59,7 @@ The VLM section (shown for `Detector Type = vlm`, behind `?vlm=true`) is mode-dr
 
 ### Event Listener Defaults
 
-- new listener `methods`: `disabled`
+- new listener `methods`: the type's own method when the detector allows it — `Id3Event` `rollup`, `OverlayEvent` and `ObjectTracking` `immediate`, `LogFileEvent` and `WebhookEvent2` `batch` — otherwise the first method the detector allows
 - listener confidence threshold default: `0.7`
 - built-in listener presets shown in the create UI:
   - `OverlayEvent`

@@ -1,10 +1,10 @@
 window.VIF_LISTENER_PROPERTIES = window.VIF_LISTENER_PROPERTIES || {};
 window.VIF_LISTENER_PROPERTIES['OverlayEvent'] = [
-    { object_methods: ['immediate'] },
-    { scene_methods: ['immediate'] },
-    { motion_methods: ['immediate'] },
-    { vlm_methods: ['immediate'] },
-    { synthetic_methods: ['immediate'] },
+    { object_methods: ['immediate','batch','rollup'] },
+    { scene_methods: ['immediate','batch'] },
+    { motion_methods: ['immediate','batch','rollup'] },
+    { vlm_methods: ['immediate','batch'] },
+    { synthetic_methods: ['immediate','batch'] },
     { requires: ['RENDER_TARGET'] },
     { key: 'fade_step', label: 'Fade Step', type: 'number', default: 20, tooltip: 'Number of frames over which overlays fade out' },
     { key: 'jitter', label: 'Jitter', type: 'number', default: 0, tooltip: 'Don\'t draw if the pixel change is less than this' },

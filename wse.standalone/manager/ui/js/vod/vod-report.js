@@ -10,9 +10,29 @@ VIF.vod = VIF.vod || {};
 (function (V) {
 	'use strict';
 	const { h, clear, api, toast, DETECTOR_META } = V;
+	const { sure } = VIF.chainResults;
+	// The detector's words for a verdict, and its score, as the page says them.
+	const verdictWord = (verdict) => (verdict === 'synthetic' ? 'AI-generated' : verdict);
+	/**
+	 * A score or a threshold as a percentage. Named beside the figure it is judged against, it
+	 * takes as many decimals as it needs to read apart from it; alone, anything short of
+	 * exactly 0 or 1 never reads 0% or 100%.
+	 */
+	function likely(score, against) {
+		let places = 0;
+		if (typeof against === 'number' && against !== score) {
+			while (places < 4 && (100 * score).toFixed(places) === (100 * against).toFixed(places)) places++;
+		}
+		const shown = Number((100 * score).toFixed(places));
+		const step = Math.pow(10, -places);
+		if (shown === 0 && score > 0) return '<' + step.toFixed(places) + '%';
+		if (shown === 100 && score < 1) return '>' + (100 - step).toFixed(places) + '%';
+		return shown + '%';
+	}
 
 	const WLIST_PAGE = 1000; // windows-pane rows per page; motion jobs store one row per frame
 	const STRIP_HUES = 6; // distinct class colors — must match the --strip-c0..c5 tokens in vod.css
+	const STRIP_BANDS = 2; // the most classes one cell stacks as bands; a cell with more adds dots
 
 	const view = {
 		state: null,
@@ -30,7 +50,7 @@ VIF.vod = VIF.vod || {};
 				rows: [], rowsTotal: 0, noResults: null,
 				browser: { offset: 0, limit: 50, from_ms: '', to_ms: '', page: null, error: null, seq: 0 },
 				tail: false, settlePolls: 0, thumbUrl: null, openRows: new Set(),
-				playerOn: false, playError: null, stripSel: null, wpage: 0,
+				playerOn: false, playError: null, stripSel: null, clipSearch: '', wpage: 0,
 				browserOpen: false, openZero: new Set(), openZeroPane: new Set(),
 			};
 			if (!this.state.id) { this.state.error = 'No job selected.'; this.render(); return; }
@@ -42,6 +62,7 @@ VIF.vod = VIF.vod || {};
 
 		destroy() {
 			if (this.timer) { clearInterval(this.timer); this.timer = null; }
+			clearTimeout(this.searchTimer);
 			if (this.state && this.state.thumbUrl) { URL.revokeObjectURL(this.state.thumbUrl); this.state.thumbUrl = null; }
 			this.stopPlayer();
 		},
@@ -101,10 +122,12 @@ VIF.vod = VIF.vod || {};
 				this.reloading = false;
 			}
 			if (gen !== V.gen || !changed) return;
-			// Don't repaint over the user's typing; the next progressed tick catches up.
+			// Don't repaint over the user's typing; the next progressed tick catches up. The
+			// list's search box is redrawn with its focus and caret, so it holds nothing back.
 			const active = document.activeElement;
-			if (!first && active && this.root.contains(active) && active.matches('input,textarea,select')) return;
-			this.render();
+			if (!first && active && this.root.contains(active) && active.matches('input,textarea,select')
+				&& !active.matches('.chain-search')) return;
+			this.renderKeepingSearch();
 		},
 
 		/** Appends only the rows not fetched yet — the results file is append-only. */
@@ -281,23 +304,7 @@ VIF.vod = VIF.vod || {};
 
 		playbackUrl() {
 			const s = this.state;
-			if (!s.job || !s.job.file) return null;
-			const props = (typeof pluginProperties !== 'undefined' && pluginProperties) || {};
-			const conn = (window.VIF && VIF.core && VIF.core.resolveServer) ? VIF.core.resolveServer() : null;
-			if (!conn) return null;
-			let engineHost;
-			try { engineHost = new URL(conn.serverUrl).hostname; } catch (e) { return null; }
-			// Same overrides the live dashboard player honors; default to the Engine's
-			// standard streaming port. Page protocol, so an https Manager never tries
-			// mixed-content http media (it needs playback_host/playback_port pointed at
-			// an https streaming port instead).
-			const host = props.playback_host || engineHost;
-			const port = props.playback_port ? ':' + props.playback_port : ':1935';
-			// _definst_ is mandatory: without it the Engine parses a subfolder (qa-vod/…)
-			// as the application-instance name.
-			// Per segment, not encodeURI: '#' or '?' in a legal file name must not truncate the path.
-			const file = s.job.file.split('/').map(encodeURIComponent).join('/');
-			return conn.protocol + '//' + host + port + '/vod/_definst_/mp4:' + file + '/playlist.m3u8';
+			return s.job ? V.filePlaybackUrl(s.job.file) : null;
 		},
 
 		/** An explicit jump to a moment re-engages Follow: the newest intent wins,
@@ -317,11 +324,9 @@ VIF.vod = VIF.vod || {};
 			const url = this.playbackUrl();
 			if (!url) return;
 			const gen = this.gen;
-			// Probe before mounting: a compose Engine without the vod application answers
-			// 404 (and without CORS headers, so the fetch may throw) — keep the thumbnail
-			// and say why instead of showing a dead player.
-			let ok = false;
-			try { ok = (await fetch(url, { cache: 'no-store' })).ok; } catch (e) { /* no app or unreachable */ }
+			// Probe before mounting: with no playlist, keep the thumbnail and say why
+			// instead of showing a dead player.
+			const ok = await V.playlistAnswers(url);
 			if (gen !== V.gen) return;
 			// A second click (▶ then a strip cell) can resolve its probe after the first
 			// already mounted — never mount twice, just honor the seek.
@@ -356,7 +361,7 @@ VIF.vod = VIF.vod || {};
 
 		mountPlayer(url) {
 			const s = this.state;
-			const video = h('video', { controls: '', playsinline: '', preload: 'metadata' });
+			const video = V.playerVideo();
 			if (window.Hls && Hls.isSupported()) {
 				const hls = new Hls({ enableWorker: true });
 				this.hls = hls;
@@ -387,6 +392,7 @@ VIF.vod = VIF.vod || {};
 			});
 			video.addEventListener('timeupdate', () => this.movePlayhead());
 			video.loop = V.playerLoopOn();
+			video.muted = V.playerMutedOn();
 			this.videoEl = video;
 			s.playerOn = true;
 			s.playError = null;
@@ -460,17 +466,24 @@ VIF.vod = VIF.vod || {};
 			const v = this.videoEl;
 			if (!list || !v || !s.playerOn) return;
 			const t = v.currentTime * 1000;
+			// One row plays at a time: the last one showing that has started, until the next
+			// starts. A clip folded away inside a closed run leaves the run's line to play.
+			const all = Array.from(list.querySelectorAll('[data-from]'));
+			const spans = all.filter((el) => !(el.parentElement && el.parentElement.closest('details:not([open])')));
 			let hit = null;
-			list.querySelectorAll('[data-from]').forEach((el) => {
-				const from = +el.dataset.from;
-				const to = +(el.dataset.to || el.dataset.from);
-				const on = t >= from && (t < to || (to <= from && t < from + 1000));
-				el.classList.toggle('playing', on);
-				if (on) hit = el;
-			});
+			for (const el of spans) if (+el.dataset.from <= t) hit = el;
+			// A search leaves gaps between the rows it lists, so each plays to its own end.
+			const searching = !!(s.clipSearch || '').trim();
+			if (hit && (searching || spans[spans.length - 1] === hit)) {
+				// Nothing follows the last row: it plays to its own end, a single frame for a second.
+				const from = +hit.dataset.from, to = +(hit.dataset.to || hit.dataset.from);
+				if (t >= (to > from ? to : from + 1000)) hit = null;
+			}
+			all.forEach((el) => el.classList.toggle('playing', el === hit));
 			// Follow across pages: when the playhead's row lives on another page of the
 			// windows pane, show that page (the re-render re-enters here and finds it).
-			if (!hit && (force || s.followTail !== false) && s.rows.length > WLIST_PAGE) {
+			// A search lists every page's matches at once, so there is no page to turn.
+			if (!hit && !searching && (force || s.followTail !== false) && s.rows.length > WLIST_PAGE) {
 				const k = this.rowIndexAt(t);
 				const pg = k >= 0 ? Math.floor(k / WLIST_PAGE) : -1;
 				if (pg >= 0 && pg !== s.wpage) { s.wpage = pg; this.render(); return; }
@@ -504,9 +517,34 @@ VIF.vod = VIF.vod || {};
 			return null;
 		},
 
+		/**
+		 * Where a row's stretch of video ends. A clip's stored end is its last sampled frame,
+		 * one sampling step short of where the next clip starts, so the step is added back.
+		 */
+		rowSpanEndMs(r) {
+			const w = (r && r.detection_window) || {};
+			const from = w.from_time_code, to = w.to_time_code, frames = w.frame_count;
+			if (typeof from === 'number' && typeof to === 'number' && to > from && frames > 1) {
+				return Math.round(to + (to - from) / (frames - 1));
+			}
+			return this.rowEndMs(r);
+		},
+
 		/* ---------- derivations ---------- */
 
+		/** What an empty row says: only a prose AI job can have had no answer at all. */
+		nothingLabel(type) {
+			if (type === 'motion') return 'nothing moved';
+			return type === 'vlm' && this.vlmMode() !== 'detect' ? 'no answer' : 'nothing found';
+		},
+
 		rowValue(r, type) {
+			if (type === 'chain') return r.chain.value;
+			// Movement has no meaningful score: more moving areas reads darker.
+			if (type === 'motion') {
+				const n = (r.detections || []).length;
+				return n ? Math.min(1, 0.4 + 0.15 * n) : 0;
+			}
 			if (type === 'synthetic') return typeof r.synthetic_score === 'number' ? r.synthetic_score : 0;
 			const dets = r.detections || [];
 			if (type === 'vlm') return dets.length ? 1 : 0;
@@ -516,6 +554,7 @@ VIF.vod = VIF.vod || {};
 		},
 
 		rowLow(r, type) {
+			if (type === 'chain') return r.chain.quiet;
 			if (type === 'synthetic') return r.verdict !== 'synthetic';
 			return (r.detections || []).length === 0;
 		},
@@ -595,7 +634,10 @@ VIF.vod = VIF.vod || {};
 			}
 			if (w.from_frame && w.to_frame) {
 				if (w.from_frame === w.to_frame) return w.from_frame.replace(/^00:(0?)/, '').replace(/\.000$/, '');
-				return w.from_frame.slice(0, 8) + ' – ' + w.to_frame.slice(0, 8);
+				const end = this.rowSpanEndMs(r);
+				const stored = typeof w.to_time_code === 'number' ? w.to_time_code : null;
+				return w.from_frame.slice(0, 8) + ' – '
+					+ (end !== null && end !== stored ? this.msToPaddedTc(end).slice(0, 8) : w.to_frame.slice(0, 8));
 			}
 			if (typeof w.from_time_code === 'number') return V.fmtMediaMs(w.from_time_code) + ' – ' + V.fmtMediaMs(w.to_time_code || w.from_time_code);
 			return '';
@@ -714,7 +756,7 @@ VIF.vod = VIF.vod || {};
 			} else if (s.noResults) {
 				root.appendChild(h('div', { class: 'empty' }, s.noResults));
 			} else {
-				if (type !== 'chain') root.appendChild(this.renderStrip(type));
+				root.appendChild(this.renderStrip(type));
 				root.appendChild(h('div', { class: 'rbody' },
 					h('div', null, type === 'chain' ? V.chain.windows(this) : this.renderWindows(type)),
 					h('div', null, this.renderFrame(type))));
@@ -779,17 +821,19 @@ VIF.vod = VIF.vod || {};
 
 			if (type === 'chain' && rows.length) {
 				const counts = V.chain.summary(rows);
-				cells.push(cell('Chain windows', String(s.rowsTotal || counts.windows),
-					counts.historical ? counts.historical + ' with incomplete historical detail' : 'complete retained stage history',
-					'Each completed media window contributes one retained chain result.'));
-				cells.push(cell('Stage executions', String(counts.executions), 'across loaded windows',
-					'Every retained execution, including revisits. Earlier executions missing from old records are not counted.'));
-				cells.push(cell('Degraded windows', String(counts.degraded), 'one or more stages unavailable',
-					'Windows containing a degraded stage result.'));
+				const unit = V.chain.unitOf(((s.job.effectiveConfig || s.job.config || {}).detector) || {});
+				const units = unit === 'clip' ? 'Clips' : 'Frames';
+				cells.push(cell(units, String(s.rowsTotal || counts.windows),
+					counts.historical ? counts.historical + ' kept only the final result' : 'every step’s results kept',
+					'Each finished ' + unit + ' adds one result to this job.'));
+				cells.push(cell('Step runs', String(counts.executions), 'across the ' + unit + 's loaded',
+					'Every time a step ran, including a step that ran again. Older records that kept only the final result count just that one.'));
+				cells.push(cell(units + ' with a gap', String(counts.degraded), 'a step couldn’t reach its service',
+					units + ' where at least one step couldn’t reach its service, so that step has no result.'));
 			} else if (type === 'synthetic' && rows.length) {
 				const scores = rows.map((r) => r.synthetic_score).filter((x) => typeof x === 'number');
 				const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-				const peak = scores.length ? Math.max.apply(null, scores) : null;
+				const peak = scores.length ? scores.reduce((a, b) => Math.max(a, b)) : null;
 				const threshold = this.threshold();
 				const flagged = rows.filter((r) => r.verdict === 'synthetic').length;
 				// The headline follows the video-level score (the mean across windows)
@@ -805,7 +849,8 @@ VIF.vod = VIF.vod || {};
 				const RUN_PROMOTES = 5;
 				const over = mean !== null && threshold !== null && mean >= +threshold;
 				const promoted = !over && run >= RUN_PROMOTES;
-				const thrLabel = threshold !== null ? Math.round(100 * +threshold) + '%' : null;
+				const thrLabel = threshold !== null ? likely(+threshold, mean) : null;
+				const meanLabel = mean !== null ? likely(mean, threshold !== null ? +threshold : null) : null;
 				const runFrom = run ? this.rowStartMs(rows[runEnd - run + 1]) : null;
 				const runTo = run ? this.rowEndMs(rows[runEnd]) : null;
 				// Equal billing under the judgment: how much of the timeline each side
@@ -820,15 +865,16 @@ VIF.vod = VIF.vod || {};
 				const knownMs = synMs + realMs;
 				const unscored = rows.filter((r) => r.verdict !== 'synthetic' && r.verdict !== 'real').length;
 				const balance = knownMs ? (synMs >= realMs
-					? 'synthetic ' + V.fmtMediaMs(synMs) + ' · real ' + V.fmtMediaMs(realMs)
-					: 'real ' + V.fmtMediaMs(realMs) + ' · synthetic ' + V.fmtMediaMs(synMs)) : null;
+					? 'AI-generated ' + V.fmtMediaMs(synMs) + ' · real ' + V.fmtMediaMs(realMs)
+					: 'real ' + V.fmtMediaMs(realMs) + ' · AI-generated ' + V.fmtMediaMs(synMs)) : null;
 				// The share line continues the headline when the headline names synthetic
 				// ("Synthetic content detected / in 57% of the video"); under "Likely real
 				// video" it stands alone instead. Duration-based, like the bar it sits on.
-				const synPct = knownMs ? Math.round(100 * synMs / knownMs) : 0;
-				const synPctLabel = flagged && synPct === 0 ? '<1%' : synPct + '%';
+				const synPctLabel = synMs ? likely(synMs / knownMs) : flagged ? '<1%' : '0%';
+				// Only a finished job speaks for the whole video, and only a job still going has more to come.
 				const share = flagged && knownMs
-					? ((over || promoted ? 'in ' : 'synthetic in ') + synPctLabel + ' of the video')
+					? ((over || promoted ? 'in ' : 'AI-generated in ') + synPctLabel + ' of the video'
+						+ (job.state === 'completed' ? '' : isTerminal(job) ? ' analyzed' : ' analyzed so far'))
 					: null;
 				// The tooltip is one explainer paragraph, then Label: value receipts.
 				// One currency throughout the cell: time of the video, never window
@@ -843,30 +889,33 @@ VIF.vod = VIF.vod || {};
 				}
 				if (unscored) receipts.push('Unscored: ' + unscored + (unscored === 1 ? ' window' : ' windows') + ', no score from the service');
 				cells.push(cell('Evaluation',
-					!flagged ? 'No synthetic content detected'
-						: over ? 'Synthetic content detected'
-						: promoted ? 'Synthetic segment detected'
+					!flagged ? 'No AI-generated video detected'
+						: over ? 'AI-generated video detected'
+						: promoted ? 'AI-generated segment detected'
 						: 'Likely real video',
 					[share ? h('div', { class: 'rcsv' }, share) : null,
 						h('div', null, (balance || (thrLabel ? 'threshold ' + thrLabel : 'no scored windows')))],
-					(mean !== null ? 'Synthetic score ' + Math.round(100 * mean) + '%: the average across all '
+					(mean !== null ? 'Average score ' + meanLabel + ': how likely the video is AI-generated, across all '
 							+ rows.length + ' analyzed windows'
-							+ (thrLabel ? ', judged against the ' + thrLabel + ' classification threshold' : '')
+							+ (thrLabel ? ', judged against the ' + thrLabel + ' How strict setting' : '')
 							+ '. Lower means stronger evidence of real content.'
-						: 'Each window is judged against the classification threshold' + (thrLabel ? ' (' + thrLabel + ')' : '') + '.')
+						: 'Each window is judged against the How strict setting' + (thrLabel ? ' (' + thrLabel + ')' : '') + '.')
 					+ (receipts.length ? '\n\n' + receipts.join('\n') : ''),
 					knownMs ? 100 * synMs / knownMs : undefined, 'syn'));
-				cells.push(cell('Peak score', peak !== null ? peak.toFixed(3) : '—',
-					mean !== null ? 'mean ' + mean.toFixed(3) : null,
-					'A window\'s score is the model\'s probability that its clip is synthetic. Peak is the strongest window in the file; mean averages every window.'));
+				cells.push(cell('Highest score', peak !== null ? likely(peak, threshold !== null ? +threshold : null) : '—',
+					mean !== null ? 'average ' + meanLabel : null,
+					'A window’s score is how likely the detector thinks its clip is AI-generated. Highest is the strongest window in the file; the average covers every window.'));
 			} else if (type === 'vlm' && rows.length) {
-				const answered = rows.filter((r) => r.content || (r.detections || []).length).length;
+				const modeKey = this.vlmMode() || 'describe';
+				// A detect answer that names none of the classes is still an answer.
+				const answered = rows.filter((r) => (modeKey === 'detect' ? !r.degraded : (r.content || (r.detections || []).length))).length;
 				const degraded = rows.filter((r) => r.degraded).length;
 				cells.push(cell('Windows answered', answered + ' / ' + rows.length,
 					(degraded ? degraded + ' degraded' : 'one model call each'),
-					'Windows where the model returned content or detections. Degraded windows got no usable answer '
-					+ '(endpoint trouble) but the job kept going.'));
-				const modeKey = this.vlmMode() || 'describe';
+					(modeKey === 'detect'
+						? 'Windows the model answered, including ones where it found none of the classes. '
+						: 'Windows where the model returned content. ')
+					+ 'Degraded windows got no usable answer (endpoint trouble) but the job kept going.'));
 				cells.push(cell('Mode', modeKey.charAt(0).toUpperCase() + modeKey.slice(1),
 					(rows.find((r) => r.model_name) || {}).model_name || null,
 					'How the VLM was prompted: Detect names classes to find, Describe asks for free-form prose, '
@@ -883,6 +932,21 @@ VIF.vod = VIF.vod || {};
 					cells.push(cell('Classes seen', String(classes.size), cfgN ? 'of ' + cfgN + ' configured' : null,
 						'Distinct class names among the detections so far.'));
 				}
+			} else if (type === 'motion' && rows.length) {
+				const moved = rows.filter((r) => (r.detections || []).length).length;
+				// An area the tracker gave no id can't be followed, so each sighting of one counts.
+				const areas = new Set();
+				let untracked = 0;
+				for (const r of rows) for (const d of (r.detections || [])) {
+					if (d.track_id != null) areas.add(d.track_id); else untracked++;
+				}
+				cells.push(cell('Frames with movement', moved + ' / ' + (s.rowsTotal || rows.length), 'one analysis request each',
+					'Frames where something moved since the frame before, out of every frame analyzed.'));
+				cells.push(cell('Moving areas', String(areas.size + untracked),
+					!untracked ? 'tracked across frames'
+						: areas.size ? areas.size + ' tracked across frames · ' + untracked + ' not tracked' : 'not tracked across frames',
+					'Each area that moved is followed from frame to frame and counted once, however many frames it shows in.'
+					+ (untracked ? '\nAn area that couldn’t be followed counts once for every frame it shows in.' : '')));
 			} else if ((type === 'object' || type === 'scene') && rows.length) {
 				let total = 0; const classes = new Set();
 				for (const r of rows) for (const d of (r.detections || [])) { total++; if (d.class_name) classes.add(d.class_name); }
@@ -920,8 +984,13 @@ VIF.vod = VIF.vod || {};
 
 		renderStrip(type) {
 			const s = this.state;
-			const rows = s.rows || [];
+			// A chain's finds sit in each step's results; the strip reads each clip through
+			// the chain's own summary of it.
+			const detector = ((s.job.effectiveConfig || s.job.config || {}).detector) || {};
+			const rows = type === 'chain' ? (s.rows || []).map((r) => V.chain.stripRow(r, detector)) : (s.rows || []);
 			this.browserColors = null;
+			// A clip reaches to where the next one starts; a synthetic window's stored end is already that.
+			const endOf = (r) => (type === 'synthetic' ? this.rowEndMs(r) : this.rowSpanEndMs(r));
 			if (!rows.length) return h('div', { class: 'stripblock' },
 				h('div', { class: 'eyebrow', style: 'margin-bottom:6px' }, 'Score strip'),
 				h('div', { class: 'hint' }, s.job && !isTerminal(s.job) ? 'Rows appear here as the service answers.' : 'No stored rows: the analysis found nothing to store, or none were kept.'));
@@ -933,9 +1002,13 @@ VIF.vod = VIF.vod || {};
 			const terminal = isTerminal(s.job);
 			// A completed job analyzed the whole clip; anything else (running, failed,
 			// cancelled) reached only doneMs, and the strip must say so past that point.
+			// Rows that span time are answered in order, so the last one's end is as far as
+			// the answers go, whatever the Engine has sent since; a frame row is an instant,
+			// and the frames after the last one stored are behind the Engine's media time.
 			const completed = s.job.state === 'completed';
-			const doneMs = completed ? endMs : Math.max(s.job.mediaTimeMs || 0,
-				this.rowEndMs(rows[rows.length - 1]) ?? this.rowStartMs(rows[rows.length - 1]) ?? 0);
+			const lastRow = rows[rows.length - 1];
+			const lastStart = this.rowStartMs(lastRow) ?? 0, lastEnd = endOf(lastRow) ?? lastStart;
+			const doneMs = completed ? endMs : lastEnd > lastStart ? lastEnd : Math.max(s.job.mediaTimeMs || 0, lastStart);
 
 			const mkCell = (bucket, i, startMs, cellEndMs) => {
 				const entries = this.classEntries(bucket);
@@ -953,7 +1026,7 @@ VIF.vod = VIF.vod || {};
 				cells = rows.map((r, i) => mkCell([r], i, this.rowStartMs(r) ?? Math.round(endMs * i / rows.length), null));
 				for (let i = 0; i < cells.length; i++) {
 					const c = cells[i];
-					const re = this.rowEndMs(c.rows[0]);
+					const re = endOf(c.rows[0]);
 					c.endMs = re !== null && re > c.startMs ? re : (i + 1 < cells.length ? cells[i + 1].startMs : endMs);
 				}
 			} else {
@@ -967,7 +1040,7 @@ VIF.vod = VIF.vod || {};
 				for (const r of rows) {
 					const a = this.rowStartMs(r);
 					if (a === null || !sliceMs) continue;
-					const b = Math.max(a, this.rowEndMs(r) ?? a);
+					const b = Math.max(a, endOf(r) ?? a);
 					const i0 = Math.min(BIN_LIMIT - 1, Math.max(0, Math.floor(a / sliceMs)));
 					const i1 = Math.min(BIN_LIMIT - 1, Math.max(i0, Math.ceil(b / sliceMs) - 1));
 					for (let i = i0; i <= i1; i++) buckets[i].push(r);
@@ -981,49 +1054,81 @@ VIF.vod = VIF.vod || {};
 			// Class colors: stable hues for the top classes across every stored row, the
 			// rest lumped as "other". Synthetic and text-mode VLM jobs have no classes,
 			// so they keep the plain accent strip and get no legend.
-			const rank = type === 'synthetic' ? [] : this.classEntries(rows);
+			const found = type === 'synthetic' ? [] : this.classEntries(rows);
+			// A chain's AI-generated video find paints its clips in the alert color, so it takes no class hue.
+			const alertFind = type === 'chain' ? found.find((e) => e.name === V.chain.ALERT_FIND) : null;
+			const rank = found.filter((e) => e !== alertFind);
 			const top = rank.slice(0, STRIP_HUES);
 			const colorIdx = new Map(top.map((e, i) => [e.name, i]));
 			this.browserColors = colorIdx; // the drawer's chips reuse the strip's hues
 			const otherCount = rank.slice(STRIP_HUES).reduce((a, e) => a + e.count, 0);
-			if (s.stripSel && !top.some((e) => e.name === s.stripSel)) s.stripSel = null;
+			if (s.stripSel && !found.some((e) => e.name === s.stripSel)) s.stripSel = null;
 
 			const seekable = isTerminal(s.job) && !!s.job.file;
-			const cardCtx = { type, seekable, hasClasses: top.length > 0 };
+			const unit = type === 'chain' ? V.chain.unitOf(detector) : 'window';
+			const cardCtx = { type, seekable, unit, detect: type === 'vlm' && this.vlmMode() === 'detect',
+				threshold: type === 'synthetic' && this.threshold() !== null ? +this.threshold() : null };
 			const card = h('div', { class: 'stripcard', style: 'display:none' });
 			this.cardEl = card;
 			this.cellCount = cells.length;
 
-			// Synthetic cells take the alert red (via CSS, the spec pins no inline
-			// backgrounds here): score opacity ramps pale pink to deep red, so
-			// flagged runs read as flagged instead of blending into the grays.
+			// The color a class paints with: alert red for an AI-generated video find, its
+			// own hue, or the look the classes past the colored ones share.
+			const look = (name) => (alertFind && name === alertFind.name ? '--alert-color'
+				: colorIdx.has(name) ? '--strip-c' + colorIdx.get(name) : '--strip-other');
+			// A search of the list dims the cells none of whose clips or windows match, as the list hides them.
+			const query = type === 'chain' || type === 'vlm' ? (s.clipSearch || '').trim() : '';
+			const said = (r) => V.chain.clipMatches(type === 'chain' ? r.chain.row : r, query);
+			let anyMore = false;
 			const strip = h('div', { class: 'strip' + (type === 'synthetic' ? ' syn' : ''), onmouseleave: () => { card.style.display = 'none'; } },
 				cells.map((c) => {
-					// The legend selection dims every cell without that class — inline, because
-					// the cell's own opacity is inline and would win over a CSS rule.
-					const dim = s.stripSel && !c.classes.has(s.stripSel);
+					// The legend selection paints the cells with that class in its color and dims
+					// the rest — inline, because the cell's own opacity is inline and would win
+					// over a CSS rule.
+					const picked = s.stripSel ? c.entries.find((e) => e.name === s.stripSel) : null;
+					const dim = (s.stripSel && !picked) || (query && !c.rows.some(said));
+					// A chain clip with no named find has its own look, never a class color.
+					const unnamed = type === 'chain' && !c.low && !c.entries.length
+						? (c.rows.some((r) => r.chain.described) ? 'described' : 'moved') : null;
 					const style = [];
+					let more = false;
 					// The strip is a timeline: a cell's width is its window's share of the
 					// media time, so the axis below and the playhead stay honest even when
 					// keyframe-bound windows run long and short.
 					style.push('flex:' + Math.max(1, (c.endMs || 0) - (c.startMs || 0)) + ' 1 0px');
 					if (dim) style.push('opacity:.12');
-					else if (!c.low) style.push('opacity:' + Math.max(0.15, Math.min(1, c.v)).toFixed(2));
-					// Synthetic first: its real rows carry detections too, and letting those
-					// reach the class-hue path paints every cell --strip-other gray (the
-					// color index is empty for synthetic). Flagged cells take the alert red
-					// and the score opacity ramps it pale pink to deep red.
-					if (!c.low && type === 'synthetic') {
+					else if (!c.low && !unnamed) style.push('opacity:' + Math.max(0.15, Math.min(1, (picked && picked.max) || c.v)).toFixed(2));
+					if (!c.low && picked) {
+						style.push('background:var(' + look(picked.name) + ')');
+					// Flagged cells take the alert red, and the score opacity ramps it pale pink
+					// to deep red. This comes before the class hues: a synthetic job has no
+					// color index, so its rows' detections would all paint --strip-other.
+					} else if (!c.low && (type === 'synthetic' || (type === 'chain' && c.rows.some((r) => r.chain.alert)))) {
 						style.push('background:var(--alert-color)');
 					} else if (!c.low && c.entries.length) {
-						const ci = colorIdx.get(c.entries[0].name);
-						style.push('background:var(' + (ci !== undefined ? '--strip-c' + ci : '--strip-other') + ')');
+						// A cell that found several colored classes shows each as a band, most
+						// detections on top, so one that is always there doesn't hide the rest.
+						const hues = c.entries.filter((e) => colorIdx.has(e.name)).slice(0, STRIP_BANDS);
+						const banded = hues.length > 1 && hues[0] === c.entries[0];
+						if (banded) {
+							const edge = (i) => Math.round(i * 100 / hues.length) + '%';
+							style.push('background:linear-gradient(' + hues.map((e, i) =>
+								'var(' + look(e.name) + ') ' + edge(i) + ' ' + edge(i + 1)).join(',') + ')');
+						} else {
+							style.push('background:var(' + look(c.entries[0].name) + ')');
+						}
+						// A colored cell that found more classes than its bands show adds dots under them.
+						more = !s.stripSel && colorIdx.has(c.entries[0].name) && c.entries.length > (banded ? hues.length : 1);
+						if (more) anyMore = true;
 					}
 					return h('i', {
-						class: [c.low ? 'low' : null, c.pend ? 'pend' : null, dim ? 'dim' : null].filter(Boolean).join(' ') || null,
+						class: [c.low ? 'low' : null, c.pend ? 'pend' : null, dim ? 'dim' : null, unnamed, more ? 'more' : null].filter(Boolean).join(' ') || null,
 						style: style.join(';') || null,
 						onmouseenter: () => this.showStripCard(c, cardCtx),
-						onclick: c.pend ? null : () => { this.syncBrowser(c); if (seekable) this.startPlayer(c.startMs); },
+						onclick: c.pend ? null : () => {
+							if (type === 'chain') this.openChainClip(c); else this.syncBrowser(c);
+							if (seekable) this.startPlayer(c.startMs);
+						},
 					});
 				}));
 			const wrap = h('div', { class: 'stripwrap' + (seekable ? ' seek' : '') },
@@ -1032,22 +1137,59 @@ VIF.vod = VIF.vod || {};
 			this.stripWrapEl = wrap;
 
 			const axis = [0, 0.25, 0.5, 0.75, 1].map((f) => V.fmtMediaMs(Math.round(endMs * f)));
-			const wcount = rows.length + ' windows' + (terminal ? '' : ' so far');
-			const caption = (type === 'synthetic'
-				? wcount + ' · darker red = more synthetic · gray = not flagged'
-				: wcount + ' · ' + (top.length ? 'color = leading class · ' : '')
-					+ 'darker is higher ' + (type === 'vlm' ? 'activity' : 'confidence') + ' · gray = empty')
+			const wcount = rows.length + ' ' + unit + 's' + (terminal ? '' : ' so far');
+			// With a legend chip picked the strip shows that class alone, so the caption says so.
+			const caption = (s.stripSel
+				? wcount + ' · showing ' + unit + 's with ' + s.stripSel + ' · darker is more sure'
+				: type === 'synthetic'
+				? wcount + ' · darker red = more likely AI-generated · gray = not flagged'
+				: type === 'chain'
+					? wcount + ' · color = what the ' + unit + ' found · darker is more sure · striped = movement only · gray = nothing found'
+					: type === 'motion'
+						? wcount + ' · darker is more moving areas · gray = nothing moved'
+					: type === 'vlm'
+						? wcount + ' · ' + (cardCtx.detect ? 'color = what the window found · gray = nothing found' : 'orange = the model answered · gray = no answer')
+					: wcount + ' · ' + (top.length ? 'color = what the window found · ' : '')
+						+ 'darker is more sure · gray = nothing found')
+				+ (otherCount && !s.stripSel ? ' · dotted = other classes' : '')
+				+ (anyMore ? ' · dots under a color = it found more classes than it shows' : '')
 				+ (rows.length > BIN_LIMIT ? ' · binned to ' + BIN_LIMIT + ' cells' : '')
-				+ (seekable ? ' · click a cell to play + browse its rows' : ' · click a cell to browse its rows');
+				// A chain's hover card says what a click does.
+				+ (type === 'chain' ? ''
+					: (seekable ? ' · click a cell to play + browse its rows' : ' · click a cell to browse its rows'));
 
-			const legend = top.length ? h('div', { class: 'legend' },
-				top.map((e, i) => h('button', {
-					class: 'lchip' + (s.stripSel === e.name ? ' on' : ''),
-					title: (e.max ? 'max conf ' + e.max.toFixed(2) + ' · ' : '') + 'click to highlight windows with ' + e.name,
-					onclick: () => { s.stripSel = s.stripSel === e.name ? null : e.name; this.render(); },
-				}, h('span', { class: 'sw', style: 'background:var(--strip-c' + i + ')' }), e.name, h('span', { class: 'lc' }, '×' + e.count))),
-				otherCount ? h('span', { class: 'lchip static', title: (rank.length - top.length) + ' more classes share one color' },
-					h('span', { class: 'sw', style: 'background:var(--strip-other)' }), 'other', h('span', { class: 'lc' }, '×' + otherCount)) : null) : null;
+			const classChip = (e, look) => h('button', {
+				class: 'lchip' + (s.stripSel === e.name ? ' on' : ''),
+				title: (e.max ? 'best ' + sure(e.max) + ' · ' : '') + 'click to show only the ' + unit + 's with ' + e.name,
+				onclick: () => { s.stripSel = s.stripSel === e.name ? null : e.name; this.render(); },
+			}, h('span', { class: 'sw', style: 'background:var(' + look + ')' }), e.name, h('span', { class: 'lc' }, '×' + e.count));
+			// The classes past the colored ones open from the "other" chip, so any class can be highlighted.
+			const rest = rank.slice(STRIP_HUES);
+			const restOpen = rest.length > 0 && (!!s.stripRest || rest.some((e) => e.name === s.stripSel));
+			const legend = top.length || alertFind ? h('div', { class: 'legend' },
+				alertFind ? classChip(alertFind, '--alert-color') : null,
+				top.map((e, i) => classChip(e, '--strip-c' + i)),
+				otherCount ? h('button', {
+					class: 'lchip more' + (restOpen ? ' open' : ''),
+					title: rest.length + ' more classes share the dotted look · click to ' + (restOpen ? 'hide' : 'list') + ' them',
+					onclick: () => {
+						s.stripRest = !restOpen;
+						if (!s.stripRest && rest.some((e) => e.name === s.stripSel)) s.stripSel = null;
+						this.render();
+					},
+				}, h('span', { class: 'sw', style: 'background:var(--strip-other)' }), 'other', h('span', { class: 'lc' }, '×' + otherCount)) : null,
+				restOpen ? rest.map((e) => classChip(e, '--strip-other')) : null,
+				// With a chip picked, the way back to every find is a chip of its own, not only a
+				// second click. It sits last so picking a chip doesn't move the others.
+				s.stripSel ? h('button', { class: 'lchip all', title: 'Show everything the ' + unit + 's found again',
+					onclick: () => { s.stripSel = null; this.render(); } }, 'Show all') : null) : null;
+			// A chain's clips with no named find still say something: what moved, or what the AI described.
+			const chainKey = (label, count, look) => (count ? h('span', { class: 'lchip static' },
+				h('span', { class: 'sw ' + look }), label, h('span', { class: 'lc' }, '×' + count)) : null);
+			const chainLegend = type === 'chain' ? h('div', { class: 'legend' },
+				legend ? Array.from(legend.childNodes) : null,
+				chainKey('AI description', rows.filter((r) => r.chain.described).length, 'described'),
+				chainKey('movement only', rows.filter((r) => r.chain.movementOnly).length, 'moved')) : null;
 
 			return h('div', { class: 'stripblock' },
 				h('div', { style: 'display:flex;align-items:baseline;gap:10px;margin-bottom:6px;flex-wrap:wrap' },
@@ -1055,7 +1197,7 @@ VIF.vod = VIF.vod || {};
 					h('span', { style: 'font-size:11px;color:var(--ink-52)' }, caption)),
 				wrap,
 				h('div', { class: 'axis' }, axis.map((t) => h('span', null, t))),
-				legend);
+				chainLegend || legend);
 		},
 
 		/** Point the row browser at this cell's slice of the timeline: the results filter
@@ -1064,13 +1206,91 @@ VIF.vod = VIF.vod || {};
 			const s = this.state, b = s.browser;
 			s.tail = false;
 			s.browserOpen = true; // the drawer must show the rows the click just selected
-			b.from_ms = this.msToPaddedTc(Math.max(0, Math.floor(cell.startMs)));
+			// The cell counts every window that reaches into it, so the list starts at the
+			// earliest of them, even one that began just before the cell.
+			const starts = cell.rows.map((r) => this.rowStartMs(r)).filter((ms) => ms !== null);
+			b.from_ms = this.msToPaddedTc(Math.max(0, Math.floor(Math.min(cell.startMs, ...starts))));
 			b.to_ms = cell.endMs > cell.startMs ? this.msToPaddedTc(Math.ceil(cell.endMs)) : '';
 			b.toIsExclusive = true; // a cell's end is the next cell's start, not "through"
 			b.offset = 0;
 			s.openRows.clear();
 			s.openZero.clear();
 			this.fetchBrowserPage().then(() => this.render());
+		},
+
+		/** The clip a chain cell opens: during a search the first the search lists, else the one
+		    the cell is colored for: the first with the legend's picked class, else the one flagged
+		    AI-generated, else the first with the cell's leading find, else the first that found
+		    anything. */
+		chainCellClip(cell) {
+			const lead = cell.entries.length ? cell.entries[0].name : null;
+			const picked = this.state.stripSel;
+			const query = (this.state.clipSearch || '').trim();
+			return (query && cell.rows.find((r) => V.chain.clipMatches(r.chain.row, query)))
+				|| (picked && cell.rows.find((r) => r.detections.some((d) => d.class_name === picked)))
+				|| cell.rows.find((r) => r.chain.alert)
+				|| cell.rows.find((r) => r.detections.some((d) => d.class_name === lead))
+				|| cell.rows.find((r) => !r.chain.quiet)
+				|| cell.rows[0];
+		},
+
+		/** What a search's count adds while the job runs: more windows are still to come. */
+		loadedSoFar() {
+			return isTerminal(this.state.job) ? '' : ' loaded so far';
+		},
+
+		/** The box that searches a report's list for what its clips or windows said. */
+		searchBox(unit) {
+			const label = 'Search these ' + unit + 's';
+			return h('input', { class: 'input chain-search', type: 'search', value: this.state.clipSearch || '', placeholder: label,
+				'aria-label': label, oninput: (e) => this.filterClips(e.target) });
+		},
+
+		/** Close every clip opened in the Clips list, and every unfolded run of quiet ones. */
+		closeClips() {
+			const open = this.state.openRows;
+			Array.from(open).filter((key) => /^chain(Window|Quiet)\d+$/.test(key)).forEach((key) => open.delete(key));
+			this.render();
+		},
+
+		/** Narrow the Clips list and the strip to the clips that say what the search box holds. */
+		filterClips(box) {
+			this.state.clipSearch = box.value;
+			clearTimeout(this.searchTimer);
+			this.searchTimer = setTimeout(() => this.renderKeepingSearch(), 120);
+		},
+
+		/** Redraw the page; a search box that held the focus gets it back, caret in place: the
+		    box is redrawn with everything else. */
+		renderKeepingSearch() {
+			const box = document.activeElement;
+			const typing = !!box && this.root.contains(box) && box.matches('.chain-search');
+			const caret = typing ? box.selectionStart : null;
+			this.render();
+			const redrawn = typing ? this.root.querySelector('.chain-search') : null;
+			if (!redrawn) return;
+			redrawn.focus({ preventScroll: true });
+			if (typeof caret === 'number') redrawn.setSelectionRange(caret, caret);
+		},
+
+		/** Open the chain clip a strip cell is colored for in the Clips list, unfolding a run of
+		    quiet clips that holds it, and bring it into view. */
+		openChainClip(cell) {
+			const s = this.state;
+			const index = cell.rows.length ? s.rows.indexOf(this.chainCellClip(cell).chain.row) : -1;
+			// A cell the search dimmed has no clip in the list to open.
+			if (index < 0 || !V.chain.clipMatches(s.rows[index], (s.clipSearch || '').trim())) return;
+			s.tail = false;
+			const fold = V.chain.foldStart(s.rows, index);
+			if (fold !== null) s.openRows.add('chainQuiet' + fold);
+			s.openRows.add('chainWindow' + index);
+			this.render();
+			const list = this.root.querySelector('.wlist');
+			const clip = list && list.querySelector('[data-clip="' + index + '"]');
+			if (clip) {
+				this.progScroll = true;
+				list.scrollTop += clip.getBoundingClientRect().top - list.getBoundingClientRect().top - 8;
+			}
 		},
 
 		/** Populate and place the hovercard for this cell. Direct DOM, like the playhead:
@@ -1083,15 +1303,22 @@ VIF.vod = VIF.vod || {};
 			if (c.rows.some((r) => r.degraded)) flags.push('degraded');
 			if (c.rows.some((r) => r.truncated)) flags.push('truncated');
 			clear(card);
+			// A single frame is one instant, not a range; so is a slice too short to name two times.
+			const only = c.n === 1 ? c.rows[0] : null;
+			const instant = only && this.rowStartMs(only) !== null && (this.rowEndMs(only) ?? this.rowStartMs(only)) === this.rowStartMs(only)
+				? this.rowStartMs(only) : null;
 			card.appendChild(h('div', { class: 'sch' },
-				V.fmtMediaMs(c.startMs) + ' – ' + V.fmtMediaMs(c.endMs) + (c.n > 1 ? ' · ' + c.n + ' windows' : '')));
+				(instant !== null ? this.msToTc(instant)
+					: V.fmtMediaMs(c.startMs) === V.fmtMediaMs(c.endMs) ? this.msToTc(Math.round(c.startMs))
+					: V.fmtMediaMs(c.startMs) + ' – ' + V.fmtMediaMs(c.endMs)) + (c.n > 1 ? ' · ' + c.n + ' ' + (ctx.unit || 'window') + 's' : '')));
 			if (c.pend) {
 				card.appendChild(h('div', { class: 'scb' }, 'Not analyzed yet'));
 			} else {
 				card.appendChild(h('div', { class: 'scb' }, this.stripCardBody(c, ctx),
 					flags.map((f) => [' ', h('span', { class: 'tag tag-e' }, f)])));
-				card.appendChild(h('div', { class: 'scf' },
-					ctx.seekable ? 'Click to play from here and list the rows below.' : 'Click to list these rows below.'));
+				card.appendChild(h('div', { class: 'scf' }, ctx.type === 'chain'
+					? (ctx.seekable ? 'Click to play from here and open it below.' : 'Click to open it below.')
+					: (ctx.seekable ? 'Click to play from here and list the rows below.' : 'Click to list these rows below.')));
 			}
 			card.style.display = 'block';
 			const center = wrap.clientWidth * (c.idx + 0.5) / this.cellCount;
@@ -1102,35 +1329,47 @@ VIF.vod = VIF.vod || {};
 		/** What happened in this cell, one line, detector-aware. */
 		stripCardBody(c, ctx) {
 			if (!c.n) return 'no windows in this span';
+			if (ctx.type === 'chain') {
+				if (c.n === 1) return [c.rows[0].chain.finding, h('div', { class: 'hint' }, c.rows[0].chain.path)];
+				const names = c.entries.slice(0, 4).map((e) => e.name).join(', ')
+					+ (c.entries.length > 4 ? ' +' + (c.entries.length - 4) + ' more' : '');
+				const ran = c.rows.reduce((most, r) => Math.max(most, r.chain.distinct), 0);
+				return (names || (c.rows.some((r) => !r.chain.quiet) ? 'movement or an AI description' : 'nothing found'))
+					+ ' · up to ' + ran + ' step' + (ran === 1 ? '' : 's') + ' ran';
+			}
 			if (ctx.type === 'synthetic') {
 				if (c.n === 1) {
 					const r = c.rows[0];
-					const score = typeof r.synthetic_score === 'number' ? 'score ' + r.synthetic_score.toFixed(3) : null;
-					return [score, r.verdict || 'real'].filter(Boolean).join(' · ');
+					const score = typeof r.synthetic_score === 'number' ? likely(r.synthetic_score, ctx.threshold) + ' likely AI-generated' : null;
+					return [score, 'judged ' + verdictWord(r.verdict || 'real')].filter(Boolean).join(' · ');
 				}
 				const flagged = c.rows.filter((r) => r.verdict === 'synthetic').length;
-				return 'peak ' + c.v.toFixed(3) + ' · ' + flagged + ' of ' + c.n + ' flagged';
+				return 'highest ' + likely(c.v, ctx.threshold) + ' · ' + flagged + ' of ' + c.n + ' flagged';
 			}
 			if (c.entries.length) { // object / scene / VLM detect classes
 				if (c.n === 1) {
 					const shown = c.entries.slice(0, 4)
-						.map((e) => e.name + ' ×' + e.count + (e.max ? ' · ' + e.max.toFixed(2) : ''));
+						.map((e) => (ctx.type === 'motion' ? e.count + ' moving area' + (e.count === 1 ? '' : 's')
+							: e.name + ' ×' + e.count + (e.max ? ' · ' + sure(e.max) : '')));
 					return shown.join(' — ') + (c.entries.length > 4 ? ' — +' + (c.entries.length - 4) + ' more' : '');
 				}
 				const names = c.entries.slice(0, 4).map((e) => e.name).join(', ')
 					+ (c.entries.length > 4 ? ' +' + (c.entries.length - 4) + ' more' : '');
-				return (ctx.type === 'vlm' ? '' : 'peak ' + c.v.toFixed(2) + ' · ') + names;
+				if (ctx.type === 'motion') return 'movement in ' + c.rows.filter((r) => (r.detections || []).length).length + ' of ' + c.n + ' frames';
+				return (ctx.type === 'vlm' ? '' : 'best ' + sure(c.v) + ' · ') + names;
 			}
 			if (ctx.type === 'vlm') {
+				// A detect answer naming none of the classes is an answer; only an unreachable model gives none.
+				if (ctx.detect) return c.rows.every((r) => r.degraded) ? 'no answer' : 'nothing found';
 				const texts = c.rows.map((r) => this.vlmRowText(r)).filter(Boolean);
 				if (texts.length) {
 					const first = texts[0].split('\n')[0];
 					const clipped = first.length > 140 ? first.slice(0, 140) + '…' : first;
 					return (c.n > 1 ? texts.length + ' of ' + c.n + ' answered · ' : '') + clipped;
 				}
-				return ctx.hasClasses ? 'no detections' : 'no answer';
+				return 'no answer';
 			}
-			return 'no detections';
+			return ctx.type === 'motion' ? 'nothing moved' : 'nothing found';
 		},
 
 		renderFrame(type) {
@@ -1148,7 +1387,7 @@ VIF.vod = VIF.vod || {};
 					h('span', { class: 'nf1' }, 'Play the source video'));
 			} else if (type === 'synthetic') {
 				inner = h('div', { class: 'noframe' },
-					h('span', { class: 'nf1' }, 'No preview for synthetic analysis'),
+					h('span', { class: 'nf1' }, 'No preview for AI-generated video detection'),
 					h('span', null, 'The Engine sends the video to the analysis service without decoding frames, so there is no image to show.'));
 			} else if (s.thumbUrl) {
 				inner = h('div', { class: 'frame' }, h('img', { src: s.thumbUrl, alt: 'job thumbnail' }));
@@ -1165,17 +1404,10 @@ VIF.vod = VIF.vod || {};
 			return h('div', null,
 				h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, s.playerOn || seekable ? 'Player' : 'Frame'),
 				inner,
-				// Every element in this row gets the same 16px line box (the button
-				// explicitly - a button does not inherit line-height). The label
-				// zeroes its margins and weight: the Manager's Bootstrap styles
-				// label with a 5px bottom margin (which flex centers into a 2.5px
-				// droop) and bold text.
-				s.playerOn ? h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:6px;line-height:16px' },
-					h('span', { class: 'hint' }, type === 'chain' ? 'Expand a chain window and choose Play this window.' : 'Click the score strip to jump around the source.'),
-					h('label', { class: 'hint', style: 'margin:0 0 0 auto;font-weight:400;display:inline-flex;align-items:center;gap:5px;cursor:pointer' },
-						h('input', { type: 'checkbox', style: 'margin:0;width:12px;height:12px', checked: V.playerLoopOn() ? 'checked' : null,
-							onchange: (e) => { V.setPlayerLoop(e.target.checked); if (this.videoEl) this.videoEl.loop = e.target.checked; } }),
-						'Loop'),
+				// A button does not inherit line-height, so Stop player is given the row's.
+				s.playerOn ? h('div', { class: 'prow' },
+					h('span', { class: 'hint' }, 'Click the score strip to jump around the source.'),
+					V.playerToggles(() => this.videoEl),
 					h('button', { class: 'btn btn-sm btn-ghost', style: 'line-height:16px',
 						onclick: () => { this.stopPlayer(); this.render(); } }, 'Stop player')) : null,
 				s.playError ? h('div', { class: 'hint', style: 'margin-top:6px;color:var(--alert-color)' }, s.playError) : null,
@@ -1283,7 +1515,7 @@ VIF.vod = VIF.vod || {};
 		   show. A click fans the run back out. Same shape as the drawer's rbz. */
 		zeroRunLine(rows, i, j, label) {
 			const s = this.state;
-			const a = this.rowStartMs(rows[i]), z = this.rowEndMs(rows[j - 1]);
+			const a = this.rowStartMs(rows[i]), z = this.rowSpanEndMs(rows[j - 1]);
 			return h('div', { class: 'rbz', role: 'button', tabindex: '0',
 				'data-from': a != null ? String(a) : null,
 				'data-to': z != null ? String(z) : null,
@@ -1305,7 +1537,7 @@ VIF.vod = VIF.vod || {};
 			if (this.tailMode() && s.followTail !== false) s.wpage = pages - 1;
 			s.wpage = Math.min(Math.max(0, s.wpage), pages - 1);
 			const p0 = s.wpage * WLIST_PAGE, p1 = Math.min(rows.length, p0 + WLIST_PAGE);
-			const threshold = type === 'synthetic' ? this.threshold() : null;
+			const threshold = type === 'synthetic' && this.threshold() !== null ? +this.threshold() : null;
 			// A window row is a seek target like a strip cell: click, and the video
 			// plays from that window. Clicks that operate something inside the row
 			// (the per-clip details, a button) or finish a text selection don't seek.
@@ -1333,9 +1565,9 @@ VIF.vod = VIF.vod || {};
 						return h('div', Object.assign({ class: 'wrow' + (low ? ' low' : ''),
 							'data-from': fromMs != null ? String(fromMs) : null,
 							'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
-							h('span', { class: 'ws' }, typeof r.synthetic_score === 'number' ? r.synthetic_score.toFixed(3) : '—'),
+							h('span', { class: 'ws' }, typeof r.synthetic_score === 'number' ? likely(r.synthetic_score, threshold) : '—'),
 							h('span', { class: 'wt' }, this.windowLabel(r)),
-							h('span', { class: 'wv' }, low ? (r.verdict || 'real') + (threshold !== null ? ' · below ' + threshold : '') : (r.verdict || '')),
+							h('span', { class: 'wv' }, low ? verdictWord(r.verdict || 'real') + (threshold !== null ? ' · below ' + likely(threshold, r.synthetic_score) : '') : verdictWord(r.verdict || '')),
 							r.degraded ? h('span', { class: 'tag tag-e' }, 'degraded') : null,
 							(r.per_clip_scores || []).length ? this.keyedDetails('clip' + i, { style: 'margin-left:auto' },
 								h('summary', { style: 'font-size:11px;color:var(--ink-40);cursor:pointer' }, 'w' + String(i + 1).padStart(2, '0') + ' · per-clip ▸'),
@@ -1371,7 +1603,7 @@ VIF.vod = VIF.vod || {};
 				};
 				const hasAnswer = (r) => !!(r.content || (r.detections || []).length);
 				const block = (r, i) => {
-					const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
+					const fromMs = this.rowStartMs(r), toMs = this.rowSpanEndMs(r);
 					return h('div', Object.assign({ class: 'wblock',
 						'data-from': fromMs != null ? String(fromMs) : null,
 						'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
@@ -1385,7 +1617,7 @@ VIF.vod = VIF.vod || {};
 				// A window the model had nothing to say about stays on the timeline as a
 				// slim row; long stretches of them collapse to one line, like the drawer.
 				const emptyRow = (r, i) => {
-					const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
+					const fromMs = this.rowStartMs(r), toMs = this.rowSpanEndMs(r);
 					return h('div', Object.assign({ class: 'wrow low',
 						'data-from': fromMs != null ? String(fromMs) : null,
 						'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
@@ -1394,8 +1626,10 @@ VIF.vod = VIF.vod || {};
 						r.degraded ? h('span', { class: 'tag tag-e' }, 'degraded') : null,
 						h('span', { style: 'margin-left:auto;color:var(--ink-40);font-size:11px' }, 'w' + String(i + 1).padStart(2, '0')));
 				};
-				const out = [];
-				let i = p0;
+				// A search lists every window that says it, across all pages.
+				const query = (s.clipSearch || '').trim();
+				const out = query ? rows.map((r, at) => (V.chain.clipMatches(r, query) ? block(r, at) : null)).filter(Boolean) : [];
+				let i = query ? p1 : p0;
 				while (i < p1) {
 					let j = i;
 					while (j < p1 && !hasAnswer(rows[j])) j++;
@@ -1411,10 +1645,13 @@ VIF.vod = VIF.vod || {};
 					}
 				}
 				return h('div', null,
-					h('div', { style: 'display:flex;align-items:center;margin-bottom:9px' },
-						h('div', { class: 'eyebrow' }, 'What the model saw'), this.followBtn(), this.wpager(rows)),
+					h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:9px' },
+						h('div', { class: 'eyebrow' }, 'What the model saw'),
+						query ? h('span', { class: 'hint' }, out.length + ' of ' + rows.length + ' windows' + this.loadedSoFar()) : null,
+						rows.length ? this.searchBox('window') : null, this.followBtn(), query ? null : this.wpager(rows)),
 					!rows.length ? h('div', { class: 'hint' }, 'No windows analyzed yet.') :
-						h('div', { class: 'wlist', style: 'border:none;display:flex;flex-direction:column;gap:16px;max-height:460px' }, out));
+						h('div', { class: 'wlist', style: 'border:none;display:flex;flex-direction:column;gap:16px;max-height:460px' }, out),
+					query && !out.length ? h('p', { class: 'hint' }, 'No window says “' + query + '”. The search covers every answer in full.') : null);
 			}
 
 			// object / scene / vlm-detect: the same chronological pane as synthetic,
@@ -1422,41 +1659,54 @@ VIF.vod = VIF.vod || {};
 			// Per-class totals live in the strip legend, which this pane used to
 			// duplicate. VLM detections carry a reasoning the chip's tooltip keeps.
 			const vlmChips = type === 'vlm';
+			const nothing = this.nothingLabel(type);
+			const cmap = this.browserColors;
+			// An AI model's finds: each class in the strip's color, with the model's reasoning beside it.
+			const answerChip = (k, e) => {
+				const ci = cmap ? cmap.get(k) : undefined;
+				return h('span', { class: 'wfind' },
+					h('span', { class: 'rchip' },
+						h('span', { class: 'sw', style: 'background:var(' + (ci !== undefined ? '--strip-c' + ci : '--strip-other') + ')' }),
+						k, e.n > 1 ? h('span', { class: 'ct' }, '×' + e.n) : null),
+					e.why.length ? h('span', { class: 'wwhy' }, e.why[0]) : null);
+			};
 			const rowNode = (r, i) => {
 				const dets = r.detections || [];
 				const byClass = new Map();
 				for (const d of dets) {
 					const k = d.class_name || '?';
-					const e = byClass.get(k) || { n: 0, why: [] };
+					const e = byClass.get(k) || { n: 0, why: [], best: null };
 					e.n++;
 					if (d.reasoning) e.why.push(d.reasoning);
+					if (typeof d.confidence === 'number' && (e.best === null || d.confidence > e.best)) e.best = d.confidence;
 					byClass.set(k, e);
 				}
 				const entries = Array.from(byClass.entries());
-				const fromMs = this.rowStartMs(r), toMs = this.rowEndMs(r);
+				const fromMs = this.rowStartMs(r), toMs = this.rowSpanEndMs(r);
+				const found = type === 'motion' ? dets.length + ' moving area' + (dets.length === 1 ? '' : 's')
+					: entries.map(([k, e]) => k + (e.n > 1 ? ' ×' + e.n : '') + (e.best ? ' ' + Math.round(e.best * 100) + '%' : '')).join(' · ');
 				return h('div', Object.assign({ class: 'wrow' + (dets.length ? '' : ' low'),
 					'data-from': fromMs != null ? String(fromMs) : null,
 					'data-to': toMs != null ? String(toMs) : null }, seekAttrs(fromMs)),
 					h('span', { class: 'ws' }, String(dets.length)),
 					h('span', { class: 'wt' }, this.windowLabel(r)),
 					vlmChips && entries.length
-						? h('span', { class: 'wv', style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center' },
-							entries.map(([k, e]) => h('span', { class: 'tag tag-o', title: e.why.join('\n') || null },
-								k + (e.n > 1 ? ' ×' + e.n : ''))))
-						: h('span', { class: 'wv' },
-							entries.map(([k, e]) => k + (e.n > 1 ? ' ×' + e.n : '')).join(' · ')
-							|| (vlmChips ? 'no answer' : 'no detections')),
+						? h('span', { class: 'wv wfinds' + (entries.some(([, e]) => e.why.length) ? ' why' : '') },
+							entries.map(([k, e]) => answerChip(k, e)))
+						: h('span', { class: 'wv' }, dets.length ? found : (r.degraded ? 'no answer' : nothing)),
 					r.degraded ? h('span', { class: 'tag tag-e' }, 'degraded') : null,
 					h('span', { style: 'margin-left:auto;color:var(--ink-40);font-size:11px' }, 'w' + String(i + 1).padStart(2, '0')));
 			};
+			// An AI model's list can be searched; a search lists every window that says it, across all pages.
+			const query = vlmChips ? (s.clipSearch || '').trim() : '';
 			// Long stretches of empty windows collapse to one line, like the drawer.
-			const listOut = [];
-			let li = p0;
+			const listOut = query ? rows.map((r, at) => (V.chain.clipMatches(r, query) ? rowNode(r, at) : null)).filter(Boolean) : [];
+			let li = query ? p1 : p0;
 			while (li < p1) {
 				let j = li;
 				while (j < p1 && !(rows[j].detections || []).length) j++;
 				if (j - li >= 3 && !s.openZeroPane.has('z' + li)) {
-					listOut.push(this.zeroRunLine(rows, li, j, vlmChips ? 'no answer' : 'no detections'));
+					listOut.push(this.zeroRunLine(rows, li, j, rows.slice(li, j).every((r) => r.degraded) ? 'no answer' : nothing));
 					li = j;
 				} else if (j > li) {
 					for (let k = li; k < j; k++) listOut.push(rowNode(rows[k], k));
@@ -1467,11 +1717,19 @@ VIF.vod = VIF.vod || {};
 				}
 			}
 			return h('div', null,
-				h('div', { style: 'display:flex;align-items:center;margin-bottom:9px' },
-					h('div', { class: 'eyebrow' }, 'Windows'), this.followBtn(), this.wpager(rows)),
-				h('div', { class: 'wlist' }, listOut),
-				h('div', { class: 'hint', style: 'margin-top:10px' },
-					'One row per analyzed window. Class totals are in the legend above; the raw responses are under Detection details below.'));
+				h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:9px' },
+					h('div', { class: 'eyebrow' }, 'Windows'),
+					query ? h('span', { class: 'hint' }, listOut.length + ' of ' + rows.length + ' windows' + this.loadedSoFar()) : null,
+					vlmChips && rows.length ? this.searchBox('window') : null, this.followBtn(), query ? null : this.wpager(rows)),
+				query && !listOut.length ? h('p', { class: 'hint' }, 'No window says “' + query + '”. The search covers what the model found and its reasons.')
+				: !listOut.length ? h('div', { class: 'hint' }, 'No windows analyzed yet.') : [
+					h('div', { class: 'whead' },
+						h('span', { class: 'ws' }, 'Found'), h('span', { class: 'wt' }, 'Time'),
+						h('span', { class: 'wv' }, type === 'motion' ? 'What moved' : vlmChips ? 'What the model found' : 'What it found, and how sure'),
+						h('span', { style: 'margin-left:auto' }, 'Window')),
+					h('div', { class: 'wlist' }, listOut),
+					h('div', { class: 'hint', style: 'margin-top:10px' },
+						'One row per analyzed window. Class totals are in the legend above; the raw responses are under Detection details below.')]);
 		},
 
 		/* The raw rows live in a drawer, closed by default — the sections above tell the
@@ -1485,6 +1743,7 @@ VIF.vod = VIF.vod || {};
 			const from = page && page.count ? page.offset + 1 : 0;
 			const to = page ? page.offset + (page.count || 0) : 0;
 			const refetch = () => { s.openRows.clear(); s.openZero.clear(); this.fetchBrowserPage().then(() => this.render()); };
+			const threshold = type === 'synthetic' && this.threshold() !== null ? +this.threshold() : null;
 			// Valid means Apply can act: both boxes parse and the range runs forward.
 			const rangeInvalid = () => {
 				const f = this.parseTcMs(b.from_ms), t = this.parseTcMs(b.to_ms);
@@ -1517,8 +1776,8 @@ VIF.vod = VIF.vod || {};
 					} }));
 
 			const brief = (r) => {
-				if (type === 'chain') return V.chain.brief(r);
-				if (type === 'synthetic') return (r.verdict || '') + (typeof r.synthetic_score === 'number' ? ' · ' + r.synthetic_score.toFixed(3) : '');
+				if (type === 'chain') return V.chain.brief(r, ((s.job.effectiveConfig || s.job.config || {}).detector) || {});
+				if (type === 'synthetic') return verdictWord(r.verdict || '') + (typeof r.synthetic_score === 'number' ? ' · ' + likely(r.synthetic_score, threshold) : '');
 				if (type === 'vlm') {
 					// A describe/custom row is its text, not a count of one.
 					const d = (r.detections || [])[0];
@@ -1535,7 +1794,8 @@ VIF.vod = VIF.vod || {};
 			// VLM prose, empties) keep the plain text brief.
 			const chips = (r) => {
 				const entries = this.classEntries([r]);
-				if (!entries.length) return h('span', null, brief(r));
+				// A synthetic row's verdict and score say it all; its class entry would repeat them.
+				if (!entries.length || type === 'synthetic') return h('span', null, brief(r));
 				const cmap = this.browserColors;
 				const shown = entries.slice(0, 4);
 				return h('span', { class: 'rchips' },
@@ -1545,7 +1805,7 @@ VIF.vod = VIF.vod || {};
 							h('span', { class: 'sw', style: 'background:var(' + (ci !== undefined ? '--strip-c' + ci : '--strip-other') + ')' }),
 							e.name,
 							e.count > 1 ? h('span', { class: 'ct' }, '×' + e.count) : null,
-							e.max ? h('span', { class: 'cf' }, e.max.toFixed(2)) : null);
+							e.max ? h('span', { class: 'cf' }, Math.round(e.max * 100) + '%') : null);
 					}),
 					entries.length > 4 ? h('span', { class: 'rchip more' }, '+' + (entries.length - 4) + ' more') : null);
 			};
@@ -1555,12 +1815,12 @@ VIF.vod = VIF.vod || {};
 					h('span', { style: 'color:var(--ink-52)' }, 'row ' + (page.offset + i + 1)),
 					h('span', null, this.windowLabel(r)),
 					chips(r),
-					h('span', { class: 'rawlink', style: 'margin-left:auto;color:var(--accent-700)' }, type === 'chain' ? 'stage results & JSON ▸' : 'raw JSON ▸')),
-				type === 'chain' ? V.chain.windowResults(r, ((s.job.effectiveConfig || s.job.config || {}).detector) || {}) : null,
+					h('span', { class: 'rawlink', style: 'margin-left:auto;color:var(--accent-700)' }, 'raw JSON ▸')),
 			h('pre', null, JSON.stringify(r, null, 2)));
 
 			// Long stretches of nothing collapse to one line; a click fans the run back
 			// out into its individual rows.
+			const nothing = this.nothingLabel(type);
 			const isEmpty = (r) => {
 				if (type === 'synthetic' || type === 'chain') return false;
 				if (type === 'vlm') return !this.vlmRowText(r) && !(r.detections || []).length;
@@ -1581,7 +1841,7 @@ VIF.vod = VIF.vod || {};
 							onclick: () => { s.openZero.add(runKey); this.render(); } },
 							h('span', { style: 'color:var(--ink-52)' }, 'rows ' + (page.offset + i + 1) + '–' + (page.offset + j)),
 							a !== null && z !== null ? h('span', null, V.fmtMediaMs(a) + ' – ' + V.fmtMediaMs(z)) : null,
-							h('span', null, (j - i) + ' windows · ' + (type === 'vlm' ? 'no answer' : 'no detections')),
+							h('span', null, (j - i) + ' windows · ' + nothing),
 							h('span', { class: 'rbzx' }, 'show ▸')));
 						i = j;
 					} else if (j > i) {
@@ -1605,7 +1865,8 @@ VIF.vod = VIF.vod || {};
 					total ? h('span', { class: 'rbcount' }, String(total)) : null,
 					h('span', { class: 'rbhint' }, s.browserOpen
 						? 'every stored analysis response'
-						: 'the raw rows behind the numbers above, or click a strip cell')),
+						: this.detectorType() === 'chain' ? 'the raw rows behind the results above'
+							: 'the raw rows behind the numbers above, or click a strip cell')),
 				!s.browserOpen ? null : [
 					h('div', { class: 'rbtools' },
 						num('from', 'from_ms'), num('to', 'to_ms'),

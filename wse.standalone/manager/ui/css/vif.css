@@ -1,6 +1,7 @@
 /*
  * vif.css — shared styles for the VIF Manager UI fragments
- * (default.html, stream-config.html, playback.html, shm.html).
+ * (shm.html, vod.html, stream-config.html, default.html, secrets.html,
+ * playback.html).
  *
  * Every selector here MUST be scoped under .vif-plugin. Fragments are
  * jQuery .html()-injected into the WSE Manager DOM, so an unscoped rule
@@ -457,115 +458,207 @@
     cursor: help;
 }
 
-/* --- Shared page header (shm.html + vod.html) ------------------------------
- * The "VIF Dashboard" title and the Live Streams / On-Demand tab row render
- * identically on both pages (the tabs navigate between them), so the rules
- * live here per this file's sharing contract. Everything in the header is
- * sized in px, never em: the pages set different base font sizes, so an
- * em here renders differently per page and the header jumps on tab
- * navigation. Colors and hover states stay page-side. */
-.vif-plugin .vif-header-title {
-    font-size: 28px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    line-height: 1.2;
-    color: #1b2430;
-    margin: 0;
+/* --- Page shell: the left menu and the content column ----------------------
+ * Every fragment's root is .vif-plugin.vif-shell: the <nav> VIF.nav.mount fills
+ * on the left, the page's own wrapper (.vif-main) on the right. Sizes are px: the
+ * pages set different base font sizes. */
+.vif-plugin.vif-shell {
+    display: flex;
+    align-items: stretch;
+    background: #fff;
 }
-.vif-plugin .streams-header button {
-    font-size: 12px;
-    line-height: 1.5;
-    margin-bottom: 0;
+/* Inside the Manager the negative margins eat the navbar's gap and the column
+   gutters, so the shell runs edge to edge; anywhere else they would overflow. */
+#mainContent > .vif-plugin.vif-shell {
+    margin: -20px -15px 0;
+    min-height: calc(100vh - 50px);
 }
-/* Small leading icon inside header buttons (e.g. the settings cog); inherits
-   the button's text color. */
-.vif-plugin .vif-btn-ico {
-    width: 13px;
-    height: 13px;
-    vertical-align: -2px;
-    margin-right: 6px;
+.vif-plugin.vif-shell > .vif-main {
+    flex: 1 1 0%;
+    min-width: 0;
+    width: auto;
+    max-width: none;
 }
-.vif-plugin .vif-tabs-row {
+.vif-plugin .vif-sidenav {
+    flex: 0 0 220px;
+    width: 220px;
+    background: #f6f7f9;
+    border-right: 1px solid #e3e6ea;
+    transition: flex-basis 0.15s ease, width 0.15s ease;
+}
+.vif-plugin.vif-shell.is-rail .vif-sidenav {
+    flex-basis: 56px;
+    width: 56px;
+}
+.vif-plugin .vif-sidenav-inner {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    max-height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px 8px;
+}
+.vif-plugin.vif-shell.is-rail .vif-sidenav-inner {
+    padding: 12px 6px;
+}
+.vif-plugin .vif-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.vif-plugin .vif-nav-item,
+.vif-plugin button.vif-nav-item,
+.vif-plugin .vif-nav-toggle,
+.vif-plugin button.vif-nav-toggle {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 0;
-    background: #fff;
-}
-.vif-plugin .vif-tab,
-.vif-plugin button.vif-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 7px 14px;
-    border: 1px solid #d9dee3;
-    border-radius: 3px;
-    background: #fff;
-    color: #6a7480;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: #3b4652;
     font-family: inherit;
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.4;
     font-weight: 600;
+    text-align: left;
     cursor: pointer;
-    margin-bottom: 0;
 }
-.vif-plugin button.vif-tab:hover {
-    background: #f5f6f7;
-    border-color: #b9c0c8;
+.vif-plugin button.vif-nav-item:hover,
+.vif-plugin button.vif-nav-toggle:hover {
+    background: #e9ecf0;
+    color: #1b2430;
 }
-.vif-plugin .vif-tab.is-active {
+.vif-plugin .vif-nav-item.is-active,
+.vif-plugin button.vif-nav-item.is-active:hover {
     background: #f08a00;
-    border-color: #f08a00;
     color: #fff;
     cursor: default;
 }
-.vif-plugin .vif-tab .vif-tab-count {
+.vif-plugin .vif-nav-item .fa,
+.vif-plugin .vif-nav-toggle .fa {
+    flex: none;
+    width: 18px;
+    text-align: center;
+    font-size: 14px;
+}
+.vif-plugin .vif-nav-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.vif-plugin .vif-nav-count {
+    flex: none;
+    font-size: 11px;
+    line-height: 1.5;
     font-weight: 600;
     color: #6b7480;
+    background: #e3e6ea;
+    border-radius: 10px;
+    padding: 1px 7px;
 }
-.vif-plugin .vif-tab.is-active .vif-tab-count {
-    color: rgba(255, 255, 255, 0.85);
+.vif-plugin .vif-nav-item.is-active .vif-nav-count {
+    background: rgba(255, 255, 255, 0.25);
+    color: #fff;
 }
-.vif-plugin .vif-tabs-summary {
+.vif-plugin .vif-nav-group-head .vif-nav-chevron {
+    width: auto;
+    font-size: 13px;
+    transition: transform 0.15s ease;
+}
+.vif-plugin .vif-nav-group:not(.is-open) .vif-nav-chevron {
+    transform: rotate(-90deg);
+}
+.vif-plugin .vif-nav-group.has-active > .vif-nav-group-head {
+    color: #1b2430;
+}
+.vif-plugin .vif-nav-children {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 2px;
+}
+.vif-plugin .vif-nav-group.is-open .vif-nav-children {
+    display: flex;
+}
+.vif-plugin .vif-nav-child,
+.vif-plugin button.vif-nav-child {
+    padding-left: 24px;
+    font-size: 12.5px;
+    font-weight: 500;
+}
+.vif-plugin .vif-nav-child .fa {
     font-size: 12px;
-    color: #6b7480;
-    margin-left: 8px;
-    min-width: 0;
-    overflow-wrap: anywhere;
 }
-.vif-plugin .vif-tabs-meta {
+.vif-plugin .vif-nav-toggle,
+.vif-plugin button.vif-nav-toggle {
+    margin-top: 16px;
+    padding-top: 10px;
+    border-top: 1px solid #e3e6ea;
+    border-radius: 0;
+    color: #6b7480;
+    font-size: 12px;
+    font-weight: 500;
+}
+/* The rail: icons only, every entry still reachable; the group head goes and
+   its children sit under a divider instead. */
+.vif-plugin.vif-shell.is-rail .vif-nav-label,
+.vif-plugin.vif-shell.is-rail .vif-nav-count,
+.vif-plugin.vif-shell.is-rail .vif-nav-chevron,
+.vif-plugin.vif-shell.is-rail .vif-nav-group-head {
+    display: none;
+}
+.vif-plugin.vif-shell.is-rail .vif-nav-item,
+.vif-plugin.vif-shell.is-rail .vif-nav-toggle {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+}
+.vif-plugin.vif-shell.is-rail .vif-nav-item {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+.vif-plugin.vif-shell.is-rail .vif-nav-children {
+    display: flex;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #e3e6ea;
+}
+.vif-plugin.vif-shell.is-rail .vif-nav-child .fa {
+    font-size: 14px;
+}
+
+/* --- Page head -------------------------------------------------------------
+ * The first thing in the content column: the page's title, with meta text or
+ * actions on the right. */
+.vif-plugin .vif-page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 6px 0 10px;
+    border-bottom: 1px solid #cfd5db;
+    margin-bottom: 16px;
+}
+.vif-plugin .vif-page-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: #1b2430;
+}
+.vif-plugin .vif-page-meta {
     font-size: 11px;
     color: #6b7480;
-}
-/* Secondary tab row for the Configs area: which config surface is showing.
-   Underline style, one visual tier below the primary pills. */
-.vif-plugin .vif-subtabs {
-    display: flex;
-    gap: 18px;
-    border-bottom: 1px solid #e3e6ea;
-    background: #fff;
-}
-.vif-plugin .vif-subtab,
-.vif-plugin button.vif-subtab {
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    color: #6a7480;
-    padding: 2px 2px 9px;
-    border: none;
-    background: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    margin-bottom: 0;
-}
-.vif-plugin button.vif-subtab:hover {
-    color: #1b2430;
-}
-.vif-plugin .vif-subtab.is-active {
-    color: #1b2430;
-    border-bottom-color: #f08a00;
-    cursor: default;
 }
 
 /* --- Click-popover tips (VIF.core.initClickTips) ---------------------------
@@ -585,6 +678,7 @@
     font-size: 12.5px;
     line-height: 1.45;
     overflow-wrap: anywhere;
+    white-space: pre-line;
     align-items: flex-start;
     gap: 10px;
 }

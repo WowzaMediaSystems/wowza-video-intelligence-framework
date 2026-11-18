@@ -64,7 +64,7 @@ VIF.vod = VIF.vod || {};
 				n.scrollTop = top;
 				n.scrollLeft = left;
 				if (growEl && growEl.isConnected && n.scrollTop < top) {
-					growEl.style.minHeight = (growEl.offsetHeight + (top - n.scrollTop)) + 'px';
+					growEl.style.minHeight = Math.ceil(growEl.getBoundingClientRect().height + (top - n.scrollTop)) + 'px';
 					n.scrollTop = top;
 				}
 			}
@@ -222,14 +222,19 @@ VIF.vod = VIF.vod || {};
 			desc: 'Classifies what each sampled window shows.',
 			outs: 'outputs → detections[]{class_name, confidence}',
 		},
+		motion: {
+			badge: 'MOV', name: 'Motion Detection',
+			desc: 'Watches for movement from one frame to the next.',
+			outs: 'outputs → detections[]{class_name, confidence, track_id, bbox}',
+		},
 		vlm: {
 			badge: 'VLM', name: 'VLM Analysis',
 			desc: 'A vision-language model reviews sampled frames against your prompt.',
 			outs: 'outputs → content, detections[]{class_name, reasoning}, token_count, degraded',
 		},
 		synthetic: {
-			badge: 'SVD', name: 'Synthetic Detection',
-			desc: 'Scores keyframe-aligned clips of the file for AI-generated content.',
+			badge: 'SVD', name: 'AI-Generated Video Detection',
+			desc: 'Scores each stretch of the file for how likely it is AI-generated.',
 			outs: 'outputs → synthetic_score, synthetic_logit, verdict, per_clip_scores[]',
 		},
 		chain: {
@@ -254,15 +259,95 @@ VIF.vod = VIF.vod || {};
 		VIF.core.toast(msg, kind, 'vod-toasts');
 	}
 
-	/* The Loop setting for the VOD players: one sticky flag for every playback
-	   page (report and verify report), host-scoped like the dashboard's
-	   thumbnail preference. Storage failing just means non-sticky. */
-	const PLAYER_LOOP_KEY = 'vif.vod.player-loop.' + window.location.host;
-	function playerLoopOn() {
-		try { return window.localStorage.getItem(PLAYER_LOOP_KEY) === '1'; } catch (e) { return false; }
+	/* The Loop, Muted and Speed settings for the VOD players: sticky for every player
+	   (report, verify report and file preview), host-scoped like the dashboard's
+	   thumbnail preference. A choice storage refuses is kept in memory, so the controls
+	   still show what the video does. */
+	const playerMemory = V.playerMemory = V.playerMemory || {};
+	function playerSetting(name) {
+		const key = 'vif.vod.player-' + name + '.' + window.location.host;
+		return {
+			on() {
+				if (key in playerMemory) return playerMemory[key];
+				try { return window.localStorage.getItem(key) === '1'; } catch (e) { return false; }
+			},
+			set(on) {
+				try { window.localStorage.setItem(key, on ? '1' : '0'); delete playerMemory[key]; }
+				catch (e) { playerMemory[key] = on; }
+			}
+		};
 	}
-	function setPlayerLoop(on) {
-		try { window.localStorage.setItem(PLAYER_LOOP_KEY, on ? '1' : '0'); } catch (e) { /* non-sticky */ }
+	const playerLoop = playerSetting('loop');
+	const playerMuted = playerSetting('muted');
+	function playerLoopOn() { return playerLoop.on(); }
+	function setPlayerLoop(on) { playerLoop.set(on); }
+	function playerMutedOn() { return playerMuted.on(); }
+
+	const PLAYER_SPEEDS = [0.5, 1, 1.5, 2];
+	const speedKey = 'vif.vod.player-speed.' + window.location.host;
+	function playerSpeed() {
+		let stored = speedKey in playerMemory ? playerMemory[speedKey] : null;
+		if (stored === null) { try { stored = window.localStorage.getItem(speedKey); } catch (e) { /* unreadable: normal speed */ } }
+		return PLAYER_SPEEDS.indexOf(Number(stored)) >= 0 ? Number(stored) : 1;
+	}
+	function setPlayerSpeed(speed) {
+		try { window.localStorage.setItem(speedKey, String(speed)); delete playerMemory[speedKey]; }
+		catch (e) { playerMemory[speedKey] = speed; }
+	}
+	function applySpeed(video, speed) {
+		video.defaultPlaybackRate = speed; // survives the reload a new HLS source does
+		video.playbackRate = speed;
+	}
+
+	/**
+	 * A video element for the VOD players. The browser's own menu is left empty so it doesn't
+	 * show: speed is set from playerSpeedButtons. Its rate changing by any route re-marks the
+	 * speed buttons on the page that control it.
+	 */
+	function playerVideo() {
+		const video = h('video', { controls: '', playsinline: '', preload: 'metadata',
+			disablepictureinpicture: '', controlslist: 'nodownload noplaybackrate noremoteplayback' });
+		video.disablePictureInPicture = true;
+		applySpeed(video, playerSpeed());
+		video.addEventListener('ratechange', () => document.querySelectorAll('.pspeed').forEach((group) => {
+			if (group.followRate) group.followRate(video);
+		}));
+		return video;
+	}
+
+	/**
+	 * Speed buttons for a VOD player; the pick changes the playing video at once and sticks.
+	 * A rate that is none of the buttons marks none.
+	 */
+	function playerSpeedButtons(video) {
+		const group = h('span', { class: 'pspeed', role: 'group', 'aria-label': 'Playback speed' }, h('span', null, 'Speed'));
+		const mark = (speed) => group.querySelectorAll('button').forEach((b) => {
+			const on = Number(b.dataset.speed) === speed;
+			b.classList.toggle('on', on);
+			b.setAttribute('aria-pressed', on ? 'true' : 'false');
+		});
+		group.followRate = (changed) => { if (video() === changed) mark(changed.playbackRate); };
+		PLAYER_SPEEDS.forEach((speed) => group.appendChild(h('button', { type: 'button', 'data-speed': String(speed),
+			onclick: () => { setPlayerSpeed(speed); if (video()) applySpeed(video(), speed); mark(speed); } }, speed + '×')));
+		mark(video() ? video().playbackRate : playerSpeed());
+		return group;
+	}
+
+	/**
+	 * The Speed buttons and the Loop and Muted checkboxes beside a VOD player. Each changes the
+	 * playing video at once and sticks for every player opened after; video() is the player now showing, if any.
+	 */
+	function playerToggles(video) {
+		// The label zeroes its margin and weight: the Manager's Bootstrap gives a label a 5px
+		// bottom margin (which flex centers into a 2.5px droop) and bold text.
+		const toggle = (label, setting, apply) => h('label', { class: 'hint', style: 'margin:0;font-weight:400;display:inline-flex;align-items:center;gap:5px;cursor:pointer' },
+			h('input', { type: 'checkbox', style: 'margin:0;width:12px;height:12px', checked: setting.on() ? 'checked' : null,
+				onchange: (e) => { setting.set(e.target.checked); if (video()) apply(video(), e.target.checked); } }),
+			label);
+		return h('span', { style: 'margin-left:auto;display:inline-flex;align-items:center;gap:12px' },
+			playerSpeedButtons(video),
+			toggle('Loop', playerLoop, (v, on) => { v.loop = on; }),
+			toggle('Mute by Default', playerMuted, (v, on) => { v.muted = on; }));
 	}
 
 	/**
@@ -289,21 +374,99 @@ VIF.vod = VIF.vod || {};
 		window.loadAjaxPluginContent('server', 'vif', 'stream-config.html', '');
 	}
 
-	/** Modal with arbitrary body; buttons: [{label, primary, onclick(close)}]. Returns close(). */
-	function modal(title, body, buttons) {
+	/** Where the Engine plays a content-directory file from: its stock `vod` application, over HLS. */
+	function filePlaybackUrl(file) {
+		const props = (typeof pluginProperties !== 'undefined' && pluginProperties) || {};
+		const conn = (window.VIF && VIF.core && VIF.core.resolveServer) ? VIF.core.resolveServer() : null;
+		if (!file || !conn) return null;
+		let engineHost;
+		try { engineHost = new URL(conn.serverUrl).hostname; } catch (e) { return null; }
+		// Same overrides the live dashboard player honors; default to the Engine's
+		// standard streaming port. Page protocol, so an https Manager never tries
+		// mixed-content http media (it needs playback_host/playback_port pointed at
+		// an https streaming port instead).
+		const host = props.playback_host || engineHost;
+		const port = props.playback_port ? ':' + props.playback_port : ':1935';
+		// _definst_ is mandatory: without it the Engine parses a subfolder (qa-vod/…)
+		// as the application-instance name.
+		// Per segment, not encodeURI: '#' or '?' in a legal file name must not truncate the path.
+		const path = file.split('/').map(encodeURIComponent).join('/');
+		return conn.protocol + '//' + host + port + '/vod/_definst_/mp4:' + path + '/playlist.m3u8';
+	}
+
+	/**
+	 * Whether the Engine serves a playlist at this address. A compose Engine without the vod
+	 * application answers 404, and without CORS headers, so the fetch may throw instead.
+	 */
+	async function playlistAnswers(url) {
+		try { return (await fetch(url, { cache: 'no-store' })).ok; } catch (e) { return false; }
+	}
+
+	/* Where a dialog's focus wraps to, among those of these that are rendered. Tab itself is the
+	   browser's: this list only picks the first and the last stop, and a control it misses is still reached. */
+	const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), '
+		+ 'textarea:not([disabled]), summary, video[controls], [tabindex]:not([tabindex="-1"])';
+
+	let dismissModal = null;
+
+	/** Modal dialog with arbitrary body; buttons: [{label, primary, onclick(close)}]. Returns close().
+	    While it is open the view behind is inert and focus stays in the dialog; closing hands focus
+	    back to the control that opened it. onClose runs once, however the modal is dismissed. */
+	function modal(title, body, buttons, onClose) {
+		if (dismissModal) dismissModal();
 		const root = document.getElementById('vod-modal-root');
-		const close = () => clear(root);
-		const back = h('div', { class: 'modal-back', onclick: (e) => { if (e.target === back) close(); } },
-			h('div', { class: 'modal' },
-				h('div', { class: 'mh' }, h('h3', null, title),
-					h('button', { class: 'btn btn-ghost btn-sm', style: 'margin-left:auto', onclick: close }, 'Close')),
-				h('div', { class: 'mb' }, body),
-				buttons && buttons.length ? h('div', { class: 'mf' },
-					buttons.map((b) => h('button', {
-						class: 'btn' + (b.primary ? ' btn-pri' : ''),
-						onclick: () => b.onclick(close),
-					}, b.label))) : null));
+		const view = document.getElementById('vod-view');
+		const opener = document.activeElement;
+		let open = true;
+		const release = () => {
+			document.removeEventListener('focusin', keepFocus);
+			if (view) view.inert = false;
+		};
+		const close = () => {
+			if (!open) return;
+			open = false;
+			dismissModal = null;
+			release();
+			clear(root);
+			if (onClose) onClose();
+			// A list that re-rendered while the modal was up has replaced its opener.
+			if (opener && opener.isConnected && opener.focus) opener.focus();
+			else if (view && view.isConnected) { view.setAttribute('tabindex', '-1'); view.focus(); }
+		};
+		const dialog = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, tabindex: '-1' },
+			h('div', { class: 'mh' }, h('h3', null, title),
+				h('button', { class: 'btn btn-ghost btn-sm', style: 'margin-left:auto', onclick: close }, 'Close')),
+			h('div', { class: 'mb' }, body),
+			buttons && buttons.length ? h('div', { class: 'mf' },
+				buttons.map((b) => h('button', {
+					class: 'btn' + (b.primary ? ' btn-pri' : ''),
+					onclick: () => b.onclick(close),
+				}, b.label))) : null);
+		// A drag across the dialog's edge (off the seek bar, a text selection) reports its
+		// click on the backdrop; only a press and a release that both land there dismiss.
+		let pressedBackdrop = false;
+		let releasedBackdrop = false;
+		// Tab leaves the dialog onto one of these, and keepFocus wraps it round.
+		const before = h('span', { class: 'mtrap', tabindex: '0', 'aria-hidden': 'true' });
+		const after = h('span', { class: 'mtrap', tabindex: '0', 'aria-hidden': 'true' });
+		const back = h('div', { class: 'modal-back',
+			onclick: (e) => { if (e.target === back && pressedBackdrop && releasedBackdrop) close(); } }, before, dialog, after);
+		// Capturing: the player's controls keep some of their mouse events to themselves.
+		back.addEventListener('mousedown', (e) => { pressedBackdrop = e.target === back; releasedBackdrop = false; }, true);
+		back.addEventListener('mouseup', (e) => { releasedBackdrop = e.target === back; }, true);
+		const stops = () => Array.from(dialog.querySelectorAll(FOCUSABLE)).filter((el) => el.getClientRects().length > 0);
+		function keepFocus(e) {
+			// A fragment swapped out with the modal still up must not keep steering focus.
+			if (!back.isConnected) { release(); return; }
+			if (dialog.contains(e.target)) return;
+			const all = stops();
+			(all[e.target === before ? all.length - 1 : 0] || dialog).focus();
+		}
 		clear(root).appendChild(back);
+		if (view) view.inert = true;
+		document.addEventListener('focusin', keepFocus);
+		dismissModal = close;
+		dialog.focus();
 		return close;
 	}
 
@@ -327,6 +490,13 @@ VIF.vod = VIF.vod || {};
 	V.toast = toast;
 	V.playerLoopOn = playerLoopOn;
 	V.setPlayerLoop = setPlayerLoop;
+	V.playerMutedOn = playerMutedOn;
+	V.filePlaybackUrl = filePlaybackUrl;
+	V.playlistAnswers = playlistAnswers;
+	V.playerToggles = playerToggles;
+	V.playerVideo = playerVideo;
+	V.playerSpeedButtons = playerSpeedButtons;
+	V.playerSpeed = playerSpeed;
 	V.modal = modal;
 	V.openStreamConfig = openStreamConfig;
 	V.openNewStreamConfig = openNewStreamConfig;

@@ -19,6 +19,18 @@ VIF.vod = VIF.vod || {};
 			hint: 'Appends detection JSON to a rolling file under the Engine’s VIF log directory.' },
 	];
 
+	// What the type buttons say; a type not listed shows its own name.
+	const TYPE_LABELS = { synthetic: 'AI-generated video' };
+
+	const toPercent = (score) => Number((score * 100).toFixed(2));
+
+	/** A detector the operator just put on the one-off config; an AI-generated video check starts on Balanced. */
+	function newDetector(type) {
+		if (type === 'vlm') return { type, mode: 'detect', detect: { reasoningLevel: 'low' } };
+		if (type === 'synthetic') return { type, classificationThreshold: VIF.chainPresets.SYNTHETIC_BALANCED };
+		return { type };
+	}
+
 	/** The detector a stream group config selects, or null when it inherits one. */
 	function groupDetector(group) {
 		return (group && group.config && group.config.detector) || null;
@@ -101,7 +113,7 @@ VIF.vod = VIF.vod || {};
 				files: null, filesError: null, filter: '', selected: [],
 				uploads: [], dragDepth: 0,
 				mode: 'config', groupName: '', verifyGroupName: '',
-				config: { detector: { type: 'synthetic' }, processing: {} },
+				config: { detector: newDetector('synthetic'), processing: {} },
 				vlmModelOther: false, vlmVerify: null,
 				jsonDraft: null, jsonDirty: false, jsonOpen: false,
 				storeResults: true, webhookMode: 'inherit', webhookUrl: '', webhookSecret: '', webhookHeader: '', tag: '',
@@ -150,6 +162,7 @@ VIF.vod = VIF.vod || {};
 		},
 
 		destroy() {
+			this.closePreview();
 			this.undocDrag();
 			// A fragment swap or view change must not keep pushing bytes at the Engine.
 			for (const u of (this.state && this.state.uploads) || []) {
@@ -224,7 +237,7 @@ VIF.vod = VIF.vod || {};
 			}
 			if (s.webhookMode === 'custom' && !s.webhookUrl.trim()) {
 				// An empty string is the API's opt-out — silently identical to "Off", so refuse instead.
-				toast('Enter a webhook URL, or choose Inherit global / Off.', 'err');
+				toast('Enter a webhook URL, or choose Use global / Off.', 'err');
 				return;
 			}
 			if (s.jsonDirty) { toast('The Advanced JSON has unapplied edits — Apply or discard them first.', 'err'); return; }
@@ -405,6 +418,7 @@ VIF.vod = VIF.vod || {};
 						s.selected.map((f) => h('div', { class: 'selrow' },
 							h('span', { class: 'fname', style: 'font-size:12.5px;flex:1' }, f.file),
 							h('span', { class: 'fmeta', style: 'margin:0;flex-shrink:0' }, V.fmtBytes(f.sizeBytes)),
+							this.previewButton(f),
 							h('button', { class: 'btn btn-sm btn-ghost', title: 'Remove from the selection',
 								onclick: () => { s.selected = s.selected.filter((x) => x.file !== f.file); this.renderKeepingFileScroll(); } }, '✕'))),
 						h('div', { class: 'hint', style: 'margin-top:7px' },
@@ -442,14 +456,96 @@ VIF.vod = VIF.vod || {};
 				el.appendChild(h('div', { class: 'frow' + (picked ? ' sel' : ''), role: 'button', tabindex: '0',
 					title: picked ? 'Click to remove from the selection' : 'Click to add to the selection',
 					onclick: toggle,
-					onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
+					// Only keys pressed on the row itself: Enter on Preview or Delete is that button's.
+					onkeydown: (e) => {
+						if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); }
+					} },
 					h('span', { class: 'fck' }, picked ? '✓' : ''),
 					h('span', { class: 'fn' }, f.file),
 					h('span', { class: 'fs' }, V.fmtBytes(f.sizeBytes)),
 					h('span', { class: 'fm' }, V.fmtDayClock(f.modifiedAt)),
+					this.previewButton(f),
 					h('button', { class: 'btn btn-sm btn-ghost fdel', title: 'Delete this file from the Engine’s content directory',
 						onclick: (e) => { e.stopPropagation(); this.deleteFile(f); } }, 'Delete')));
 			}
+		},
+
+		previewButton(f) {
+			return h('button', { class: 'btn btn-sm btn-ghost fplay', title: 'Preview this video', 'aria-label': 'Preview ' + f.file,
+				onclick: (e) => { e.stopPropagation(); this.previewFile(f); } }, '▶');
+		},
+
+		/** Pop-up player for one file, played over the Engine's `vod` application like the report's. */
+		async previewFile(f) {
+			this.closePreview();
+			const stage = h('div', { class: 'pvstage' });
+			const note = h('div', { class: 'pvnote' }, 'Loading…');
+			const preview = { hls: null, video: null };
+			const say = (text) => { clear(stage); stage.classList.add('off'); note.textContent = text; };
+			const onEscape = (e) => { if (e.key === 'Escape') preview.close(); };
+			document.addEventListener('keydown', onEscape);
+			preview.close = modal(f.file, h('div', { class: 'pv' }, stage, note, V.playerSpeedButtons(() => preview.video)), null, () => {
+				document.removeEventListener('keydown', onEscape);
+				if (this.preview === preview) this.preview = null;
+				if (preview.hls) { try { preview.hls.destroy(); } catch (e) { /* already torn down */ } }
+				if (preview.video) {
+					try { preview.video.pause(); preview.video.removeAttribute('src'); preview.video.load(); } catch (e) { /* detached */ }
+				}
+			});
+			this.preview = preview;
+
+			const url = V.filePlaybackUrl(f.file);
+			const ok = !!url && await V.playlistAnswers(url);
+			if (this.preview !== preview) return; // closed while the probe was out
+			if (!ok) {
+				say('This file couldn’t be opened for preview. Previews play through the Engine’s "vod" application; '
+					+ 'if none of your files preview, that application may be missing. You can still analyze this file.');
+				return;
+			}
+			const video = V.playerVideo();
+			if (window.Hls && Hls.isSupported()) {
+				const hls = new Hls({ enableWorker: true });
+				preview.hls = hls;
+				hls.loadSource(url);
+				hls.attachMedia(video);
+				hls.on(Hls.Events.ERROR, (evt, data) => {
+					if (!data.fatal || this.preview !== preview) return;
+					try { hls.destroy(); } catch (e) { /* already torn down */ }
+					preview.hls = null;
+					say(/codec/i.test(data.details || '')
+						? 'This browser can’t play this file’s video format. You can still analyze this file.'
+						: 'The preview stopped playing (' + (data.details || data.type) + '). You can still analyze this file.');
+				});
+			} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+				video.src = url; // native HLS (Safari)
+				// hls.js reports its own failures above; here the element is the only witness.
+				video.addEventListener('error', () => {
+					if (this.preview !== preview) return;
+					const code = video.error ? video.error.code : 0;
+					preview.video = null;
+					try { video.removeAttribute('src'); video.load(); } catch (e) { /* detached */ }
+					say(code === 3 || code === 4
+						? 'This browser can’t play this file’s video format. You can still analyze this file.'
+						: 'The preview stopped playing (' + (code === 2 ? 'network error' : 'media error') + '). You can still analyze this file.');
+				});
+			} else {
+				say('This browser can’t play video previews. You can still analyze this file.');
+				return;
+			}
+			video.addEventListener('loadedmetadata', () => {
+				if (this.preview !== preview) return;
+				const length = Number.isFinite(video.duration) ? V.fmtMediaMs(video.duration * 1000) + ' long' : null;
+				const size = video.videoWidth ? video.videoWidth + ' × ' + video.videoHeight : null;
+				note.textContent = [length, size, V.fmtBytes(f.sizeBytes)].filter(Boolean).join(' · ');
+				video.play().catch(() => { /* autoplay blocked: the controls are right there */ });
+			});
+			video.muted = V.playerMutedOn();
+			preview.video = video;
+			stage.appendChild(video);
+		},
+
+		closePreview() {
+			if (this.preview) this.preview.close();
 		},
 
 		/** Re-render for a selection change without the file list jumping to the top:
@@ -521,7 +617,7 @@ VIF.vod = VIF.vod || {};
 					h('input', { class: 'input', value: p.videoHeight > 0 ? p.videoHeight : '',
 						oninput: (e) => { p.videoHeight = parseInt(e.target.value, 10) || 0; this.updateJson(); } })) : null,
 				h('p', { class: 'hint', style: 'margin:9px 0 0' },
-					clipPath ? 'Synthetic analyzes keyframe-aligned clips — window length is the one sampling knob; FPS and height apply to frame-path types.'
+					clipPath ? 'AI-generated video detection analyzes keyframe-aligned clips — window length is the one sampling knob; FPS and height apply to frame-path types.'
 						: 'Same fields as a live stream config, so a config tuned on live transfers to VOD unchanged. The Engine estimates total requests when the job starts.'));
 		},
 
@@ -612,7 +708,8 @@ VIF.vod = VIF.vod || {};
 						h('div', { class: 'douts' }, meta.outs))),
 				type === 'synthetic' ? h('div', { class: 'gstrip' },
 					h('span', { class: 'gl' }, 'Verdict'),
-					h('span', { class: 'gx' }, 'window is "synthetic" when score > ' + (threshold ?? 'the classification_threshold'))) : null,
+					h('span', { class: 'gx' }, 'a window counts as AI-generated when its score is above '
+						+ (Number.isFinite(threshold) ? toPercent(threshold) + '%' : 'the How strict setting'))) : null,
 				this.listenersFoot(group));
 		},
 
@@ -635,14 +732,14 @@ VIF.vod = VIF.vod || {};
 
 		renderCustom() {
 			const s = this.state;
-			const d = s.config.detector || (s.config.detector = { type: 'synthetic' });
+			const d = s.config.detector || (s.config.detector = newDetector('synthetic'));
 			const type = d.type || 'synthetic';
 			const typeSeg = h('div', { class: 'seg' }, ['object', 'scene', 'vlm', 'synthetic'].map((t) =>
 				h('button', { class: 'opt' + (t === type ? ' on' : ''), onclick: () => {
 					// A detector is atomic, so the type switch replaces the whole section;
 					// sampling and listeners sit beside it and carry over. Rollup only
 					// accumulates object detections, so it degrades to batch off that type.
-					s.config.detector = t === 'vlm' ? { type: t, mode: 'detect' } : { type: t };
+					s.config.detector = newDetector(t);
 					if (t !== 'object') {
 						for (const l of Object.values(s.config.listeners || {})) {
 							if (l && l.trigger === 'rollup') l.trigger = 'batch';
@@ -653,7 +750,7 @@ VIF.vod = VIF.vod || {};
 					s.jsonDraft = null;
 					s.jsonDirty = false;
 					this.render();
-				} }, t)));
+				} }, TYPE_LABELS[t] || t)));
 
 			const block = (obj, name) => obj[name] || (obj[name] = {});
 			const txt = (obj, key, label, opts) => h('div', { class: 'field' }, h('label', null, label),
@@ -664,6 +761,17 @@ VIF.vod = VIF.vod || {};
 							: (opts && opts.num ? (raw.endsWith('.') ? raw : (isNaN(Number(raw)) ? raw : Number(raw))) : raw);
 						this.updateJson();
 					} }, opts && opts.attrs)));
+			// The score is kept 0 to 1 and typed as a percentage; an unfinished number leaves it alone.
+			const strictField = (obj) => h('div', { class: 'field' },
+				h('label', null, 'How strict (flag clips scoring above this %; 44 balanced, 26 catches more)'),
+				h('input', { class: 'input', type: 'number', min: '0', max: '100', step: '1', placeholder: 'default',
+					value: Number.isFinite(obj.classificationThreshold) ? toPercent(obj.classificationThreshold) : '',
+					oninput: (e) => {
+						const raw = e.target.value.trim();
+						if (e.target.validity.badInput) return;
+						obj.classificationThreshold = raw === '' ? undefined : Number((Number(raw) / 100).toFixed(4));
+						this.updateJson();
+					} }));
 			const grow = (el) => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
 			const area = (obj, key, label) => {
 				const ta = h('textarea', { class: 'input', value: obj[key] ?? '', spellcheck: 'false',
@@ -769,13 +877,16 @@ VIF.vod = VIF.vod || {};
 				const generation = block(d, 'generation');
 				const globals = vlmDefaults();
 				const mode = d.mode || (d.mode = 'detect');
-				const modelOptions = (window.VIF.fieldRegistry && VIF.fieldRegistry.VLM_MODEL_OPTIONS) || [];
-				const known = modelOptions.map((o) => o.value);
+				const known = (window.VIF.fieldRegistry && VIF.fieldRegistry.VLM_MODEL_NAMES) || [];
 				const isOther = s.vlmModelOther || (endpoint.model !== undefined && !known.includes(endpoint.model));
 
 				const modeSeg = h('div', { class: 'field' }, h('label', null, 'Mode'),
 					h('div', { class: 'seg' }, ['detect', 'describe', 'custom'].map((m) =>
-						h('button', { class: 'opt' + (m === mode ? ' on' : ''), onclick: () => { d.mode = m; this.render(); } }, m))));
+						h('button', { class: 'opt' + (m === mode ? ' on' : ''), onclick: () => {
+							d.mode = m;
+							if (m === 'detect' && !d.detect) d.detect = { reasoningLevel: 'low' };
+							this.render();
+						} }, m))));
 
 				const modelField = h('div', { class: 'field' }, h('label', null, 'Model'),
 					h('select', { class: 'input sel', onchange: (e) => {
@@ -787,7 +898,7 @@ VIF.vod = VIF.vod || {};
 					} },
 						h('option', { value: '', selected: !isOther && endpoint.model === undefined },
 							'default' + (globals.model ? ' (' + globals.model + ')' : '')),
-						modelOptions.map((o) => h('option', { value: o.value, selected: !isOther && endpoint.model === o.value }, o.label)),
+						known.map((name) => h('option', { value: name, selected: !isOther && endpoint.model === name }, name)),
 						h('option', { value: '__other__', selected: isOther }, 'Other…')),
 					isOther ? h('input', { class: 'input', style: 'margin-top:6px', placeholder: 'org/model-name',
 						value: endpoint.model ?? '',
@@ -812,10 +923,11 @@ VIF.vod = VIF.vod || {};
 						credField(endpoint, 'API key', () => this.clearVlmVerify()),
 						modeSeg),
 					detect ? classNames(detect) : null,
-					detect ? h('div', { class: 'field' }, h('label', null, 'Reasoning level'),
+					detect ? h('div', { class: 'field' }, h('label', null, 'How carefully it checks'),
 						h('select', { class: 'input sel', onchange: (e) => { detect.reasoningLevel = e.target.value || undefined; this.updateJson(); } },
-							h('option', { value: '', selected: !detect.reasoningLevel }, 'default'),
-							['low', 'medium', 'high'].map((m) => h('option', { value: m, selected: detect.reasoningLevel === m }, m)))) : null,
+							h('option', { value: '', selected: !detect.reasoningLevel }, 'Default (Careful)'),
+							[['low', 'Quick'], ['medium', 'Balanced'], ['high', 'Careful']].map(([m, label]) =>
+								h('option', { value: m, selected: detect.reasoningLevel === m }, label)))) : null,
 					h('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
 						h('button', { class: 'btn btn-sm', disabled: busy || null,
 							title: 'The Engine probes <endpoint>/models — the browser can’t reach compose-internal hostnames',
@@ -841,7 +953,7 @@ VIF.vod = VIF.vod || {};
 						txt(endpoint, 'functionId', 'Function ID')),
 					h('div', { class: 'grid2' },
 						credField(endpoint, 'API key'),
-						txt(d, 'classificationThreshold', 'Classification threshold', { num: true })),
+						strictField(d)),
 					h('label', { class: 'hint', style: 'display:flex;gap:7px;align-items:center' },
 						h('input', { type: 'checkbox', checked: (endpoint.tls && endpoint.tls.enabled) === true ? 'checked' : null,
 							onchange: (e) => { endpoint.tls = e.target.checked ? { enabled: true } : undefined; this.updateJson(); } }),
@@ -1124,7 +1236,7 @@ VIF.vod = VIF.vod || {};
 			const s = this.state;
 			const globalHook = V.store.vodSettings && V.store.vodSettings.lifecycleWebhook;
 			const tri = (value, set) => h('div', { class: 'seg', style: 'transform:scale(.92);transform-origin:left center' },
-				[['inherit', 'Inherit global'], ['custom', 'Custom'], ['off', 'Off']].map(([v, label]) =>
+				[['inherit', 'Use global'], ['custom', 'Custom'], ['off', 'Off']].map(([v, label]) =>
 					h('button', { class: 'opt' + (value === v ? ' on' : ''), onclick: () => { set(v); this.render(); } }, label)));
 
 			return h('div', null,
@@ -1137,16 +1249,16 @@ VIF.vod = VIF.vod || {};
 							: 'Status-only job: nothing for the results endpoint to serve, and no resume point.'))),
 				h('div', { class: 'checkrow' },
 					h('div', { style: 'width:15px' }),
-					h('div', { style: 'flex:1' }, h('div', { class: 'ol' }, 'Lifecycle webhook'),
+					h('div', { style: 'flex:1' }, h('div', { class: 'ol' }, 'Job status webhook'),
 						h('div', { class: 'oh', style: 'display:flex;flex-direction:column;gap:7px;margin-top:6px' },
 							tri(s.webhookMode, (v) => { s.webhookMode = v; }),
 							s.webhookMode === 'inherit' ? h('span', null, globalHook
-								? 'Status updates go to the global webhook: ' + globalHook
-								: 'No global webhook is set, so this job will send no updates. Set one on the On-Demand Configs page, or choose Custom.') : null,
+								? 'Status changes (running, completed, failed, cancelled) go to the global job status webhook: ' + globalHook
+								: 'No global job status webhook is set, so this job sends no status updates. Set one on On-Demand Configs, or choose Custom.') : null,
 							s.webhookMode === 'custom' ? h('input', { class: 'input', style: 'max-width:360px;font-size:11.5px', placeholder: 'https://…', value: s.webhookUrl, oninput: (e) => { s.webhookUrl = e.target.value; } }) : null,
 							s.webhookMode === 'custom' ? this.credentialRow() : null,
 							s.webhookMode === 'custom' ? h('span', null, 'Status updates post to this URL. The URL is saved with the job record, so don’t put passwords or tokens in it; a secret picked above rides a header on each delivery, and the job stores only the secret’s name.') : null,
-							s.webhookMode === 'off' ? h('span', null, 'This job sends no status updates, even when a global webhook is set.') : null))),
+							s.webhookMode === 'off' ? h('span', null, 'This job sends no status updates, even when a global job status webhook is set.') : null))),
 				h('div', { class: 'checkrow' },
 					h('div', { style: 'width:15px' }),
 					h('div', null, h('div', { class: 'ol' }, 'Tag'),

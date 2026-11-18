@@ -1,0 +1,86 @@
+{
+	"active":true,
+	"app_name": "live",
+	"stream_name": "chain.*",
+	"vif_event_listeners": {
+		"Id3Tags": {
+			"class_name": "Id3Event",
+			"methods": ["immediate"]
+		},
+		"Webhooks": {
+			"class_name": "WebhookEvent2",
+			"methods": ["disabled"]
+		},
+		"LogFiles": {
+			"class_name": "LogFileEvent",
+			"methods": ["immediate"]
+		},
+		"Overlays": {
+			"class_name": "OverlayEvent",
+			"methods": ["immediate"],
+			"properties": {
+				"debug_string": "'Cur time:' HH:mm:ss.SSS yyyy-MM-dd",
+				"show_stats": true
+			}
+		}
+	},
+	"frame_buffer": 10,
+	//A chain with a VLM step captures in windows: 4 fps over a 2 second window
+	//sends one request of 8 frames every 2 seconds. Every step shares that window.
+	"inference_fps": 4,
+	"duration": 2,
+
+	"detector_type":"chain",
+	"chain_analysis": {
+		//"conditional": each step's routing decides the next one. A window with no
+		//movement stops at the first step, and one with no person or car at the
+		//second, so the VLM is only asked about windows worth describing.
+		"mode": "conditional",
+		"stages": [
+			{
+				"name": "movement",
+				"detector_type": "motion",
+				//sensitivity and the other motion settings are inherited from the
+				//global motion_analysis defaults
+				"motion_analysis": {},
+				"routing": {
+					"rules": [ { "any_class_in": ["motion"] } ],
+					"on_match": "objects",
+					"on_no_match": "__terminal__"
+				}
+			},
+			{
+				"name": "objects",
+				"detector_type": "object",
+				"object_analysis": {
+					"model_name": "medium",
+					"confidence_threshold": 0.3,
+					"class_names": ["person", "car"],
+					//a step behind a motion step cannot follow objects: motion filters
+					//which frames reach it
+					"tracking_method": "none"
+				},
+				"routing": {
+					"rules": [ { "any_class_in": ["person", "car"], "min_confidence": 0.5 } ],
+					"on_match": "describe",
+					"on_no_match": "__terminal__"
+				}
+			},
+			{
+				"name": "describe",
+				"detector_type": "vlm",
+				//one frame of the window is enough to describe it, and keeps the
+				//request small
+				"frame_selection": "middle",
+				//model_name and endpoint_url are inherited from the global vlm_analysis
+				//defaults (the bundled vLLM sidecar). No class_names and no prompts is
+				//"Describe" mode: a free-form description of the frame.
+				"vlm_analysis": {}
+				//
+				//To describe each person or car on its own instead of the whole frame,
+				//zoom in on the boxes the step before found (one VLM request per box):
+				//"crop": { "classes": ["person", "car"], "padding": 0.1, "max_crops": 4 }
+			}
+		]
+	}
+}
