@@ -396,7 +396,7 @@ from types import FrameType
 from typing import IO, Any, Callable, TextIO
 
 # Bump on every edit to this file.
-LAUNCHER_REVISION: str = "2026-10-29.1"
+LAUNCHER_REVISION: str = "2026-11-20.1"
 
 EXIT_HEALTH_TIMEOUT: int = 75
 EXIT_CONFIG: int = 78
@@ -1150,16 +1150,16 @@ def size_load(
             "outside its pool, both as measured on this card"
         )
     room: int = card.free_mib - headroom - extra
-    approved: bool = room >= sizing.weights_mib
     usable: int = room
-    if approved:
+    if room >= sizing.weights_mib:
         usable = max(
             room - margin, min(room, least_pool_mib(sizing.weights_mib, card.total_mib))
         )
     factor: int = 10**_UTILIZATION_DECIMALS
+    # Floored in whole steps: a float floor can drop a pool that is exactly
+    # a step of the card one step short.
     utilization: float = min(
-        math.floor(max(usable, 0) / card.total_mib * factor) / factor,
-        sizing.max_utilization,
+        max(usable, 0) * factor // card.total_mib / factor, sizing.max_utilization
     )
     # vLLM's own rounding of its request.
     pool: int = math.ceil(utilization * card.total_mib)
@@ -1168,11 +1168,20 @@ def size_load(
         f"{card.free_mib} MiB free as CUDA reports it - {terms} = {room} MiB"
         f"{_margin_words(room, usable, margin)} for its pool"
     )
+    # The floor and the cap can leave the pool under what it needs even when
+    # `usable` holds it.
+    approved: bool = usable >= sizing.weights_mib and pool >= sizing.weights_mib
     reason: str
-    if not approved:
+    if usable < sizing.weights_mib:
         reason = (
             f"{model} cannot be loaded on the card as it is now: "
             f"{arithmetic}, less than the {sizing.weights_mib} MiB its pool needs."
+        )
+    elif not approved:
+        reason = (
+            f"{model} cannot be loaded on the card as it is now: "
+            f"{arithmetic}, but vLLM's pool at utilization {utilization:g} is "
+            f"{pool} MiB, less than the {sizing.weights_mib} MiB it needs."
         )
     else:
         cap: str = (
