@@ -66,7 +66,7 @@ Environment variables for the `video-intelligence-service-gpu` service (defined 
 | `VIF_STATE_DIR` | `/vif-state` | VLM model manager: the volume VIS shares with the managed engines (engine specs and markers, engine logs, the HuggingFace token saved in the Manager). Set by the compose file; keep it as is |
 | `VIF_WEIGHTS_DIR` | `/vif-weights` | VLM model manager: the engines' weights volume, mounted read-only in VIS so it can check a LoRA adapter's files before an engine loads it |
 | `VIF_ADAPTERS_DIR` | `/vif-adapters` | VLM model manager: where LoRA adapters uploaded with `POST /vlm/adapters` are stored, read-write in VIS and read-only in the engines |
-| `VLM_ADAPTER_MAX_UPLOAD_MB` | `1024` | The largest LoRA adapter archive `POST /vlm/adapters` accepts |
+| `VLM_ADAPTER_MAX_UPLOAD_MB` | `1024` | The largest LoRA adapter archive `POST /vlm/adapters` accepts. Read by both VIS and the Engine (each gets `.env`), so raising it raises both |
 | `VLM_CATALOG_OVERLAY` | `./models/vlm-catalog.local.json` | Path, inside the VIS container, of the VLM catalog overlay (`./vis/models/vlm-catalog.local.json` on the host) |
 | `VLM_FORCE_ALL_COLD` | unset | `true` stops every resting VLM engine instead of putting it to sleep, for hosts where sleep mode cannot run |
 | `VLM_RAM_RESERVE_MIB` | derived | Host RAM kept back from sleeping VLM engines; unset = the larger of 40% of host RAM and 8 GiB |

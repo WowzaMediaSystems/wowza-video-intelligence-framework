@@ -320,7 +320,7 @@ services:
     # rests asleep (hot tier: weights in host RAM, back in a second or two) or
     # parked (cold tier: no engine process, weights on disk, back in a cold
     # start). The active set and its Default are changed through VIS -- the
-    # Manager's VLM section -- and no container is recreated.
+    # Manager's VLM Config page -- and no container is recreated.
     #
     #   docker compose --profile default --profile vlm up -d
     #
@@ -376,7 +376,7 @@ services:
 
     # ── Slots: models you add yourself ─────────────────────────────────────
     # A model the catalog overlay adds (./vis/models/vlm-catalog.local.json, or
-    # the Manager's Stream Config Defaults) has no service above. A slot serves
+    # the Manager's VLM Config page) has no service above. A slot serves
     # it: the same engine, told which model by VIS instead of by its name. Both
     # slots start with the `vlm` profile and rest healthy, parked, until VIS
     # assigns each a custom model when it starts: add the model in the Manager,
