@@ -4,7 +4,7 @@ The Video Intelligence framework can run a **vision-language model (VLM)** over 
 
 With `detector_type: "vlm"` the VLM watches the stream directly. Give it a list of classes (any short phrase works) for a per-class verdict with reasoning, ask it for a free-text description, or drive it with your own prompts and output schema.
 
-The framework **manages the VLM engines for you**. The Video Intelligence Service (VIS) runs one [vLLM](https://docs.vllm.ai) engine per supported model on your GPU, keeps the models you make active serving (several at once, on one or more GPUs), and sizes every engine from the memory your cards actually have free. Streams reach the serving models through VIS's own OpenAI-compatible endpoint, and you choose the model from a dropdown in the Engine Manager. Which models serve is configured once for the deployment, in the **VLM Config** page. You can also point a stream at an endpoint you run yourself instead; see [Appendix: bring your own endpoint](#appendix-bring-your-own-endpoint). The default model is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
+The framework **manages the VLM engines for you**. The Video Intelligence Service (VIS) runs one [vLLM](https://docs.vllm.ai) engine per supported model on your GPU, keeps the models you make active serving (several at once, on one or more GPUs), and sizes every engine from the memory your cards actually have free. Streams reach the serving models through VIS's own OpenAI-compatible endpoint, and you choose the model from a dropdown in the Engine Manager. Which models serve is configured once for the deployment, on the **VLM Config** page. You can also point a stream at an endpoint you run yourself instead; see [Appendix: bring your own endpoint](#appendix-bring-your-own-endpoint). The default model is **Qwen/Qwen3-VL-4B-Instruct-FP8** (commercial-use friendly).
 
 **In this guide**
 
@@ -73,7 +73,7 @@ stream ─▶ Engine (WSE + plugin) ──WebSocket──▶ VIS ──▶ manag
 ```
 
 - **One engine per model.** The compose file has a `vif-model-<model>` service for every supported model (plus generic [slots](#adding-your-own-model-an-overlay-entry-and-a-slot) for models you add). They all run the stock `vllm/vllm-openai` image through a small launcher (`vif-vlm-launcher.py`) that runs the command VIS wrote for it. Nothing about a model is configured in `.env`: VIS resolves each engine's whole command from its catalog and from the card it runs on.
-- **The active models serve.** Several can serve at once, on one GPU or spread over several. The others rest, either **asleep** (hot tier) or **parked** (cold tier); see [Tiers](#tiers-hot-and-cold). Which models are active is configured in the **VLM Config** page; changing it is a call to VIS, and no container is recreated.
+- **The active models serve.** Several can serve at once, on one GPU or spread over several. The others rest, either **asleep** (hot tier) or **parked** (cold tier); see [Tiers](#tiers-hot-and-cold). Which models are active is configured on the **VLM Config** page; changing it is a call to VIS, and no container is recreated.
 - **One endpoint.** Streams use `http://video-intelligence-service.docker:5001/v1`, VIS's own port. VIS routes each request by the `model_name` it carries. The address the old single sidecar answered on, `http://vlm.docker:8000/v1`, is served the same way, so older configs keep working. The engines sit on an internal network that only VIS joins, and no engine port is ever published.
 - **A stream either follows or pins.** An empty `model_name` (shown as **Default** in the Manager) follows the active model marked **Default**: move the marker to another model and the stream moves with it. A named `model_name` pins the stream to that model, and a pinned stream **degrades** (empty results, `degraded: true`, reported as `engine_asleep`) while that model is not active.
 - **The active models persist.** They are stored in the overlay's `serving` member (see [the VLM Config page](#the-vlm-config-page)). When the overlay has none, VIS seeds a set of one: the first catalog model the overlay does not disable (Qwen3-VL 4B), on GPU 0 (or the single card `VLM_GPU_IDS` names).
@@ -304,7 +304,7 @@ To bring a model back, remove the flag and apply. It returns to the list and res
 
 ### The VLM Config page
 
-The overlay file and the Engine Manager's **VLM Config** page are two views of one document: the page reads the file through VIS and writes the same file, so a change made in either shows in the other. Open the VIF configuration page and go to **VLM Config**; the page shows the models whenever VIS reports that it manages engines.
+The overlay file and the Engine Manager's **VLM Config** page (under Configs) are two views of one document: the page reads the file through VIS and writes the same file, so a change made in either shows in the other. Open the VIF configuration page and go to **VLM Config**; the page shows the models whenever VIS reports that it manages engines.
 
 The page configures the deployment, not any one stream: *these settings apply to every stream and job*. It has its own **Apply**, separate from **Save all changes**, and one Apply makes one write of the whole document. Streams and VOD jobs only [pick a model](#picking-a-model-for-a-stream) from what is configured here.
 
@@ -599,7 +599,7 @@ An engine that is resting is **healthy** as far as Docker is concerned, so `dock
 | You see | Cause and what to do |
 |---|---|
 | Stream shows **AI offline** / empty `vlm_analysis` with `degraded: true` | The managed endpoint could not take the window. Check `GET /vlm/status` or the Manager's status line. Usual causes are in the next rows |
-| Pinned stream degraded, status `engine_asleep` | The model it names is not active, so it is resting (asleep or parked). Add it to the active models in the **VLM Config** page, or set the stream to **Default** to follow the Default model. The VLM Config page lists the configs that use a model that is not active |
+| Pinned stream degraded, status `engine_asleep` | The model it names is not active, so it is resting (asleep or parked). Add it to the active models on the **VLM Config** page, or set the stream to **Default** to follow the Default model. The VLM Config page lists the configs that use a model that is not active |
 | Degraded only for a few seconds while a model loads or reloads | Normal: streams using that model pause (`paused: switching model`) and resume when it serves |
 | Degraded, status `engine_failed` | The engine that should serve is down or unreachable, or no model is active. Open **Engine logs** for the failing model; a crashed container is restarted by Docker. If nothing serves, `catastrophic_reason` in `GET /vlm/status` says why and what to do |
 | Stream errors with `model_not_found` | `model_name` is not a model this deployment manages (typo, a snapshot path, or a model the overlay disabled). Fix the name; it is deliberately not degraded over |
@@ -633,7 +633,7 @@ Earlier releases ran one `vlm` container (hostname `vlm.docker`) configured by `
 }
 ```
 
-Or add the model in the **VLM Config** page after the first start, mark it Default and remove Qwen. Custom per-model settings (`VLM_*` in the old `.env`) do not carry over either; write them as fields of the model's entry in the same file (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
+Or add the model on the **VLM Config** page after the first start, mark it Default and remove Qwen. Custom per-model settings (`VLM_*` in the old `.env`) do not carry over either; write them as fields of the model's entry in the same file (see [the overlay](#customizing-the-deployment-the-catalog-overlay)).
 
 **Upgrading.**
 
